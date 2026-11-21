@@ -1,0 +1,21 @@
+LIBRARY xmem.dll
+EXPORTS
+    XMemInitialize
+    XMemSetConsoleModel
+    XMemAllocatePhysicalPages
+    XMemFreePhysicalPages
+    XMemVirtualAlloc
+    XMemVirtualFree
+    XMemMapPhysicalPages
+    XMemMapPhysicalPagesScatter
+    XMemUnmapPhysicalPages
+    XMemVirtualQuery
+    XMemGetWorkingSetStatistics
+    XMemMakeTag
+    XMemAllocDefault
+    XMemFreeDefault
+    XMemSizeDefault
+    XMemUmaProbe
+    XMemUmaExport
+    XMemUmaFlushBeforeSubmit
+    XMemUmaTrackHotResource
