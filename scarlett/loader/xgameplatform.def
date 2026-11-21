@@ -1,0 +1,11 @@
+LIBRARY xgameplatform.dll
+EXPORTS
+    XGamePlatformResolveApiSet
+    XGamePlatformGetTitleMetadata
+    XGamePlatformGetPackageFullName
+    XGamePlatformGetConsoleModel
+    XGamePlatformCreateActivationContext
+    RegisterAppStateChangeNotification=api-ms-win-core-psm-appnotify-l1-1-0.RegisterAppStateChangeNotification
+    UnregisterAppStateChangeNotification=api-ms-win-core-psm-appnotify-l1-1-0.UnregisterAppStateChangeNotification
+    RegisterAppConstrainedChangeNotification=api-ms-win-core-psm-appnotify-l1-1-0.RegisterAppConstrainedChangeNotification
+    UnregisterAppConstrainedChangeNotification=api-ms-win-core-psm-appnotify-l1-1-0.UnregisterAppConstrainedChangeNotification

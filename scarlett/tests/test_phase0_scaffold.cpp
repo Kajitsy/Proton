@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include "scarlett_errors.h"
+
 namespace scarlett::xdl {
 struct SubsystemDescriptor {
     const char* name;
@@ -112,7 +114,8 @@ int main() {
                             "loader XVD header span must be 0x200 bytes");
     ok &= require_condition(scarlett::loader::verify_unencrypted_key_count(0U) == 0U,
                             "loader must accept unencrypted XVC with key_count == 0");
-    ok &= require_condition(scarlett::loader::verify_unencrypted_key_count(1U) == 0x80831001U,
+    ok &= require_condition(scarlett::loader::verify_unencrypted_key_count(1U) ==
+                            static_cast<uint32_t>(SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED),
                             "loader must reject encrypted XVC with SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED");
 
     const auto& mem_spec = scarlett::xmem::query_arena_specification();
