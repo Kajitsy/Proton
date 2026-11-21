@@ -25,24 +25,26 @@
     "silent_stubs_allowed": false,
     "strict_mode_env": "PROTON_XBOX_STRICT"
   },
-  "phase": "Phase_2",
-  "current_phase": 2,
+  "phase": "Phase_3",
+  "current_phase": 3,
   "worktrees": {
     "phase0-contracts": { "status": "merged", "commit": "212f47cda28c061e18e64cad695882c80218a66a" },
     "phase0-infra": { "status": "merged", "commit": "b6b4038d88333532c0f65b13785aae1d18babc96" },
     "wt-xdl-abi": { "status": "merged", "commit": "d44900d963e8b3441b0f89b763e09e2cd26a3a20" },
     "wt-loader-vfs": { "status": "merged", "commit": "0462d760dcb74ce827329e572542634da515754f" },
-    "wt-xmem-uma": { "status": "merged", "commit": "14f5e202f12438f76a482e0f7b80c7b8e84d1e3c" }
+    "wt-xmem-uma": { "status": "merged", "commit": "14f5e202f12438f76a482e0f7b80c7b8e84d1e3c" },
+    "wt-gdk-runtime": { "status": "merged", "commit": "213a9f07cf9978c596269558cab469d72ce08774" },
+    "wt-audio-input-media": { "status": "merged", "commit": "aa334b7b02e4be8d99b654970f318bfc6203d58b" }
   },
   "verified_exports_count": {
-    "xgameruntime": 0,
+    "xgameruntime": 182,
     "d3d12_xs": 0,
     "xmem": 37,
     "loader": 14,
     "xdl_schemas": 6,
     "dstorage_xs": 0,
     "xg_xs": 0,
-    "audio_input_media": 0
+    "audio_input_media": 42
   },
   "open_blockers": [
     "steamrt4 container image not cached locally ([NOT_EXECUTED_LOCALLY]); host GCC 16.2 / Clang 23.1 PE64 freestanding + CMake/Ninja verified"
@@ -68,13 +70,14 @@
     },
     "phase_2": {
       "name": "GDK Runtime (xgameruntime.dll 22 domains, XGameSave 15 codes, libHttpClient/XCurl) & Audio/Input/Media (xaudio2_9, AcpHal, GameInput 4-motor, Bink2Scarlett, FSR)",
-      "status": "in_progress",
-      "exit_gate": "100% XTaskQueue/XAsync, XGameSave 0x80830001..0x8083000F, QueryApiImpl, 4-motor GameInput, Opus 0x704F & XMA2 without xruns"
+      "status": "completed",
+      "merged_commit": "715c026a7c0c358d6b9022b6d0b1f03a26d72c60",
+      "exit_gate": "100% XTaskQueue/XAsync, XGameSave 0x80830001..0x8083000F, QueryApiImpl, 4-motor GameInput, Opus 0x704F & XMA2 without xruns — 23/23 ctest PASS (370 + 395 assertions)"
     },
     "phase_3": {
-      "name": "RDNA2 to SPIR-V 1.5/1.6 Lifter (Path A DXIL Strip & Path B GFX10.3 Binary Lifter)",
-      "status": "pending",
-      "exit_gate": "GPU VkBuffer microprobes, computeKnownFPClass, adaptive Wave64-on-Wave32, BVH4 ray_query + BDA fallback, 100% spirv-val pass"
+      "name": "Graphics Core (d3d12_xs.dll, xg_xs.dll, XboxBvhBuilder.dll, pixevt.dll, PresentX & Frame Pacing)",
+      "status": "in_progress",
+      "exit_gate": "DXIL fast-path, CreatePlacedResourceX + UMA pre-submit flush, deswizzle 8-128 bpp >4GiB, VK_EXT_descriptor_heap NVIDIA 610.xx/1M fallback, HDR PresentX + WaitFrameEventX p99 < 1.5ms + Alt+Enter"
     },
     "phase_4": {
       "name": "d3d12_xs.dll, xg_xs.dll, XboxBvhBuilder.dll & pixevt.dll",
