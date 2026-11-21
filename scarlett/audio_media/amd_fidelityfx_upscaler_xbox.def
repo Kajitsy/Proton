@@ -1,0 +1,11 @@
+LIBRARY amd_fidelityfx_upscaler_xbox.dll
+EXPORTS
+    ffxFsr3ContextCreate
+    ffxFsr3ContextDestroy
+    ffxFsr3ContextDispatch
+    ffxFsr3GetUpscaleRatioFromQualityMode
+    ffxFsr3GetRenderResolutionFromQualityMode
+    ffxFsr3GetJitterPhaseCount
+    ffxFsr3GetJitterOffset
+    ffxFsr4GetVersion
+    ffxFsr4SetDebugHook

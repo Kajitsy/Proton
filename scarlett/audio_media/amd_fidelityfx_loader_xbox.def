@@ -1,0 +1,7 @@
+LIBRARY amd_fidelityfx_loader_xbox.dll
+EXPORTS
+    ffxCreateContext
+    ffxDestroyContext
+    ffxConfigure
+    ffxQuery
+    ffxLoadInterface

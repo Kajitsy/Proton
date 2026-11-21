@@ -1,0 +1,15 @@
+LIBRARY Bink2Scarlett.dll
+EXPORTS
+    BinkOpen
+    BinkClose
+    BinkDoFrame
+    BinkNextFrame
+    BinkWait
+    BinkCopyToBuffer
+    BinkCopyToBufferRect
+    BinkSetSoundOnOff
+    BinkSetVolume
+    BinkPause
+    BinkGoto
+    BinkGetSummary
+    BinkSetIOSize
