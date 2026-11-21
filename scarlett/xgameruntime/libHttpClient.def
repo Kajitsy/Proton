@@ -1,0 +1,26 @@
+LIBRARY libHttpClient.dll
+EXPORTS
+    HCInitialize
+    HCCleanup
+    HCGetLibVersion
+    HCCallCreate
+    HCCallDuplicateHandle
+    HCCallCloseHandle
+    HCCallRequestSetUrl
+    HCCallRequestSetRequestBodyBytes
+    HCCallRequestSetRequestBodyString
+    HCCallRequestSetHeader
+    HCCallRequestSetTimeout
+    HCCallPerformAsync
+    HCCallResponseGetStatusCode
+    HCCallResponseGetNetworkErrorCode
+    HCCallResponseGetResponseString
+    HCCallResponseGetResponseBodyBytesSize
+    HCCallResponseGetResponseBodyBytes
+    HCCallResponseGetHeader
+    HCWebSocketCreate
+    HCWebSocketConnectAsync
+    HCWebSocketSendMessageAsync
+    HCWebSocketDisconnect
+    HCWebSocketCloseHandle
+    HCGlobalSetHttpCallPerformFunction
