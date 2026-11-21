@@ -25,22 +25,51 @@
     "silent_stubs_allowed": false,
     "strict_mode_env": "PROTON_XBOX_STRICT"
   },
-  "current_phase": 0,
+  "phase": "Phase_2",
+  "current_phase": 2,
+  "worktrees": {
+    "phase0-contracts": { "status": "merged", "commit": "212f47cda28c061e18e64cad695882c80218a66a" },
+    "phase0-infra": { "status": "merged", "commit": "b6b4038d88333532c0f65b13785aae1d18babc96" },
+    "wt-xdl-abi": { "status": "merged", "commit": "d44900d963e8b3441b0f89b763e09e2cd26a3a20" },
+    "wt-loader-vfs": { "status": "merged", "commit": "0462d760dcb74ce827329e572542634da515754f" },
+    "wt-xmem-uma": { "status": "merged", "commit": "14f5e202f12438f76a482e0f7b80c7b8e84d1e3c" }
+  },
+  "verified_exports_count": {
+    "xgameruntime": 0,
+    "d3d12_xs": 0,
+    "xmem": 37,
+    "loader": 14,
+    "xdl_schemas": 6,
+    "dstorage_xs": 0,
+    "xg_xs": 0,
+    "audio_input_media": 0
+  },
+  "open_blockers": [
+    "steamrt4 container image not cached locally ([NOT_EXECUTED_LOCALLY]); host GCC 16.2 / Clang 23.1 PE64 freestanding + CMake/Ninja verified"
+  ],
+  "perf_baselines": {
+    "cold_pso_p99_ms": null,
+    "spirv_adaptive_reduction_pct": null,
+    "dstorage_gbps": null,
+    "arena_frametime_p99_ms": null
+  },
   "phases": {
     "phase_0": {
       "name": "ABI Contracts, Freestanding Headers & Proton 11.0 Build Scaffold",
-      "status": "in_progress",
+      "status": "completed",
+      "merged_commit": "246d44b3e19a83493945dc3ba4dd2c470b255253",
       "exit_gate": "ABI_CONTRACTS.md hashed, C11/C++20 headers compile cleanly (-Wall -Wextra -Werror), valid TOML/JSON, Proton 11.0 build/env scaffold passes tests with zero PC regressions"
     },
     "phase_1": {
-      "name": "scarlett-xdl, Auto-Stub Thunk, Loader/VFS CoW & XVD/XVC Clean-Room Parser",
-      "status": "pending",
-      "exit_gate": "32-slot vtables for core GUIDs, Win64 QueryApiImpl, PROTON_XBOX_STRICT trap, GAME: CoW overlay, encrypted XVC rejection"
+      "name": "scarlett-xdl, Auto-Stub Thunk, Loader/VFS CoW, XVD/XVC & xmem/kernelx UMA Core",
+      "status": "completed",
+      "merged_commit": "d7bad011e37f13300897f4bf7df61d636d750366",
+      "exit_gate": "32-slot vtables for core GUIDs, Win64 QueryApiImpl, PROTON_XBOX_STRICT trap, GAME: CoW overlay, encrypted XVC rejection, MEM_GRAPHICS/MEM_TITLE, RO/RW aliasing, cache/cross-alloc error invariants, Tier A/B/C UMA bridge with pre-submit flush — 9/9 ctest PASS"
     },
     "phase_2": {
-      "name": "xmem.dll, kernelx.dll & xmem_unix.so (MEM_GRAPHICS/MEM_TITLE & UMA Tier A/B/C)",
-      "status": "pending",
-      "exit_gate": "Memory range budgets, RO/RW aliasing, cache/cross-alloc error invariants, Tier A/B/C UMA bridge with UFFDIO_WRITEPROTECT flush"
+      "name": "GDK Runtime (xgameruntime.dll 22 domains, XGameSave 15 codes, libHttpClient/XCurl) & Audio/Input/Media (xaudio2_9, AcpHal, GameInput 4-motor, Bink2Scarlett, FSR)",
+      "status": "in_progress",
+      "exit_gate": "100% XTaskQueue/XAsync, XGameSave 0x80830001..0x8083000F, QueryApiImpl, 4-motor GameInput, Opus 0x704F & XMA2 without xruns"
     },
     "phase_3": {
       "name": "RDNA2 to SPIR-V 1.5/1.6 Lifter (Path A DXIL Strip & Path B GFX10.3 Binary Lifter)",
