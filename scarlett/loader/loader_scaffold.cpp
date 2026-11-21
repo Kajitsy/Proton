@@ -1,5 +1,7 @@
 #include <cstdint>
 
+#include "scarlett_errors.h"
+
 namespace scarlett::loader {
 
 struct LoaderDescriptor {
@@ -11,7 +13,7 @@ struct LoaderDescriptor {
 constexpr LoaderDescriptor kDescriptor = {
     "scarlett-loader",
     0x200U,
-    0x80831001U, // SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED
+    static_cast<uint32_t>(SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED),
 };
 
 const LoaderDescriptor& query_descriptor() noexcept {
