@@ -1,0 +1,4 @@
+option('install_version', type: 'boolean', value: true,
+       description: 'Install version stamp file into lib/wine/scarlett/version')
+option('build_tests', type: 'boolean', value: false,
+       description: 'Build Proton-Scarlett host verification tests under Meson')

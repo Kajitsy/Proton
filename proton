@@ -18,6 +18,7 @@ import shlex
 import uuid
 import json
 import time
+import xml.etree.ElementTree as ET
 
 from ctypes import CDLL
 from ctypes import CFUNCTYPE
@@ -89,6 +90,8 @@ def file_is_wine_builtin_dll(path):
                     '/lib/wine/x86_64-windows',
                     '/lib/wine/aarch64-unix',
                     '/lib/wine/aarch64-windows',
+                    '/lib/wine/scarlett/x86_64-unix',
+                    '/lib/wine/scarlett/x86_64-windows',
                     # old paths
                     '/lib/wine',
                     '/lib/wine/fakedlls',
@@ -853,6 +856,7 @@ class CompatData:
             if os.path.dirname(contents).endswith(('/lib/wine/i386-unix', '/lib/wine/i386-windows',
                                                    '/lib/wine/x86_64-unix', '/lib/wine/x86_64-windows',
                                                    '/lib/wine/aarch64-unix', '/lib/wine/aarch64-windows',
+                                                   '/lib/wine/scarlett/x86_64-unix', '/lib/wine/scarlett/x86_64-windows',
                                                    # old paths:
                                                    '/lib64/wine/x86_64-unix', '/lib64/wine/x86_64-windows')):
                 # wine builtin dll
@@ -1507,6 +1511,213 @@ fex_application_profiles = {
     }
 }
 
+SCARLETT_CONSOLE_DLLS = (
+    "xgameruntime",
+    "xgameplatform",
+    "d3d12_xs",
+    "xg_xs",
+    "xmem",
+    "kernelx",
+    "pixevt",
+    "dstorage_xs",
+    "XboxBvhBuilder",
+    "GameInput",
+    "xaudio2_9",
+    "AcpHal",
+    "Bink2Scarlett",
+    "amd_fidelityfx_loader_xbox",
+    "amd_fidelityfx_upscaler_xbox",
+    "libHttpClient",
+    "XCurl",
+    "api-ms-win-core-psm-appnotify-l1-1-0",
+)
+
+SCARLETT_VALID_MODELS = ("anaconda", "lockhart", "devkit")
+SCARLETT_VALID_SHADER_MODES = ("exact", "adaptive", "fast_f32")
+SCARLETT_VALID_NET_MODES = ("offline", "lan", "passthrough")
+
+def is_pe64_binary(path):
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "rb") as f:
+            dos_magic = f.read(2)
+            if dos_magic != b"MZ":
+                return False
+            f.seek(0x3C)
+            raw_ofs = f.read(4)
+            if len(raw_ofs) != 4:
+                return False
+            pe_offset = int.from_bytes(raw_ofs, "little")
+            if pe_offset <= 0 or pe_offset > 0x100000:
+                return False
+            f.seek(pe_offset)
+            pe_sig = f.read(4)
+            if pe_sig != b"PE\x00\x00":
+                return False
+            machine_raw = f.read(2)
+            if len(machine_raw) != 2:
+                return False
+            machine = int.from_bytes(machine_raw, "little")
+            f.seek(pe_offset + 24)
+            opt_magic_raw = f.read(2)
+            opt_magic = int.from_bytes(opt_magic_raw, "little") if len(opt_magic_raw) == 2 else 0
+            return machine == 0x8664 and opt_magic == 0x020B
+    except OSError:
+        return False
+
+def find_microsoft_game_config(directory):
+    if not directory or not os.path.isdir(directory):
+        return None
+    direct_path = os.path.join(directory, "MicrosoftGame.Config")
+    if os.path.isfile(direct_path):
+        return direct_path
+    try:
+        for entry in os.listdir(directory):
+            if entry.lower() == "microsoftgame.config":
+                candidate = os.path.join(directory, entry)
+                if os.path.isfile(candidate):
+                    return candidate
+    except OSError:
+        pass
+    return None
+
+def is_scarlett_game_config(config_path):
+    if not config_path or not os.path.isfile(config_path):
+        return False
+    try:
+        tree = ET.parse(config_path)
+        root = tree.getroot()
+        for elem in root.iter():
+            tag_name = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            if tag_name.lower() == "targetdevicefamily":
+                text_val = (elem.text or "").lower()
+                if "scarlett" in text_val or "xboxgen9" in text_val:
+                    return True
+                for attr_val in elem.attrib.values():
+                    low_val = attr_val.lower()
+                    if "scarlett" in low_val or "xboxgen9" in low_val:
+                        return True
+            for attr_key, attr_val in elem.attrib.items():
+                clean_key = attr_key.split("}")[-1] if "}" in attr_key else attr_key
+                if clean_key.lower() == "targetdevicefamily":
+                    low_val = attr_val.lower()
+                    if "scarlett" in low_val or "xboxgen9" in low_val:
+                        return True
+    except (ET.ParseError, OSError):
+        return False
+    return False
+
+def normalize_candidate_exe_path(arg):
+    if not arg:
+        return None
+    if os.path.isfile(arg):
+        return os.path.abspath(arg)
+    if len(arg) > 3 and arg[0].lower() == "z" and arg[1] == ":" and arg[2] in ("\\", "/"):
+        unix_candidate = "/" + arg[3:].replace("\\", "/")
+        if os.path.isfile(unix_candidate):
+            return os.path.abspath(unix_candidate)
+    return None
+
+def detect_scarlett_from_executable(exe_path):
+    norm_path = normalize_candidate_exe_path(exe_path)
+    if not norm_path or not is_pe64_binary(norm_path):
+        return False
+    exe_dir = os.path.dirname(norm_path)
+    config_path = find_microsoft_game_config(exe_dir)
+    if not config_path:
+        return False
+    return is_scarlett_game_config(config_path)
+
+def resolve_scarlett_mode(env, argv=None):
+    raw_mode = env.get("PROTON_XBOX_SCARLETT", "auto").strip().lower()
+    if raw_mode in ("0", "false", "no", "off"):
+        return False
+    if raw_mode in ("1", "true", "yes", "on"):
+        return True
+    if argv is None:
+        argv = sys.argv[2:] if len(sys.argv) > 2 else []
+    for arg in argv:
+        if detect_scarlett_from_executable(arg):
+            return True
+    return False
+
+def apply_scarlett_environment(env, dlloverrides, lib_dir, prefix_dir, argv=None):
+    if not resolve_scarlett_mode(env, argv):
+        return False
+
+    env["PROTON_XBOX_SCARLETT"] = env.get("PROTON_XBOX_SCARLETT", "auto").strip() or "auto"
+
+    model = env.get("PROTON_XBOX_MODEL", "anaconda").strip().lower()
+    if model not in SCARLETT_VALID_MODELS:
+        model = "anaconda"
+    env["PROTON_XBOX_MODEL"] = model
+
+    default_overlay_dir = os.path.join(prefix_dir.rstrip("/"), "drive_c/scarlett_overlay")
+    overlay_dir = env.get("PROTON_XBOX_OVERLAY_DIR", "").strip()
+    if not overlay_dir:
+        overlay_dir = default_overlay_dir
+    env["PROTON_XBOX_OVERLAY_DIR"] = overlay_dir
+
+    shader_mode = env.get("PROTON_XBOX_SHADER_MODE", "adaptive").strip().lower()
+    if shader_mode not in SCARLETT_VALID_SHADER_MODES:
+        shader_mode = "adaptive"
+    env["PROTON_XBOX_SHADER_MODE"] = shader_mode
+
+    strict_raw = env.get("PROTON_XBOX_STRICT", "0").strip().lower()
+    env["PROTON_XBOX_STRICT"] = "1" if strict_raw in ("1", "true", "yes", "on") else "0"
+
+    if "PROTON_XBOX_BCPACK_PLUGIN" in env:
+        env["PROTON_XBOX_BCPACK_PLUGIN"] = env["PROTON_XBOX_BCPACK_PLUGIN"].strip()
+
+    net_mode = env.get("PROTON_XBOX_NET_MODE", "offline").strip().lower()
+    if net_mode not in SCARLETT_VALID_NET_MODES:
+        net_mode = "offline"
+    env["PROTON_XBOX_NET_MODE"] = net_mode
+
+    clean_lib_dir = lib_dir.rstrip("/")
+    scarlett_pe_dir = os.path.join(clean_lib_dir, "wine/scarlett/x86_64-windows")
+    scarlett_unix_dir = os.path.join(clean_lib_dir, "wine/scarlett/x86_64-unix")
+
+    prepend_to_env_str(env, "WINEDLLPATH", scarlett_pe_dir + ":" + scarlett_unix_dir, ":")
+    prepend_to_env_str(env, ld_path_var, scarlett_unix_dir, ":")
+
+    if "gameinput" in dlloverrides:
+        del dlloverrides["gameinput"]
+    for dll in SCARLETT_CONSOLE_DLLS:
+        dlloverrides[dll] = "b"
+
+    if net_mode in ("passthrough", "lan"):
+        if not env.get("SSL_CERT_FILE"):
+            for candidate in (
+                "/etc/ssl/certs/ca-certificates.crt",
+                "/etc/pki/tls/certs/ca-bundle.crt",
+                "/etc/ssl/ca-bundle.pem",
+                "/etc/ssl/cert.pem",
+            ):
+                if os.path.exists(candidate):
+                    env["SSL_CERT_FILE"] = candidate
+                    break
+            else:
+                env["SSL_CERT_FILE"] = "/etc/ssl/certs/ca-certificates.crt"
+
+        if not env.get("SSL_CERT_DIR"):
+            for candidate in ("/etc/ssl/certs", "/etc/pki/tls/certs"):
+                if os.path.isdir(candidate):
+                    env["SSL_CERT_DIR"] = candidate
+                    break
+            else:
+                env["SSL_CERT_DIR"] = "/etc/ssl/certs"
+
+        env["PRESSURE_VESSEL_IMPORT_CA_CERTS"] = "1"
+        ro_entries = [p for p in env.get("PRESSURE_VESSEL_FILESYSTEMS_RO", "").split(":") if p]
+        for cert_path in (env["SSL_CERT_FILE"], env["SSL_CERT_DIR"]):
+            if cert_path and cert_path not in ro_entries:
+                ro_entries.append(cert_path)
+        env["PRESSURE_VESSEL_FILESYSTEMS_RO"] = ":".join(ro_entries)
+
+    return True
+
 class Session:
     def __init__(self):
         self.log_file = None
@@ -1529,6 +1740,7 @@ class Session:
 
         self.compat_config = default_compat_config()
         self.cmdlineappend = []
+        self.scarlett_enabled = False
 
         if "STEAM_COMPAT_CONFIG" in os.environ:
             config = os.environ["STEAM_COMPAT_CONFIG"]
@@ -2063,6 +2275,8 @@ class Session:
                 ]:
                 self.env["PROTON_LIMIT_ADDRESS_SPACE"] = "1"
 
+        self.configure_scarlett(g_proton, g_compatdata, sys.argv[2:] + self.cmdlineappend)
+
         s = ""
         for dll in self.dlloverrides:
             setting = self.dlloverrides[dll]
@@ -2085,6 +2299,20 @@ class Session:
                 self.env['FEX_APP_CONFIG'] = g_compatdata.fex_config_file
 
             self.env["FEX_APP_CONFIG_LOCATION"] = os.path.join(g_proton.dist_dir, "share/fex-emu/")
+
+    def configure_scarlett(self, proton_inst=None, compatdata_inst=None, argv=None):
+        lib_dir = proton_inst.lib_dir if proton_inst is not None else "files/lib/"
+        prefix_dir = compatdata_inst.prefix_dir if compatdata_inst is not None else "pfx/"
+        self.scarlett_enabled = apply_scarlett_environment(
+            self.env,
+            self.dlloverrides,
+            lib_dir,
+            prefix_dir,
+            argv=argv,
+        )
+        if self.scarlett_enabled and compatdata_inst is not None:
+            makedirs(self.env["PROTON_XBOX_OVERLAY_DIR"])
+        return self.scarlett_enabled
 
     def run_proc(self, args, local_env=None):
         if local_env is None:
