@@ -12,10 +12,10 @@ def file_is_wine_builtin_dll(path):
     if not os.path.exists(path):
         return False
     try:
-        sfile = open(path, "rb")
-        sfile.seek(0x40)
-        tag = sfile.read(20)
-        return tag.startswith((b"Wine placeholder DLL", b"Wine builtin DLL"))
+        with open(path, "rb") as sfile:
+            sfile.seek(0x40)
+            tag = sfile.read(20)
+            return tag.startswith((b"Wine placeholder DLL", b"Wine builtin DLL"))
     except IOError:
         return False
 
@@ -31,16 +31,16 @@ def dll_bitness(path):
     if not os.path.exists(path):
         return 0
     try:
-        sfile = open(path, "rb")
-        sfile.seek(0x3c)
-        ntheader_ofs = little_endian_bytes_to_uint(sfile.read(4))
-        sfile.seek(0x18 + ntheader_ofs)
-        magic = sfile.read(2)
-        if magic == bytes((11, 1)):
-            return 32
-        if magic == bytes((11, 2)):
-            return 64
-        return 0
+        with open(path, "rb") as sfile:
+            sfile.seek(0x3c)
+            ntheader_ofs = little_endian_bytes_to_uint(sfile.read(4))
+            sfile.seek(0x18 + ntheader_ofs)
+            magic = sfile.read(2)
+            if magic == bytes((11, 1)):
+                return 32
+            if magic == bytes((11, 2)):
+                return 64
+            return 0
     except IOError:
         return 0
 
@@ -60,14 +60,23 @@ def setup_dll_symlinks(default_pfx_dir, dist_dir, arm64):
             if os.path.isfile(filename) and file_is_wine_builtin_dll(filename):
                 bitness = dll_bitness(filename)
                 if bitness == 32:
-                    libdir = os.path.join(dist_dir, 'lib/wine/i386-windows')
+                    libdirs = [os.path.join(dist_dir, 'lib/wine/i386-windows')]
                 elif bitness == 64:
-                    libdir = os.path.join(dist_dir, f'lib/wine/{"aarch64" if arm64 else "x86_64"}-windows')
+                    arch = "aarch64" if arm64 else "x86_64"
+                    libdirs = [os.path.join(dist_dir, f'lib/wine/{arch}-windows')]
+                    if not arm64:
+                        scarlett_libdir = os.path.join(dist_dir, 'lib/wine/scarlett/x86_64-windows')
+                        if os.path.isdir(scarlett_libdir):
+                            libdirs.append(scarlett_libdir)
                 else:
                     continue
-                if os.path.exists(os.path.join(libdir, file_)):
-                    target = os.path.join(libdir, file_)
-                else:
+                target = None
+                for libdir in libdirs:
+                    candidate = os.path.join(libdir, file_)
+                    if os.path.exists(candidate):
+                        target = candidate
+                        break
+                if target is None:
                     continue
                 os.unlink(filename)
                 make_relative_symlink(target, filename)
@@ -117,6 +126,18 @@ def fixup_drive_links(default_pfx_dir):
             if ":" in dir_:
                 os.remove(os.path.join(walk_dir, dir_))
 
+def build_default_pfx_winedllpath(dist_dir, arm64=False):
+    libdir = dist_dir + '/lib/'
+    paths = [libdir + "vkd3d"]
+    if not arm64:
+        scarlett_pe_dir = os.path.join(dist_dir, "lib/wine/scarlett/x86_64-windows")
+        scarlett_unix_dir = os.path.join(dist_dir, "lib/wine/scarlett/x86_64-unix")
+        if os.path.isdir(scarlett_pe_dir):
+            paths.append(scarlett_pe_dir)
+            if os.path.isdir(scarlett_unix_dir):
+                paths.append(scarlett_unix_dir)
+    return ':'.join(paths)
+
 def make_default_pfx(default_pfx_dir, dist_dir, arm64):
     local_env = dict(os.environ)
     libdir = dist_dir + '/lib/'
@@ -126,7 +147,7 @@ def make_default_pfx(default_pfx_dir, dist_dir, arm64):
     local_env["LD_LIBRARY_PATH"] = ld_path
     local_env["WINEPREFIX"] = default_pfx_dir
     local_env["WINEDEBUG"] = "-all"
-    local_env["WINEDLLPATH"] = libdir + "vkd3d"
+    local_env["WINEDLLPATH"] = build_default_pfx_winedllpath(dist_dir, arm64)
     runtime_args = []
 
 

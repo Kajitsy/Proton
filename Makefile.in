@@ -845,6 +845,84 @@ $(OBJ)/.vkd3d-proton-post-source:
 
 
 ##
+## scarlett
+##
+
+SCARLETT_VERSION := 11.0-100
+SCARLETT_x86_64_SOURCE_DATE_EPOCH := $(shell expr $(x86_64_SOURCE_DATE_EPOCH) - 3)
+
+SCARLETT_MESON_ARGS = \
+	-Dinstall_version=false
+
+SCARLETT_x86_64_MESON_ARGS = \
+	--bindir=$(SCARLETT_x86_64_DST)/lib/wine/scarlett/x86_64-windows \
+	--libdir=$(SCARLETT_x86_64_DST)/lib/wine/scarlett/x86_64-windows
+
+SCARLETT_x86_64_UNIX_ENV = \
+	CCACHE_BASEDIR="$(SCARLETT_SRC)" \
+	STRIP="$(STRIP)" \
+	AR="$(x86_64-unix_TARGET)-ar" \
+	RANLIB="$(x86_64-unix_TARGET)-ranlib" \
+	CC="$(x86_64-unix_TARGET)-gcc" \
+	CXX="$(x86_64-unix_TARGET)-g++" \
+	LD="$(x86_64-unix_TARGET)-ld" \
+	PKG_CONFIG="$($(HOST_ARCH)-unix_TARGET)-pkg-config" \
+	PKG_CONFIG_LIBDIR="/usr/lib/$(x86_64-unix_LIBDIR)/pkgconfig:/usr/share/pkgconfig" \
+	CFLAGS="$(SCARLETT_CFLAGS) $(x86_64_CFLAGS) $(CFLAGS)" \
+	CPPFLAGS="$(SCARLETT_CFLAGS) $(x86_64_CFLAGS) $(CFLAGS)" \
+	CXXFLAGS="-std=c++20 $(SCARLETT_CFLAGS) $(x86_64_CFLAGS) $(CFLAGS)" \
+	LDFLAGS="$(SCARLETT_LDFLAGS) $(x86_64_LDFLAGS) $(LDFLAGS)" \
+	SOURCE_DATE_EPOCH="$(SCARLETT_x86_64_SOURCE_DATE_EPOCH)"
+
+$(eval $(call rules-source,scarlett,$(SRCDIR)/scarlett))
+$(eval $(call rules-meson,scarlett,x86_64,windows))
+
+$(OBJ)/.scarlett-post-source:
+	mkdir -p $(DST_LIBDIR)/wine/scarlett/x86_64-windows
+	mkdir -p $(DST_LIBDIR)/wine/scarlett/x86_64-unix
+	rm -rf $(DST_LIBDIR)/wine/scarlett/version
+	echo "proton-scarlett-$(SCARLETT_VERSION) $(shell git -C $(SRCDIR) rev-parse --short=12 HEAD 2>/dev/null || echo no-git-repo-info)" > $(DST_LIBDIR)/wine/scarlett/version
+	touch $@
+
+$(OBJ)/.scarlett-x86_64-post-build:
+	mkdir -p $(SCARLETT_x86_64_DST)/lib/wine/scarlett/x86_64-windows
+	mkdir -p $(SCARLETT_x86_64_DST)/lib/wine/scarlett/x86_64-unix
+	mkdir -p $(DST_LIBDIR)/wine/scarlett/x86_64-windows
+	mkdir -p $(DST_LIBDIR)/wine/scarlett/x86_64-unix
+	rm -rf "$(OBJ)/obj-scarlett-x86_64-unix/meson-private/coredata.dat"
+	mkdir -p "$(OBJ)/obj-scarlett-x86_64-unix"
+	env $(SCARLETT_x86_64_UNIX_ENV) \
+	meson "$(OBJ)/obj-scarlett-x86_64-unix" "$(SCARLETT_SRC)" \
+	      --prefix="$(SCARLETT_x86_64_DST)" \
+	      --libdir="lib/wine/scarlett/x86_64-unix" \
+	      --bindir="lib/wine/scarlett/x86_64-unix" \
+	      --buildtype=plain \
+	      $(SCARLETT_MESON_ARGS) \
+	      $(MESON_STRIP_ARG)
+	env $(SCARLETT_x86_64_UNIX_ENV) \
+	ninja -C "$(OBJ)/obj-scarlett-x86_64-unix" install
+	if [ -f "$(SCARLETT_x86_64_OBJ)/compile_commands.json" ]; then \
+	    mkdir -p "$(OBJ)/compile_commands"; \
+	    sed "s#$(SCARLETT_SRC)#$(SCARLETT_ORIGIN)#g" "$(SCARLETT_x86_64_OBJ)/compile_commands.json" > "$(OBJ)/compile_commands/scarlett.json"; \
+	fi
+	touch $@
+
+.PHONY: scarlett-tests
+scarlett-tests: | scarlett-source
+	cmake -S "$(SCARLETT_SRC)" -B "$(OBJ)/obj-scarlett-tests" -G Ninja \
+	    -DSCARLETT_BUILD_HOST_TESTS=ON \
+	    -DSCARLETT_BUILD_PE=OFF \
+	    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	cmake --build "$(OBJ)/obj-scarlett-tests"
+	if [ -f "$(OBJ)/obj-scarlett-tests/compile_commands.json" ]; then \
+	    mkdir -p "$(OBJ)/compile_commands"; \
+	    sed "s#$(SCARLETT_SRC)#$(SCARLETT_ORIGIN)#g" "$(OBJ)/obj-scarlett-tests/compile_commands.json" > "$(OBJ)/compile_commands/scarlett.json"; \
+	fi
+	ctest --test-dir "$(OBJ)/obj-scarlett-tests" --output-on-failure
+	python3 "$(SCARLETT_SRC)/tests/test_proton_scarlett_env.py"
+
+
+##
 ## FEX
 ##
 
@@ -1341,7 +1419,7 @@ endif
 ## default_pfx
 ##
 
-default_pfx: wine gst_good gst_bad gst_libav gst_plugins_rs lsteamclient steamexe vrclient wineopenxr $(WINEOPENXR64_JSON) dxvk dxvk-nvapi vkd3d-proton
+default_pfx: wine gst_good gst_bad gst_libav gst_plugins_rs lsteamclient steamexe vrclient wineopenxr $(WINEOPENXR64_JSON) dxvk dxvk-nvapi vkd3d-proton scarlett
 	find $(DST_LIBDIR)/wine -type f -execdir chmod a-w '{}' '+'
 	rm -rf $(abspath $(DIST_PREFIX))
 	rm -rf $(abspath $(DIST_PREFIX_ARM64))
@@ -1460,6 +1538,14 @@ redist: all
 
 .PHONY: module32 module64 module
 
+ifeq ($(module),scarlett)
+module32:
+	@echo ":: scarlett is 64-bit only (x86_64-windows / x86_64-unix), skipping 32-bit module32" >&2
+
+module64: scarlett
+
+module: scarlett
+else
 module32: | all-source wine-i386-configure
 	+$(MAKE) -j$(J) $(filter -j%,$(MAKEFLAGS)) $(MFLAGS) $(MAKEOVERRIDES) -C $(WINE_i386_OBJ)/dlls/$(module)
 
@@ -1468,6 +1554,7 @@ module64: | all-source wine-x86_64-configure
 
 module: | all-source wine-configure
 module: module32 module64
+endif
 
 ###############################
 else # outside of the container
