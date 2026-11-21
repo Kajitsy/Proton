@@ -1,0 +1,85 @@
+// Proton-Scarlett XDL Schema: xgameruntime.dll (Game OS 2020..2026)
+
+module xgameruntime {
+    dll = "xgameruntime.dll";
+    namespace = "scarlett::xdl::xgameruntime";
+    default_abi = 10.0.26200.0;
+    abi_range = 2020..2026;
+};
+
+enum XGameRuntimeFeature : uint32_t {
+    XAccessibility = 0,
+    XAppCapture = 1,
+    XAsync = 2,
+    XAsyncProvider = 3,
+    XDisplay = 4,
+    XGame = 5,
+    XGameInvite = 6,
+    XGameSave = 7,
+    XGameUI = 8,
+    XLauncher = 9,
+    XNetworking = 10,
+    XPackage = 11,
+    XPersistentLocalStorage = 12,
+    XSpeechSynthesizer = 13,
+    XStore = 14,
+    XSystem = 15,
+    XTaskQueue = 16,
+    XThread = 17,
+    XUser = 18,
+    XError = 19,
+    XGameEvent = 20,
+    XGameStreaming = 21
+};
+
+[uuid("073B7DCB-1FCF-4030-94BE-E3C9EB623428"), slots(32)]
+interface IScarlettSystemDispatch {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    hresult InitializeRuntime();
+    void ShutdownRuntime();
+    hresult QueryFeatureAvailability(XGameRuntimeFeature feature, bool32* isAvailable);
+    hresult GetGameOsVersion(uint64_t* outPackedVersion);
+    hresult CreateTaskQueue(uint32_t workMode, uint32_t completionMode, void** outQueue);
+    hresult SubmitAsync(void* asyncBlock, void* workCallback);
+    void CancelAsync(void* asyncBlock);
+    [added(10.0.22621.1806)] hresult QueryGxdkCapabilities(uint32_t* outCaps);
+    [removed(10.0.25398.0)] hresult LegacyTelemetryFlush();
+    [unimplemented] hresult RegisterCrashDumpCallback(void* callback, void* context);
+    [slot(31), unimplemented] hresult ReservedSystemTail();
+};
+
+[uuid("37E56907-2F10-41E8-B72F-36EDB185331A"), slots(32)]
+interface IScarlettPlatformDispatch {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    uint32_t GetConsoleModel();
+    hresult GetMemoryBudget(uint64_t* outTotalBytes, uint64_t* outFastBytes);
+    hresult XGameSaveInitializeProvider(void* userHandle, const char* scid, bool32 syncOnDemand, void** outProvider);
+    hresult XGameSaveCommitBlob(void* updateHandle, const char* blobName, const uint8_t* data, uint32_t size);
+    bool32 XThreadIsTimeSensitive();
+    hresult XThreadSetTimeSensitive(bool32 isTimeSensitive);
+    [removed(10.0.26100.0)] hresult LegacySuspendCallback(void* context);
+    [unimplemented] hresult QueryTitleLicenseStub(uint32_t titleId, uint32_t* outFlags);
+    [slot(31), unimplemented] hresult ReservedPlatformTail();
+};
+
+[no_uuid]
+interface IXGameRuntimeFlatTable {
+    uint32_t GetAbiVersion();
+    hresult DispatchSystemCall(uint32_t callId, void* args);
+    hresult NotifyAppLifetime(uint32_t state);
+    [unimplemented] hresult QueryExperimentalExtension(uint32_t extId, void** outExt);
+};
+
+[win64_abi, register_abi("RCX=api_id, RDX=riid, R8=out_impl")]
+export hresult QueryApiImpl(uint64_t api_id, const guid* riid, void** out_impl);
+
+export hresult XGameRuntimeInitialize();
+export void XGameRuntimeUninitialize();
+export hresult XGameRuntimeIsFeatureAvailable(XGameRuntimeFeature feature, bool32* isAvailable);
+
+[unimplemented]
+export hresult XGameRuntimeGetDiagnostics(void* outBuf, uint32_t bufSize);

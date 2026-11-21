@@ -1,0 +1,110 @@
+// Proton-Scarlett XDL Schema: d3d12_xs.dll (Game OS 2020..2026)
+
+module d3d12_xs {
+    dll = "d3d12_xs.dll";
+    namespace = "scarlett::xdl::d3d12_xs";
+    default_abi = 10.0.26200.0;
+    abi_range = 2020..2026;
+};
+
+const uint32_t D3D12XBOX_COMMAND_LIST_TYPE_DMA = 0x02;
+const uint32_t D3D12XBOX_COMMAND_LIST_TYPE_COMPUTE_XS = 0x10;
+const uint32_t D3D12XBOX_DESCRIPTOR_HEAP_SAFE_LIMIT = 1000000;
+
+struct D3D12XBOX_CREATE_DEVICE_PARAMETERS {
+    uint32_t Version;
+    uint32_t ProcessDebugFlags;
+    uint32_t GraphicsCommandBufferSizeBytes;
+    uint32_t GraphicsScratchMemorySizeBytes;
+    uint32_t ComputeCommandBufferSizeBytes;
+    uint32_t ComputeScratchMemorySizeBytes;
+    uint32_t DmaCommandBufferSizeBytes;
+    uint32_t Reserved0;
+    uint64_t AutoBreadcrumbNodeCount;
+    [added(10.0.22621.1806)] uint32_t AmplificationShaderIndirectArgsBufferSize;
+    [added(10.0.22621.1806)] uint32_t AmplificationShaderPayloadBufferSize;
+    [conditional("devkit")] uint64_t DevKitDiagnosticBufferSize;
+};
+
+struct D3D12XBOX_PRESENT_PLANE_PARAMETERS {
+    void* pResource;
+    uint32_t SubresourceIndex;
+    uint32_t Flags;
+    uint32_t SourceRectLeft;
+    uint32_t SourceRectTop;
+    uint32_t SourceRectRight;
+    uint32_t SourceRectBottom;
+    uint32_t ColorSpace;
+    uint32_t Reserved0;
+};
+
+struct D3D12XBOX_FRAME_PIPELINE_TOKEN_DESC {
+    uint64_t Token;
+    uint64_t TargetOriginTimestampNs;
+    uint32_t FrameIndex;
+    uint32_t Flags;
+    [added(10.0.25398.0)] uint64_t VrrTargetFrameTimeNs;
+};
+
+[force_abi(10.0.19041.0)]
+struct D3D12XBOX_LEGACY_DEVICE_DESC {
+    uint32_t Version;
+    uint32_t ProcessDebugFlags;
+    uint64_t GraphicsHeapSizeBytes;
+    [added(10.0.22621.1806)] uint64_t ExtendedLegacyReserved;
+};
+
+[uuid("189819F1-1DB6-4B57-BE54-1821339B85F7")]
+interface ID3D12DeviceX {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    hresult CreatePlacedResourceX(
+        gpu_va gpuAddress,
+        const void* pDesc,
+        uint32_t InitialResourceState,
+        const void* pOptimizedClearValue,
+        const guid* riid,
+        void** ppvResource);
+    hresult PresentX(
+        uint32_t PlaneCount,
+        const D3D12XBOX_PRESENT_PLANE_PARAMETERS* pPlaneParameters,
+        const void* pPresentParameters);
+    hresult WaitFrameEventX(
+        uint32_t FrameEventType,
+        uint64_t TimeoutInMilliseconds,
+        const D3D12XBOX_FRAME_PIPELINE_TOKEN_DESC* pTokenDesc,
+        uint64_t* pOutEventTimestamp);
+    [added(10.0.22621.1806)]
+    hresult SetAmplificationShaderLimits(
+        uint32_t IndirectArgsBufferSize,
+        uint32_t PayloadBufferSize);
+    [removed(10.0.25398.0)]
+    hresult LegacyPresentSyncX(
+        uint64_t FrameToken,
+        uint32_t TimeoutMs);
+    [unimplemented]
+    hresult CreateReservedResourceDebugX(
+        const void* pDesc,
+        uint32_t InitialState,
+        const guid* riid,
+        void** ppvResource);
+};
+
+[ordinal(1)]
+export hresult D3D12XboxCreateDevice(
+    const D3D12XBOX_CREATE_DEVICE_PARAMETERS* pParams,
+    const guid* riid,
+    void** ppDevice);
+
+[unimplemented]
+export hresult D3D12GetDebugInterface(
+    const guid* riid,
+    void** ppvDebug);
+
+[added(10.0.22621.1806), unimplemented]
+export hresult D3D12XboxCreateMeshPipelineState(
+    void* pDevice,
+    const void* pDesc,
+    const guid* riid,
+    void** ppState);
