@@ -1,0 +1,156 @@
+# Proton-Scarlett — Declarative AAA Engine-Class Profile Database
+#
+# Architectural Policy:
+#   - Engine-class declarative profiles ONLY (zero per-title hacks in runtime core).
+#   - Every Vulkan extension or GPU capability listed here is dynamically probed at
+#     device initialization; hardware-missing features ALWAYS fall back safely.
+#   - Environment variables (`PROTON_XBOX_*`) always take precedence over profile values.
+
+[meta]
+schema_version = 1
+proton_prefix_version = "11.0-100"
+target_device_family = "Gaming.Xbox.Scarlett.x64"
+policy = "engine-class-declarative-only"
+
+[defaults]
+console_model = "anaconda"            # anaconda (13.5 GiB) | lockhart (8.5 GiB) | devkit (40.0 GiB)
+shader_mode = "adaptive"              # exact | adaptive | fast_f32
+net_mode = "offline"                  # offline | lan | passthrough
+strict_stubs = false                  # PROTON_XBOX_STRICT=0|1
+uma_tier = "auto"                     # auto | tier_a_dmabuf | tier_b_ext_host | tier_c_uffd_wp
+descriptor_backend = "auto"           # auto | descriptor_heap | descriptor_buffer | descriptor_indexing
+descriptor_heap_safe_limit = 1000000  # Fallback to VK_EXT_descriptor_buffer above 1M descriptors
+sparse_bind_coalescing = true         # Coalesce UpdateTileMappings into batched vkQueueBindSparse
+wave64_strategy = "adaptive"          # native_subgroup_control | narrow_wave32 | paired_lds_emulation
+rt_bvh4_strategy = "ray_query_or_bda" # VK_KHR_ray_query with automatic BDA software fallback
+dstorage_io_uring = true              # Linux io_uring with pread thread-pool fallback
+dstorage_gpu_deflate = true           # VK_EXT_memory_decompression / vkdeflate -> zlib-ng/libdeflate fallback
+present_hdr10_pq = true               # PresentX 1/2-plane HDR10 PQ + GameDVR capture path
+frame_pacing = "display_timing_or_wait" # VK_GOOGLE_display_timing / VK_KHR_present_wait -> monotonic sleep
+spirv_validate = false                # Run spirv-val on lifted shaders (enabled in QA/dev profiles)
+
+# ============================================================================
+# Declarative Driver & Hardware Capability Guards (Dynamic Runtime Probing)
+# ============================================================================
+
+[driver_guards.nvidia_610_descriptor_heap]
+vendor = "nvidia"
+driver_branch_prefix = "610."
+affected_extension = "VK_EXT_descriptor_heap"
+max_safe_descriptors = 1000000
+action = "fallback_to_descriptor_buffer"
+fallback_extension = "VK_EXT_descriptor_buffer"
+secondary_fallback_extension = "VK_EXT_descriptor_indexing"
+rationale = "Protects against NVIDIA 610.xx VK_EXT_descriptor_heap regression and >1M descriptor pool limits."
+
+[driver_guards.nvidia_595_plus_wave32]
+vendor = "nvidia"
+min_driver_branch = "595."
+native_wave_size = 32
+wave64_strategy = "adaptive"
+uma_preferred_tier = "auto"
+rationale = "NVIDIA Warp32 hardware uses adaptive Wave64-on-Wave32 narrowing or paired LDS emulation."
+
+[driver_guards.amd_radv_rdna2_native]
+vendor = "amd"
+driver = "radv"
+prefer_extension = "VK_EXT_subgroup_size_control"
+native_wave64 = true
+uma_preferred_tier = "tier_a_dmabuf"
+rationale = "RADV on RDNA2/3/4 exposes native Wave64 subgroup control and ReBAR DMA-BUF UMA."
+
+[driver_guards.intel_anv_gen12_xe]
+vendor = "intel"
+driver = "anv"
+wave64_strategy = "adaptive"
+rt_bvh4_strategy = "ray_query_or_bda"
+uma_preferred_tier = "auto"
+rationale = "Intel ANV dynamically probes VK_KHR_ray_query and falls back to BDA BVH4 traversal when needed."
+
+# ============================================================================
+# Engine-Class Profiles
+# ============================================================================
+
+[profiles.ue5_gen9]
+display_name = "Unreal Engine 5 (Gen9 / Scarlett Class)"
+engine_class = "ue5"
+match_heuristics = ["UnrealEngine", "UE5", "Nanite", "Lumen"]
+console_model = "anaconda"
+shader_mode = "adaptive"
+net_mode = "offline"
+uma_tier = "auto"
+descriptor_backend = "auto"
+descriptor_heap_safe_limit = 1000000
+sparse_bind_coalescing = true
+wave64_strategy = "adaptive"
+rt_bvh4_strategy = "ray_query_or_bda"
+dstorage_io_uring = true
+dstorage_gpu_deflate = true
+enable_async_compute_queue_0x10 = true
+enable_dma_queue_0x02 = true
+enable_sfs_feedback = true
+enable_fsr_xbox_bridge = true
+notes = "Optimized for Nanite/Lumen Wave64 compute, VSM sparse residency coalescing, and heavy >1M bindless descriptors."
+
+[profiles.rage9_gen9]
+display_name = "RAGE 9 (Open-World Gen9 Streaming Class)"
+engine_class = "rage9"
+match_heuristics = ["RAGE9", "RageEngine"]
+console_model = "anaconda"
+shader_mode = "adaptive"
+net_mode = "offline"
+uma_tier = "auto"
+descriptor_backend = "auto"
+descriptor_heap_safe_limit = 1000000
+sparse_bind_coalescing = true
+wave64_strategy = "adaptive"
+rt_bvh4_strategy = "ray_query_or_bda"
+dstorage_io_uring = true
+dstorage_gpu_deflate = true
+enable_async_compute_queue_0x10 = true
+enable_dma_queue_0x02 = true
+enable_sfs_feedback = true
+large_surface_gt_4gib = true
+present_dual_plane = true
+present_hdr10_pq = true
+notes = "Targets high-throughput MEM_GRAPHICS physical aliasing, >4 GiB SW_64KB virtual textures, dual-plane HDR10 PQ, and BVH4 RT."
+
+[profiles.generic_gen9]
+display_name = "Generic Xbox Series X|S (Gaming.Xbox.Scarlett.x64)"
+engine_class = "generic_gen9"
+match_heuristics = ["TargetDeviceFamily:XboxGen9", "TargetDeviceFamily:Scarlett"]
+console_model = "anaconda"
+shader_mode = "adaptive"
+net_mode = "offline"
+uma_tier = "auto"
+descriptor_backend = "auto"
+descriptor_heap_safe_limit = 1000000
+sparse_bind_coalescing = true
+wave64_strategy = "adaptive"
+rt_bvh4_strategy = "ray_query_or_bda"
+dstorage_io_uring = true
+dstorage_gpu_deflate = true
+enable_async_compute_queue_0x10 = true
+enable_dma_queue_0x02 = true
+notes = "Conservative clean-room baseline for any uncatalogued Gaming.Xbox.Scarlett.x64 title."
+
+[profiles.scarlett_arena_linux]
+display_name = "ScarlettArena-Linux (Clean-Room 6-Scene QA Harness)"
+engine_class = "qa_harness"
+match_heuristics = ["ScarlettArena", "ScarlettArena-Linux"]
+console_model = "anaconda"
+shader_mode = "exact"
+net_mode = "lan"
+strict_stubs = true
+uma_tier = "auto"
+descriptor_backend = "auto"
+descriptor_heap_safe_limit = 1000000
+sparse_bind_coalescing = true
+wave64_strategy = "adaptive"
+rt_bvh4_strategy = "ray_query_or_bda"
+dstorage_io_uring = true
+dstorage_gpu_deflate = true
+spirv_validate = true
+enable_gpu_microprobe_dump = true
+enable_all_6_stress_scenes = true
+notes = "Full validation harness exercising all 8 subsystems, strict auto-stub trapping, spirv-val, and Exit Gates Phase 0..7."
