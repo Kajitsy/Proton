@@ -1,0 +1,26 @@
+LIBRARY kernelx.dll
+EXPORTS
+    TitleMemoryStatus
+    JobTitleMemoryStatus
+    KernelXVirtualAlloc
+    KernelXVirtualFree
+    KernelXVirtualQuery
+    AllocateTitlePhysicalPages
+    FreeTitlePhysicalPages
+    MapTitleEsramPages
+    XThreadGetProcessorTopology
+    XThreadSetXboxCoreAffinity
+    XThreadSetTimeSensitive
+    XThreadIsTimeSensitive
+    XThreadAssertNotTimeSensitive
+    KernelXCreateEvent
+    KernelXSetEvent
+    KernelXResetEvent
+    KernelXPulseEvent
+    KernelXCreateSemaphore
+    KernelXReleaseSemaphore
+    KernelXCreateMutex
+    KernelXReleaseMutex
+    KernelXWaitForMultipleObjects
+    KernelXReadSyncState
+    KernelXCloseSyncHandle
