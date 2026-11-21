@@ -931,11 +931,53 @@ static int32_t unix_op_check_net_policy(void* args) {
 static int32_t unix_op_gamesave_commit(void* args) {
     return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_GAMESAVE_COMMIT_BLOB, args);
 }
+static int32_t unix_op_ex_load_config(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_LOAD_CONFIG, args);
+}
+static int32_t unix_op_ex_get_metadata(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_GET_METADATA, args);
+}
+static int32_t unix_op_ex_vfs_open(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_VFS_OPEN, args);
+}
+static int32_t unix_op_ex_vfs_read(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_VFS_READ, args);
+}
+static int32_t unix_op_ex_vfs_write(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_VFS_WRITE, args);
+}
+static int32_t unix_op_ex_vfs_close(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_VFS_CLOSE, args);
+}
+static int32_t unix_op_ex_vfs_delete(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_VFS_DELETE, args);
+}
+static int32_t unix_op_ex_vfs_mkdir(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_VFS_MKDIR, args);
+}
+static int32_t unix_op_ex_vfs_stat(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_VFS_STAT, args);
+}
+static int32_t unix_op_ex_psm_register(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_PSM_REGISTER, args);
+}
+static int32_t unix_op_ex_psm_unregister(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_PSM_UNREGISTER, args);
+}
+static int32_t unix_op_ex_psm_snapshot(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_PSM_SNAPSHOT_CB, args);
+}
+static int32_t unix_op_ex_get_last_stub(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_GET_LAST_STUB, args);
+}
+static int32_t unix_op_ex_query_xvd_info(void* args) {
+    return scarlett_loader_unix_dispatch(SCARLETT_LOADER_UNIX_EX_QUERY_XVD_INFO, args);
+}
 
 __attribute__((visibility("default")))
-extern const wine_unixlib_entry_t __wine_unix_call_funcs[SCARLETT_LOADER_UNIX_OP_COUNT];
+extern const wine_unixlib_entry_t __wine_unix_call_funcs[SCARLETT_LOADER_UNIX_EX_OP_COUNT];
 
-const wine_unixlib_entry_t __wine_unix_call_funcs[SCARLETT_LOADER_UNIX_OP_COUNT] = {
+const wine_unixlib_entry_t __wine_unix_call_funcs[SCARLETT_LOADER_UNIX_EX_OP_COUNT] = {
     unix_op_init,
     unix_op_mount,
     unix_op_unmount,
@@ -944,6 +986,25 @@ const wine_unixlib_entry_t __wine_unix_call_funcs[SCARLETT_LOADER_UNIX_OP_COUNT]
     unix_op_set_time_sensitive,
     unix_op_check_net_policy,
     unix_op_gamesave_commit,
+    unix_op_ex_load_config,
+    unix_op_ex_get_metadata,
+    unix_op_ex_vfs_open,
+    unix_op_ex_vfs_read,
+    unix_op_ex_vfs_write,
+    unix_op_ex_vfs_close,
+    unix_op_ex_vfs_delete,
+    unix_op_ex_vfs_mkdir,
+    unix_op_ex_vfs_stat,
+    unix_op_ex_psm_register,
+    unix_op_ex_psm_unregister,
+    unix_op_ex_psm_snapshot,
+    unix_op_ex_get_last_stub,
+    unix_op_ex_query_xvd_info,
 };
+
+SCARLETT_STATIC_ASSERT(
+    sizeof(__wine_unix_call_funcs) / sizeof(__wine_unix_call_funcs[0]) ==
+        SCARLETT_LOADER_UNIX_EX_OP_COUNT,
+    "__wine_unix_call_funcs must cover all 22 loader unixlib opcodes");
 
 } /* extern "C" */

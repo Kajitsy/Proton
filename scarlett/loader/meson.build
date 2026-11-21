@@ -28,7 +28,6 @@ if is_windows_pe
     vs_module_defs: 'api-ms-win-core-psm-appnotify-l1-1-0.def',
     include_directories: [scarlett_inc, include_directories('.')],
     c_args: ['-ffreestanding'],
-    link_with: [xgameplatform_pe_dll],
     install: true,
     install_dir: scarlett_install_dir,
   )

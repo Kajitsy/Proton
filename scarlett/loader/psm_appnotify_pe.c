@@ -32,6 +32,22 @@ static void psm_zero_mem(void *ptr, size_t len) {
     }
 }
 
+static void psm_copy_cstr_trunc(char *dst, size_t cap, const char *src) {
+    if (dst == NULL || cap == 0u) {
+        return;
+    }
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+    size_t i = 0u;
+    while (i + 1u < cap && src[i] != '\0') {
+        dst[i] = src[i];
+        ++i;
+    }
+    dst[i] = '\0';
+}
+
 #if defined(WINE_UNIX_CALL)
 
 static int32_t psm_unix_call(uint32_t opcode, void *params) {
@@ -42,6 +58,7 @@ static int32_t psm_unix_call(uint32_t opcode, void *params) {
 
 typedef uint64_t scarlett_wine_unixlib_handle_t;
 extern scarlett_wine_unixlib_handle_t __wine_unixlib_handle;
+extern int32_t __wine_init_unix_call(void);
 extern int32_t (SCARLETT_WIN64_API *__wine_unix_call_dispatcher)(
     scarlett_wine_unixlib_handle_t handle,
     uint32_t code,
@@ -65,6 +82,53 @@ static int32_t psm_unix_call(uint32_t opcode, void *params) {
 }
 
 #endif
+
+static scarlett_hresult_t psm_stub_dispatch_win64(
+    const scarlett_stub_descriptor_t *desc,
+    uint64_t return_address,
+    uint64_t rcx,
+    uint64_t rdx,
+    uint64_t r8,
+    uint64_t r9) {
+    scarlett_loader_report_stub_params_t params;
+    psm_zero_mem(&params, sizeof(params));
+
+    params.ctx.abi_version = SCARLETT_STUB_THUNK_ABI_VERSION;
+    if (desc != NULL) {
+        params.ctx.flags = desc->flags;
+        params.ctx.ordinal = desc->ordinal;
+        params.ctx.vtable_slot = desc->vtable_slot;
+        params.ctx.return_hr = scarlett_stub_enforce_error(desc->default_error);
+        psm_copy_cstr_trunc(params.ctx.dll_name, sizeof(params.ctx.dll_name), desc->dll_name);
+        psm_copy_cstr_trunc(params.ctx.symbol_name, sizeof(params.ctx.symbol_name),
+                            desc->symbol_name);
+    } else {
+        params.ctx.ordinal = SCARLETT_STUB_ORDINAL_NONE;
+        params.ctx.vtable_slot = SCARLETT_STUB_SLOT_NONE;
+        params.ctx.return_hr = SCARLETT_ERR_UNIMPLEMENTED_STUB;
+        psm_copy_cstr_trunc(params.ctx.dll_name, sizeof(params.ctx.dll_name),
+                            "api-ms-win-core-psm-appnotify-l1-1-0.dll");
+        psm_copy_cstr_trunc(params.ctx.symbol_name, sizeof(params.ctx.symbol_name),
+                            "unknown_symbol");
+    }
+
+    params.ctx.return_address = return_address;
+    params.ctx.caller_module_base = 0u;
+    params.ctx.caller_rva = return_address;
+    psm_copy_cstr_trunc(params.ctx.caller_module_name,
+                        sizeof(params.ctx.caller_module_name),
+                        "pe64_caller");
+    params.ctx.rcx = rcx;
+    params.ctx.rdx = rdx;
+    params.ctx.r8 = r8;
+    params.ctx.r9 = r9;
+
+    (void)psm_unix_call(SCARLETT_LOADER_UNIX_REPORT_STUB, &params);
+    if (params.out_action == (uint32_t)SCARLETT_STUB_ACTION_LOG_AND_ABORT) {
+        __builtin_trap();
+    }
+    return scarlett_stub_enforce_error(params.ctx.return_hr);
+}
 
 static uint32_t psm_register_common(
     scarlett_psm_callback_fn_t routine,
@@ -179,7 +243,7 @@ scarlett_hresult_t SCARLETT_WIN64_API RegisterAppStateChangeNotificationEx(
     uint64_t arg2,
     uint64_t arg3) {
     uint64_t ret_addr = (uint64_t)(uintptr_t)__builtin_return_address(0);
-    return scarlett_stub_dispatch_win64(
+    return psm_stub_dispatch_win64(
         &g_stub_psm_register_ex,
         ret_addr,
         arg0,
@@ -187,3 +251,28 @@ scarlett_hresult_t SCARLETT_WIN64_API RegisterAppStateChangeNotificationEx(
         arg2,
         arg3);
 }
+
+#if defined(_WIN32) || defined(__MINGW32__)
+#ifndef DLL_PROCESS_ATTACH
+#define DLL_PROCESS_ATTACH 1u
+#endif
+
+uint32_t SCARLETT_WIN64_API DllMain(void *inst, uint32_t reason, void *reserved) {
+    (void)inst;
+    (void)reserved;
+    if (reason == DLL_PROCESS_ATTACH) {
+#if defined(WINE_UNIX_CALL) || defined(_WIN32) || defined(__MINGW32__)
+        if (__wine_init_unix_call() != 0) {
+            return 0u;
+        }
+#endif
+        scarlett_unix_init_params_t init_params;
+        psm_zero_mem(&init_params, sizeof(init_params));
+        init_params.abi_version = SCARLETT_UNIX_CALL_ABI_VERSION;
+        init_params.module_id = (uint32_t)SCARLETT_UNIX_MOD_LOADER;
+        init_params.console_model = (uint32_t)SCARLETT_MODEL_ANACONDA;
+        (void)psm_unix_call(SCARLETT_LOADER_UNIX_INIT, &init_params);
+    }
+    return 1u;
+}
+#endif
