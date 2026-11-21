@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0.0",
+  "project": "Proton-Scarlett",
+  "target_platform": "Gaming.Xbox.Scarlett.x64",
+  "proton_prefix_version": "11.0-100",
+  "steamrt_sdk_image": "registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:4.0.20260331.220802-0",
+  "proton_base_commit": "1f089f5610a882c8bfcb4b58a3c86ee88bb4b9f1",
+  "vkd3d_proton_commit": "212991fc2c266bc0d59f4c4ce8f80f7126508d71",
+  "wine_commit": "e60892cc2398b0a83c332a2078c7b85e47bdb42b",
+  "vulkan_headers_commit": "31aa7f634b052d87ede4664053e85f3f4d1d50d3",
+  "spirv_headers_commit": "6cae8216a6ea19ff3f237af01e54378c1ff81fcd",
+  "abi_contracts_path": "scarlett/docs/ABI_CONTRACTS.md",
+  "abi_contracts_hash": "09f07c77f943b89d5d96f5d41b5d45b37fe5d1b6d5c09e214feb5291252137d6",
+  "contract_artifacts": {
+    "scarlett/include/scarlett_errors.h": "75185680bc4e6403110aea303f6ae4c5f71b8d1ffeeb19087660f8d247ed3072",
+    "scarlett/include/scarlett_abi_common.h": "69fb27db91a4ad303783e95ba5a5af7192d84a53f9f9812632554a2383b1c4bd",
+    "scarlett/include/scarlett_unix_call.h": "5bea6eecaac3aeb5cc5e1960ec6584952ac5cd99cb6f226298240d38dcd434e4",
+    "scarlett/include/scarlett_stub_thunk.h": "6fdc1f340127d7b956aef6b1a0d94ba6c985b75f5812deea107801367398a3b9",
+    "scarlett/profiles/scarlett_app_db.toml": "7a3d26629c9118026ac4db8c06ca5d56f9e264e4c95d6975e3c56994220de51b"
+  },
+  "clean_room_policy": {
+    "proprietary_blobs_allowed": false,
+    "drm_bypass_allowed": false,
+    "encrypted_xvc_error": "SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED",
+    "silent_stubs_allowed": false,
+    "strict_mode_env": "PROTON_XBOX_STRICT"
+  },
+  "current_phase": 0,
+  "phases": {
+    "phase_0": {
+      "name": "ABI Contracts, Freestanding Headers & Proton 11.0 Build Scaffold",
+      "status": "in_progress",
+      "exit_gate": "ABI_CONTRACTS.md hashed, C11/C++20 headers compile cleanly (-Wall -Wextra -Werror), valid TOML/JSON, Proton 11.0 build/env scaffold passes tests with zero PC regressions"
+    },
+    "phase_1": {
+      "name": "scarlett-xdl, Auto-Stub Thunk, Loader/VFS CoW & XVD/XVC Clean-Room Parser",
+      "status": "pending",
+      "exit_gate": "32-slot vtables for core GUIDs, Win64 QueryApiImpl, PROTON_XBOX_STRICT trap, GAME: CoW overlay, encrypted XVC rejection"
+    },
+    "phase_2": {
+      "name": "xmem.dll, kernelx.dll & xmem_unix.so (MEM_GRAPHICS/MEM_TITLE & UMA Tier A/B/C)",
+      "status": "pending",
+      "exit_gate": "Memory range budgets, RO/RW aliasing, cache/cross-alloc error invariants, Tier A/B/C UMA bridge with UFFDIO_WRITEPROTECT flush"
+    },
+    "phase_3": {
+      "name": "RDNA2 to SPIR-V 1.5/1.6 Lifter (Path A DXIL Strip & Path B GFX10.3 Binary Lifter)",
+      "status": "pending",
+      "exit_gate": "GPU VkBuffer microprobes, computeKnownFPClass, adaptive Wave64-on-Wave32, BVH4 ray_query + BDA fallback, 100% spirv-val pass"
+    },
+    "phase_4": {
+      "name": "d3d12_xs.dll, xg_xs.dll, XboxBvhBuilder.dll & pixevt.dll",
+      "status": "pending",
+      "exit_gate": "CreatePlacedResourceX, queues 0x2/0x10, VK_EXT_descriptor_heap with NVIDIA 610.xx/1M fallback, PresentX HDR10/GameDVR, WaitFrameEventX, xg_xs >4GiB, SFS coalescing"
+    },
+    "phase_5": {
+      "name": "dstorage_xs.dll & dstorage_xs_unix.so",
+      "status": "pending",
+      "exit_gate": "64-bit DSTORAGE_REQUEST_OPTIONS, io_uring, GPU/CPU deflate, IBcpackDecoder plugin ABI & missing-plugin error"
+    },
+    "phase_6": {
+      "name": "xgameruntime.dll (22 domains, XGameSave 15 codes), Audio, GameInput 4-motor, Media & FSR",
+      "status": "pending",
+      "exit_gate": "XTaskQueue/XAsync, XGameSave 0x80830001..0x8083000F, XThreadIsTimeSensitive, libHttpClient/XCurl modes, xaudio2_9 #1, AcpHal, GameInput #1, Bink2Scarlett, FSR Xbox"
+    },
+    "phase_7": {
+      "name": "ScarlettArena-Linux 6-Scene Stress Suite & Multi-Vendor Verification",
+      "status": "pending",
+      "exit_gate": "All 6 scenes pass on AMD RADV, NVIDIA 595+/610+, Intel ANV; soak test zero leaks; zero standard Proton 11.0 regressions"
+    }
+  }
+}
