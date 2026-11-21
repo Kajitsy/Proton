@@ -1,0 +1,88 @@
+// Proton-Scarlett XDL Schema: xg_xs.dll (Game OS 2020..2026)
+
+module xg_xs {
+    dll = "xg_xs.dll";
+    namespace = "scarlett::xdl::xg_xs";
+    default_abi = 10.0.26200.0;
+    abi_range = 2020..2026;
+};
+
+enum XG_SWIZZLE_MODE : uint32_t {
+    XG_SWIZZLE_LINEAR = 0,
+    XG_SWIZZLE_4KB_D = 1,
+    XG_SWIZZLE_4KB_S = 2,
+    XG_SWIZZLE_64KB_S = 3,
+    XG_SWIZZLE_64KB_D = 4,
+    XG_SWIZZLE_64KB_R_X = 5,
+    XG_SWIZZLE_64KB_D_X = 6,
+    XG_SWIZZLE_64KB_S_X = 7
+};
+
+struct XG_SUBRESOURCE_LAYOUT {
+    uint64_t SizeBytes;
+    uint64_t OffsetBytes;
+    uint64_t RowPitchBytes;
+    uint64_t DepthPitchBytes;
+    uint32_t WidthElements;
+    uint32_t HeightElements;
+    uint32_t Depth;
+    uint32_t TileMode;
+};
+
+struct XG_RESOURCE_LAYOUT {
+    uint64_t SizeBytes;
+    uint64_t BaseAlignmentBytes;
+    uint32_t MipLevels;
+    uint32_t Planes;
+    XG_SWIZZLE_MODE SwizzleMode;
+    uint32_t Flags;
+};
+
+struct XG_TEXTURE2D_DESC {
+    uint32_t Width;
+    uint32_t Height;
+    uint32_t MipLevels;
+    uint32_t ArraySize;
+    uint32_t Format;
+    uint32_t SampleCount;
+    uint32_t SampleQuality;
+    uint32_t Usage;
+    uint32_t BindFlags;
+    uint32_t MiscFlags;
+    XG_SWIZZLE_MODE SwizzleMode;
+    uint32_t PitchAlignment;
+    [added(10.0.22621.1806)] uint32_t SamplerFeedbackMipRegionWidth;
+    [added(10.0.22621.1806)] uint32_t SamplerFeedbackMipRegionHeight;
+};
+
+[uuid("A510E860-6632-449B-A547-6A6D2F09D3C1")]
+interface IXGTextureAddressComputer {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    hresult GetResourceLayout(XG_RESOURCE_LAYOUT* pLayout);
+    uint64_t GetTexelElementOffsetBytes(
+        uint32_t plane,
+        uint32_t mipLevel,
+        uint64_t x,
+        uint64_t y,
+        uint32_t zOrSlice,
+        uint32_t sample);
+    [unimplemented]
+    hresult CopyIntoSubresource(
+        void* pDst,
+        uint32_t dstPitch,
+        uint32_t subresource,
+        const void* pSrc);
+};
+
+export hresult XGCreateTexture2DComputer(
+    const XG_TEXTURE2D_DESC* pDesc,
+    void** ppComputer);
+
+[unimplemented]
+export uint32_t XGComputeOptimalTileMode(
+    uint32_t resourceType,
+    uint32_t format,
+    uint32_t width,
+    uint32_t height);

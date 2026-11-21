@@ -1,0 +1,74 @@
+// Proton-Scarlett XDL Schema: GameInput.dll (Game OS 2020..2026)
+
+module gameinput_xs {
+    dll = "GameInput.dll";
+    namespace = "scarlett::xdl::gameinput";
+    default_abi = 10.0.26200.0;
+    abi_range = 2020..2026;
+};
+
+struct GameInputRumbleParams {
+    float lowFrequency;
+    float highFrequency;
+    float leftTrigger;
+    float rightTrigger;
+};
+
+struct GameInputGamepadState {
+    uint32_t buttons;
+    float leftTrigger;
+    float rightTrigger;
+    float leftThumbstickX;
+    float leftThumbstickY;
+    float rightThumbstickX;
+    float rightThumbstickY;
+    [added(10.0.22621.1806)] uint32_t extendedButtons;
+};
+
+[uuid("11BE2A7E-4254-445A-9C09-FFC40F006918")]
+interface IGameInput {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    uint64_t GetCurrentTimestamp();
+    hresult GetCurrentReading(uint32_t inputKind, void* device, void** reading);
+    hresult GetNextReading(void* referenceReading, uint32_t inputKind, void* device, void** reading);
+    [unimplemented]
+    hresult RegisterDeviceCallback(
+        void* device,
+        uint32_t inputKind,
+        uint32_t statusFilter,
+        uint32_t enumerationKind,
+        void* context,
+        void* callbackFunc,
+        uint64_t* callbackToken);
+};
+
+[uuid("2156947A-E1FA-4DE0-A30B-D812931DBD8D")]
+interface IGameInputReading {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    uint32_t GetInputKind();
+    uint64_t GetSequenceNumber(uint32_t inputKind);
+    uint64_t GetTimestamp();
+    void GetDevice(void** device);
+    bool32 GetGamepadState(GameInputGamepadState* state);
+};
+
+[uuid("31DD86FB-4C1B-408A-868F-439B3CD47125")]
+interface IGameInputDevice {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    hresult GetDeviceInfo(const void** info);
+    uint32_t GetDeviceStatus();
+    void SetRumbleState(const GameInputRumbleParams* params);
+    [unimplemented] void SetHapticMotorState(uint32_t motorIndex, const void* params);
+};
+
+[ordinal(1), win64_abi]
+export hresult GameInputCreate(void** gameInput);
+
+[unimplemented]
+export hresult GameInputCreateDispatcher(void** dispatcher);

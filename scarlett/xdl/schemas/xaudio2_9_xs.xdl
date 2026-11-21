@@ -1,0 +1,90 @@
+// Proton-Scarlett XDL Schema: xaudio2_9.dll (Game OS 2020..2026)
+
+module xaudio2_9_xs {
+    dll = "xaudio2_9.dll";
+    namespace = "scarlett::xdl::xaudio2_9";
+    default_abi = 10.0.26200.0;
+    abi_range = 2020..2026;
+};
+
+struct XAUDIO2_VOICE_DETAILS {
+    uint32_t CreationFlags;
+    uint32_t ActiveFlags;
+    uint32_t InputChannels;
+    uint32_t InputSampleRate;
+};
+
+struct XAUDIO2_BUFFER {
+    uint32_t Flags;
+    uint32_t AudioBytes;
+    const uint8_t* pAudioData;
+    uint32_t PlayBegin;
+    uint32_t PlayLength;
+    uint32_t LoopBegin;
+    uint32_t LoopLength;
+    uint32_t LoopCount;
+    uint32_t Reserved0;
+    void* pContext;
+};
+
+struct XAUDIO2_PERFORMANCE_DATA {
+    uint64_t AudioCyclesSinceLastQuery;
+    uint64_t TotalCyclesSinceLastQuery;
+    uint32_t MinimumCyclesPerQuantum;
+    uint32_t MaximumCyclesPerQuantum;
+    uint32_t MemoryUsageInBytes;
+    uint32_t CurrentLatencyInSamples;
+    uint32_t GlitchesSinceEngineStarted;
+    uint32_t ActiveSourceVoiceCount;
+    uint32_t TotalSourceVoiceCount;
+    uint32_t ActiveSubmixVoiceCount;
+    uint32_t ActiveResamplerCount;
+    uint32_t ActiveMatrixMixCount;
+    uint32_t ActiveXmaSourceVoices;
+    uint32_t ActiveXmaStreams;
+};
+
+[uuid("2B02E3CF-2E0B-4EC3-BE45-1B2A3FE7210D")]
+interface IXAudio2 {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    hresult RegisterForCallbacks(void* pCallback);
+    void UnregisterForCallbacks(void* pCallback);
+    hresult CreateSourceVoice(
+        void** ppSourceVoice,
+        const void* pSourceFormat,
+        uint32_t Flags,
+        float MaxFrequencyRatio,
+        void* pCallback,
+        const void* pSendList,
+        const void* pEffectChain);
+    hresult CreateMasteringVoice(
+        void** ppMasteringVoice,
+        uint32_t InputChannels,
+        uint32_t InputSampleRate,
+        uint32_t Flags,
+        const wchar_t* szDeviceId,
+        const void* pEffectChain,
+        uint32_t StreamCategory);
+    hresult StartEngine();
+    void StopEngine();
+    hresult CommitChanges(uint32_t OperationSet);
+    void GetPerformanceData(XAUDIO2_PERFORMANCE_DATA* pPerfData);
+    [unimplemented] hresult SetDebugConfiguration(const void* pDebugConfiguration, void* pReserved);
+};
+
+[no_uuid]
+interface IXAudio2Voice {
+    void GetVoiceDetails(XAUDIO2_VOICE_DETAILS* pVoiceDetails);
+    hresult SetVolume(float Volume, uint32_t OperationSet);
+    void GetVolume(float* pVolume);
+    hresult SubmitSourceBuffer(const XAUDIO2_BUFFER* pBuffer, const void* pBufferWMA);
+    [unimplemented] hresult SetOutputVoices(const void* pSendList);
+};
+
+[ordinal(1), win64_abi]
+export hresult XAudio2Create(void** ppXAudio2, uint32_t Flags, uint32_t XAudio2Processor);
+
+[ordinal(2), unimplemented]
+export hresult CreateAudioVolumeMeter(void** ppApo);

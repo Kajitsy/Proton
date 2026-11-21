@@ -1,0 +1,87 @@
+// Proton-Scarlett XDL Schema: dstorage_xs.dll (Game OS 2020..2026)
+
+module dstorage_xs {
+    dll = "dstorage_xs.dll";
+    namespace = "scarlett::xdl::dstorage_xs";
+    default_abi = 10.0.26200.0;
+    abi_range = 2020..2026;
+};
+
+bitfield DSTORAGE_REQUEST_OPTIONS : uint64_t {
+    ZlibDecompress : 1;
+    BcpackMode : 4;
+    SwizzleMode : 16;
+    DestinationIsPhysicalPages : 1;
+    SourceType : 1;
+    SourceIsPhysicalPages : 1;
+    Reserved : 40;
+};
+
+enum DSTORAGE_PRIORITY : uint32_t {
+    DSTORAGE_PRIORITY_LOW = 0,
+    DSTORAGE_PRIORITY_NORMAL = 1,
+    DSTORAGE_PRIORITY_HIGH = 2,
+    DSTORAGE_PRIORITY_REALTIME = 3
+};
+
+struct DSTORAGE_QUEUE_DESC {
+    uint64_t SourceType;
+    uint32_t Capacity;
+    DSTORAGE_PRIORITY Priority;
+    const char* Name;
+    void* Device;
+};
+
+struct DSTORAGE_REQUEST {
+    DSTORAGE_REQUEST_OPTIONS Options;
+    uint64_t FileHandle;
+    uint64_t FileOffset;
+    uint64_t SourceAddress;
+    uint32_t SourceSize;
+    uint32_t DestinationSize;
+    uint64_t DestinationAddress;
+    uint64_t CancellationTag;
+    const char* Name;
+    [added(10.0.22621.1806)] uint32_t SwizzleSubresourceIndex;
+    [added(10.0.22621.1806)] uint32_t SwizzleReserved;
+};
+
+[uuid("6924EA0C-C3CD-4826-B10A-F64F4ED927C1")]
+interface IDStorageFactoryX {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    hresult CreateQueue(const DSTORAGE_QUEUE_DESC* desc, const guid* riid, void** ppv);
+    hresult OpenFile(const wchar_t* path, const guid* riid, void** ppv);
+    hresult CreateStatusArray(uint32_t capacity, const char* name, const guid* riid, void** ppv);
+    [unimplemented] hresult SetStagingBufferSize(uint32_t size);
+};
+
+[uuid("CFDBD83F-9E06-4FDA-8EA5-69042137F49B")]
+interface IDStorageQueueX {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    void EnqueueRequest(const DSTORAGE_REQUEST* request);
+    void EnqueueStatus(void* statusArray, uint32_t index);
+    void EnqueueSignal(void* fence, uint64_t value);
+    void Submit();
+    void CancelRequestsWithTag(uint64_t mask, uint64_t value);
+    void Close();
+    [unimplemented] hresult Query(void* info);
+};
+
+[uuid("5DE95E7B-955A-4868-A73C-243B29F4B8DA")]
+interface IDStorageFileX {
+    hresult QueryInterface(const guid* riid, void** ppvObject);
+    uint32_t AddRef();
+    uint32_t Release();
+    void Close();
+    hresult GetFileInformation(void* info);
+    [unimplemented] hresult GetFileHandle(handle* outHandle);
+};
+
+export hresult DStorageGetFactory(const guid* riid, void** ppv);
+
+[unimplemented]
+export hresult DStorageSetConfiguration(const void* configuration);
