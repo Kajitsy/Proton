@@ -1,0 +1,11 @@
+LIBRARY AcpHal.dll
+EXPORTS
+    ApuCreateHeap
+    ApuAlloc
+    ApuFree
+    AcpHalCreate
+    AcpHalRelease
+    AcpHalAllocateShapeContexts
+    AcpHalReleaseShapeContexts
+    AcpHalDecodeXma2
+    AcpHalSubmitFlowgraph
