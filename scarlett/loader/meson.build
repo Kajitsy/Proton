@@ -13,7 +13,7 @@ scarlett_loader_unix_sources = files(
 
 if is_windows_pe
   xgameplatform_pe_dll = shared_library('xgameplatform',
-    'xgameplatform_pe.c',
+    ['xgameplatform_pe.c', scarlett_pe_unixlib_src],
     name_prefix: '',
     vs_module_defs: 'xgameplatform.def',
     include_directories: [scarlett_inc, include_directories('.')],
@@ -23,7 +23,7 @@ if is_windows_pe
   )
 
   psm_appnotify_pe_dll = shared_library('api-ms-win-core-psm-appnotify-l1-1-0',
-    'psm_appnotify_pe.c',
+    ['psm_appnotify_pe.c', scarlett_pe_unixlib_src],
     name_prefix: '',
     vs_module_defs: 'api-ms-win-core-psm-appnotify-l1-1-0.def',
     include_directories: [scarlett_inc, include_directories('.')],

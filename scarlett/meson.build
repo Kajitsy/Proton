@@ -26,6 +26,7 @@ else
 endif
 
 scarlett_inc = include_directories('.', 'include')
+scarlett_pe_unixlib_src = files('include/scarlett_pe_unixlib.c')
 
 if get_option('install_version')
   version_conf = configuration_data()

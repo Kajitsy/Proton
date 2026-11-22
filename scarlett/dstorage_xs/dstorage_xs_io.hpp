@@ -4,8 +4,11 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#if !defined(SCARLETT_NO_LIBURING)
 #include <liburing.h>
+#endif
 #include <mutex>
+#include <sys/uio.h>
 #include <vector>
 
 #include "dstorage_xs_unix_abi.h"
@@ -71,7 +74,9 @@ private:
     scarlett_hresult_t read_pread_fallback(int fd, uint64_t offset, uint32_t size, uint8_t *dst);
 
     std::mutex mutex_;
+#if !defined(SCARLETT_NO_LIBURING)
     struct io_uring ring_{};
+#endif
     bool initialized_ = false;
     bool io_uring_active_ = false;
     bool sqpoll_active_ = false;

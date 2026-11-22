@@ -9,7 +9,7 @@ d3d12_xs_unix_sources = files(
 
 if is_windows_pe
   d3d12_xs_dll = shared_module('d3d12_xs',
-    'd3d12_xs_pe.c',
+    ['d3d12_xs_pe.c', scarlett_pe_unixlib_src],
     vs_module_defs: 'd3d12_xs.def',
     name_prefix: '',
     name_suffix: 'dll',

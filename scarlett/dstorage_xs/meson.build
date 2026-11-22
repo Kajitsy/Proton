@@ -15,7 +15,7 @@ dstorage_xs_unix_sources = files(
 
 if is_windows_pe
   dstorage_xs_dll = shared_module('dstorage_xs',
-    'dstorage_xs_pe.c',
+    ['dstorage_xs_pe.c', scarlett_pe_unixlib_src],
     vs_module_defs: 'dstorage_xs.def',
     name_prefix: '',
     name_suffix: 'dll',
@@ -27,17 +27,31 @@ if is_windows_pe
 else
   dstorage_threads_dep = dependency('threads')
   dstorage_dl_dep = meson.get_compiler('cpp').find_library('dl', required: false)
-  dstorage_uring_dep = dependency('liburing')
+  dstorage_uring_dep = dependency('liburing', required: false)
   dstorage_deflate_dep = dependency('libdeflate')
-  dstorage_zng_dep = dependency('zlib-ng')
+  dstorage_zng_dep = dependency('zlib-ng', required: false)
+
+  dstorage_unix_cpp_args = ['-O2', '-Wall', '-Wextra', '-Werror', '-fvisibility=hidden']
+  dstorage_unix_deps = [dstorage_threads_dep, dstorage_dl_dep, dstorage_deflate_dep]
+  if dstorage_uring_dep.found()
+    dstorage_unix_deps += [dstorage_uring_dep]
+  else
+    dstorage_unix_cpp_args += ['-DSCARLETT_NO_LIBURING=1']
+  endif
+  if dstorage_zng_dep.found()
+    dstorage_unix_deps += [dstorage_zng_dep]
+  else
+    dstorage_unix_deps += [dependency('zlib')]
+    dstorage_unix_cpp_args += ['-DSCARLETT_USE_SYSTEM_ZLIB=1']
+  endif
 
   dstorage_xs_unix_so = shared_library('dstorage_xs_unix',
     dstorage_xs_unix_sources,
     name_prefix: '',
     include_directories: [scarlett_inc, include_directories('.')],
-    cpp_args: ['-O2', '-Wall', '-Wextra', '-Werror', '-fvisibility=hidden'],
+    cpp_args: dstorage_unix_cpp_args,
     link_with: [xmem_unix_so],
-    dependencies: [dstorage_threads_dep, dstorage_dl_dep, dstorage_uring_dep, dstorage_deflate_dep, dstorage_zng_dep],
+    dependencies: dstorage_unix_deps,
     install: true,
     install_dir: scarlett_install_dir,
   )
@@ -45,9 +59,9 @@ else
   dstorage_xs_unix_core_lib = static_library('scarlett_dstorage_xs_unix_core',
     dstorage_xs_unix_sources,
     include_directories: [scarlett_inc, include_directories('.')],
-    cpp_args: ['-O2', '-Wall', '-Wextra', '-Werror', '-DSCARLETT_DSTORAGEXS_STATIC_HOST_LINK=1'],
+    cpp_args: dstorage_unix_cpp_args + ['-DSCARLETT_DSTORAGEXS_STATIC_HOST_LINK=1'],
     link_with: [xmem_unix_so],
-    dependencies: [dstorage_threads_dep, dstorage_dl_dep, dstorage_uring_dep, dstorage_deflate_dep, dstorage_zng_dep],
+    dependencies: dstorage_unix_deps,
     install: false,
   )
 

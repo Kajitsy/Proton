@@ -7,7 +7,7 @@ scarlett_xgameruntime_lib = static_library('scarlett_xgameruntime_scaffold',
 
 if is_windows_pe
   xgameruntime_dll = shared_module('xgameruntime',
-    'xgameruntime_pe.c',
+    ['xgameruntime_pe.c', scarlett_pe_unixlib_src],
     vs_module_defs: 'xgameruntime.def',
     name_prefix: '',
     name_suffix: 'dll',
@@ -18,7 +18,7 @@ if is_windows_pe
   )
 
   libhttpclient_dll = shared_module('libHttpClient',
-    'libHttpClient_pe.c',
+    ['libHttpClient_pe.c', scarlett_pe_unixlib_src],
     vs_module_defs: 'libHttpClient.def',
     name_prefix: '',
     name_suffix: 'dll',
@@ -29,7 +29,7 @@ if is_windows_pe
   )
 
   xcurl_dll = shared_module('XCurl',
-    'XCurl_pe.c',
+    ['XCurl_pe.c', scarlett_pe_unixlib_src],
     vs_module_defs: 'XCurl.def',
     name_prefix: '',
     name_suffix: 'dll',

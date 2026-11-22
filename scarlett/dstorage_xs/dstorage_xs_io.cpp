@@ -59,6 +59,7 @@ scarlett_hresult_t IoUringEngine::initialize() {
         return SCARLETT_OK;
     }
 
+#if !defined(SCARLETT_NO_LIBURING)
     struct io_uring_params params{};
     params.flags = IORING_SETUP_SQPOLL;
     params.sq_thread_idle = 2000u;
@@ -93,6 +94,11 @@ scarlett_hresult_t IoUringEngine::initialize() {
             fixed_buffers_active_ = false;
         }
     }
+#else
+    io_uring_active_ = false;
+    sqpoll_active_ = false;
+    fixed_buffers_active_ = false;
+#endif
 
     initialized_ = true;
     return SCARLETT_OK;
@@ -103,6 +109,7 @@ void IoUringEngine::shutdown() {
     if (!initialized_) {
         return;
     }
+#if !defined(SCARLETT_NO_LIBURING)
     if (io_uring_active_) {
         if (fixed_buffers_active_) {
             ::io_uring_unregister_buffers(&ring_);
@@ -112,6 +119,11 @@ void IoUringEngine::shutdown() {
         io_uring_active_ = false;
         sqpoll_active_ = false;
     }
+#else
+    io_uring_active_ = false;
+    sqpoll_active_ = false;
+    fixed_buffers_active_ = false;
+#endif
     fixed_pool_.clear();
     fixed_iovecs_.clear();
     initialized_ = false;
@@ -144,6 +156,9 @@ scarlett_hresult_t IoUringEngine::read_chunk_uring_locked(
     if (size == 0u) {
         return SCARLETT_OK;
     }
+#if defined(SCARLETT_NO_LIBURING)
+    return read_pread_fallback(fd, offset, size, dst);
+#else
     if (!io_uring_active_) {
         return read_pread_fallback(fd, offset, size, dst);
     }
@@ -212,6 +227,7 @@ scarlett_hresult_t IoUringEngine::read_chunk_uring_locked(
 
     total_bytes_read_.fetch_add(size, std::memory_order_relaxed);
     return SCARLETT_OK;
+#endif
 }
 
 scarlett_hresult_t IoUringEngine::readv_uring_locked(
@@ -219,6 +235,19 @@ scarlett_hresult_t IoUringEngine::readv_uring_locked(
     if (total_bytes == 0u || iov_cnt == 0u) {
         return SCARLETT_OK;
     }
+#if defined(SCARLETT_NO_LIBURING)
+    uint64_t cur_off = offset;
+    for (unsigned i = 0; i < iov_cnt; ++i) {
+        scarlett_hresult_t hr = read_pread_fallback(
+            fd, cur_off, static_cast<uint32_t>(iov[i].iov_len),
+            static_cast<uint8_t *>(iov[i].iov_base));
+        if (scarlett_failed(hr)) {
+            return hr;
+        }
+        cur_off += iov[i].iov_len;
+    }
+    return SCARLETT_OK;
+#else
     if (!io_uring_active_) {
         uint64_t cur_off = offset;
         for (unsigned i = 0; i < iov_cnt; ++i) {
@@ -262,6 +291,7 @@ scarlett_hresult_t IoUringEngine::readv_uring_locked(
         cur_off += iov[i].iov_len;
     }
     return SCARLETT_OK;
+#endif
 }
 
 scarlett_hresult_t IoUringEngine::read_sync(int fd, uint64_t offset, uint32_t size, uint8_t *dst) {
@@ -305,6 +335,16 @@ scarlett_hresult_t IoUringEngine::read_batch_sync(const IoBatchItem *items, size
         return SCARLETT_OK;
     }
 
+#if defined(SCARLETT_NO_LIBURING)
+    for (size_t i = 0; i < count; ++i) {
+        scarlett_hresult_t hr = read_pread_fallback(
+            items[i].fd, items[i].offset, items[i].size, items[i].dst);
+        if (scarlett_failed(hr)) {
+            return hr;
+        }
+    }
+    return SCARLETT_OK;
+#else
     size_t idx = 0;
     while (idx < count) {
         const size_t batch_end = std::min(count, idx + static_cast<size_t>(kRingEntries / 2u));
@@ -396,6 +436,7 @@ scarlett_hresult_t IoUringEngine::read_batch_sync(const IoBatchItem *items, size
     }
 
     return SCARLETT_OK;
+#endif
 }
 
 scarlett_hresult_t IoUringEngine::scatter_to_xmem_physical_pages(

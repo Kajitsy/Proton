@@ -81,9 +81,15 @@ void append_avframe_to_f32(const AVFrame* frame,
     if (frame == nullptr || frame->nb_samples <= 0) {
         return;
     }
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 28, 100)
     const int nb_ch = frame->ch_layout.nb_channels > 0
                           ? frame->ch_layout.nb_channels
                           : static_cast<int>(expected_channels);
+#else
+    const int nb_ch = frame->channels > 0
+                          ? frame->channels
+                          : static_cast<int>(expected_channels);
+#endif
     const int nb_samples = frame->nb_samples;
     const size_t base = out_pcm_f32.size();
     out_pcm_f32.resize(base + static_cast<size_t>(nb_samples) * static_cast<size_t>(nb_ch));
@@ -372,7 +378,12 @@ bool Xma2StreamDecoder::init(uint32_t sample_rate_hz,
     const uint32_t sr = sample_rate_hz == 0u ? 48000u : sample_rate_hz;
     const uint32_t ch = std::clamp(channels == 0u ? 2u : channels, 1u, 8u);
     impl->ctx->sample_rate = static_cast<int>(sr);
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 28, 100)
     av_channel_layout_default(&impl->ctx->ch_layout, static_cast<int>(ch));
+#else
+    impl->ctx->channels = static_cast<int>(ch);
+    impl->ctx->channel_layout = static_cast<uint64_t>(av_get_default_channel_layout(static_cast<int>(ch)));
+#endif
 
     /* FFmpeg AV_CODEC_ID_XMA2 expects 34-byte XMA2 extradata.
      * If caller supplies full 52-byte XMA2WAVEFORMATEX (18B WAVEFORMATEX + 34B), strip 18B. */
@@ -616,7 +627,12 @@ bool decode_xwma_to_f32(const uint8_t* src,
     }
 
     ctx->sample_rate = static_cast<int>(sample_rate_hz == 0u ? 48000u : sample_rate_hz);
+#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 28, 100)
     av_channel_layout_default(&ctx->ch_layout, static_cast<int>(std::clamp(channels, 1u, 6u)));
+#else
+    ctx->channels = static_cast<int>(std::clamp(channels, 1u, 6u));
+    ctx->channel_layout = static_cast<uint64_t>(av_get_default_channel_layout(ctx->channels));
+#endif
     ctx->block_align = static_cast<int>(block_align == 0u ? src_bytes : block_align);
     ctx->bit_rate = 128000;
 

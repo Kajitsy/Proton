@@ -21,7 +21,7 @@ if is_windows_pe
   ]
   foreach shim : xg_pe_shims
     shared_library(shim[0],
-      shim[1],
+      [shim[1], scarlett_pe_unixlib_src],
       name_prefix: '',
       vs_module_defs: shim[2],
       include_directories: [scarlett_inc, include_directories('.')],

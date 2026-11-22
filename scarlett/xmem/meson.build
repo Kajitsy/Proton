@@ -7,7 +7,7 @@ scarlett_xmem_lib = static_library('scarlett_xmem_scaffold',
 
 if is_windows_pe
   xmem_dll = shared_module('xmem',
-    'xmem_pe.c',
+    ['xmem_pe.c', scarlett_pe_unixlib_src],
     vs_module_defs: 'xmem.def',
     name_prefix: '',
     name_suffix: 'dll',
@@ -18,7 +18,7 @@ if is_windows_pe
   )
 
   kernelx_dll = shared_module('kernelx',
-    'kernelx_pe.c',
+    ['kernelx_pe.c', scarlett_pe_unixlib_src],
     vs_module_defs: 'kernelx.def',
     name_prefix: '',
     name_suffix: 'dll',

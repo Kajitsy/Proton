@@ -864,6 +864,7 @@ scarlett-vkd3d-overlay-check:
 ##
 
 SCARLETT_VERSION := 11.0-100
+SCARLETT_DEPENDS := ffmpeg
 SCARLETT_x86_64_SOURCE_DATE_EPOCH := $(shell expr $(x86_64_SOURCE_DATE_EPOCH) - 3)
 
 SCARLETT_MESON_ARGS = \
@@ -882,6 +883,7 @@ SCARLETT_x86_64_UNIX_ENV = \
 	CXX="$(x86_64-unix_TARGET)-g++" \
 	LD="$(x86_64-unix_TARGET)-ld" \
 	PKG_CONFIG="$($(HOST_ARCH)-unix_TARGET)-pkg-config" \
+	PKG_CONFIG_PATH="$(OBJ)/dst-ffmpeg-x86_64/lib/$(x86_64-unix_LIBDIR)/pkgconfig" \
 	PKG_CONFIG_LIBDIR="/usr/lib/$(x86_64-unix_LIBDIR)/pkgconfig:/usr/share/pkgconfig" \
 	CFLAGS="$(SCARLETT_CFLAGS) $(x86_64_CFLAGS) $(CFLAGS)" \
 	CPPFLAGS="$(SCARLETT_CFLAGS) $(x86_64_CFLAGS) $(CFLAGS)" \

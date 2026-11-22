@@ -2,7 +2,24 @@
 
 #include <algorithm>
 #include <cstring>
+#if defined(SCARLETT_USE_SYSTEM_ZLIB)
+#include <zlib.h>
+using zng_stream = z_stream;
+static inline int zng_uncompress2(Bytef *dest, uLongf *destLen, const Bytef *source, uLong *sourceLen) {
+    return uncompress2(dest, destLen, source, sourceLen);
+}
+static inline int zng_inflateInit2(z_stream *strm, int windowBits) {
+    return inflateInit2(strm, windowBits);
+}
+static inline int zng_inflate(z_stream *strm, int flush) {
+    return inflate(strm, flush);
+}
+static inline int zng_inflateEnd(z_stream *strm) {
+    return inflateEnd(strm);
+}
+#else
 #include <zlib-ng.h>
+#endif
 
 namespace scarlett::dstorage_xs::unixlib {
 

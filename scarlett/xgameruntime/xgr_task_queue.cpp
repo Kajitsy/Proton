@@ -27,6 +27,9 @@
 #include <fcntl.h>
 #include <linux/futex.h>
 #include <linux/ntsync.h>
+#ifndef NTSYNC_IOC_SEM_RELEASE
+#define NTSYNC_IOC_SEM_RELEASE _IOWR('N', 0x81, __u32)
+#endif
 #include <memory>
 #include <mutex>
 #include <queue>
