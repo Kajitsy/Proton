@@ -10,7 +10,7 @@ uwphost_sources = files(
   'uwphost_main.c',
 )
 
-uwphost_def = files('UWPHOST.def')
+uwphost_def = files('UWPHOST.def')[0]
 
 uwphost_pe_libs = [
   'kernel32',

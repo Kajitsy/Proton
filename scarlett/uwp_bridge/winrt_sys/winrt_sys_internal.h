@@ -421,6 +421,7 @@ HRESULT winrt_sys_create_completed_async_op_ptr(
     void **out_op);
 
 HRESULT winrt_sys_create_storage_folder(const wchar_t *path, void **out_folder);
+HRESULT winrt_sys_create_storage_file(const wchar_t *path, void **out_file);
 HRESULT winrt_sys_create_property_value_string(const wchar_t *str, void **out_pv);
 HRESULT winrt_sys_create_property_value_int32(int32_t val, void **out_pv);
 HRESULT winrt_sys_create_property_value_uint32(uint32_t val, void **out_pv);
@@ -438,6 +439,12 @@ HRESULT winrt_sys_get_gamepad_factory(REFIID iid, void **out_factory);
 HRESULT winrt_sys_get_analytics_info_factory(REFIID iid, void **out_factory);
 HRESULT winrt_sys_get_game_bar_factory(REFIID iid, void **out_factory);
 HRESULT winrt_sys_get_property_value_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_folder_picker_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_storage_app_perms_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_cryptographic_buffer_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_popup_menu_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_uicommand_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_thread_pool_factory(REFIID iid, void **out_factory);
 
 #ifdef __cplusplus
 }

@@ -901,12 +901,22 @@ $(OBJ)/.scarlett-post-source:
 	echo "proton-scarlett-$(SCARLETT_VERSION) $(shell git -C $(SRCDIR) rev-parse --short=12 HEAD 2>/dev/null || echo no-git-repo-info)" > $(DST_LIBDIR)/wine/scarlett/version
 	touch $@
 
-$(OBJ)/.scarlett-x86_64-post-build:
+$(OBJ)/.scarlett-x86_64-post-build: $(OBJ)/.wine-$(HOST_ARCH)-tools
 	mkdir -p $(SCARLETT_x86_64_DST)/lib/wine/scarlett/x86_64-windows
 	mkdir -p $(SCARLETT_x86_64_DST)/lib/wine/scarlett/x86_64-unix
 	mkdir -p $(DST_LIBDIR)/wine/scarlett/x86_64-windows
 	mkdir -p $(DST_LIBDIR)/wine/scarlett/x86_64-unix
 	chmod -R u+w $(DST_LIBDIR)/wine/scarlett 2>/dev/null || true
+	chmod -R u+w $(SCARLETT_x86_64_DST)/lib/wine/scarlett 2>/dev/null || true
+	for dll in $(SCARLETT_x86_64_DST)/lib/wine/scarlett/x86_64-windows/*.dll; do \
+	    [ -f "$$dll" ] && [ ! -L "$$dll" ] || continue; \
+	    $(call make-builtin,"$$dll"); \
+	    base=$$(basename "$$dll"); \
+	    lower=$$(printf '%s' "$$base" | tr 'A-Z' 'a-z'); \
+	    if [ "$$base" != "$$lower" ]; then \
+	        ln -sf "$$base" "$(SCARLETT_x86_64_DST)/lib/wine/scarlett/x86_64-windows/$$lower"; \
+	    fi; \
+	done
 	rm -rf "$(OBJ)/obj-scarlett-x86_64-unix/meson-private/coredata.dat"
 	mkdir -p "$(OBJ)/obj-scarlett-x86_64-unix"
 	env $(SCARLETT_x86_64_UNIX_ENV) \

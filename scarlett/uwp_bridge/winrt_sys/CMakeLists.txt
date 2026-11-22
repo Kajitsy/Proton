@@ -4,6 +4,7 @@ set(WINRT_SYS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/winrt_sys_package.c
     ${CMAKE_CURRENT_SOURCE_DIR}/winrt_sys_gamepad.c
     ${CMAKE_CURRENT_SOURCE_DIR}/winrt_sys_system_ui.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/winrt_sys_uwp_extras.c
 )
 
 add_library(scarlett_uwp_winrt_sys OBJECT ${WINRT_SYS_SOURCES})

@@ -765,9 +765,9 @@ struct UwpICoreCursorFactory {
  * 5. Windows.Devices.Input.MouseDevice
  * ============================================================================ */
 
-/* IMouseDeviceStatics: {484A9045-6D70-49DB-8E68-46FF8DD317BD} */
+/* IMouseDeviceStatics: {484A9045-6D70-49DB-8E68-46FFBD17D38D} */
 static const GUID SCARLETT_IID_IMouseDeviceStatics =
-    { 0x484A9045u, 0x6D70u, 0x49DBu, { 0x8Eu, 0x68u, 0x46u, 0xFFu, 0x8Du, 0xD3u, 0x17u, 0xBDu } };
+    { 0x484A9045u, 0x6D70u, 0x49DBu, { 0x8Eu, 0x68u, 0x46u, 0xFFu, 0xBDu, 0x17u, 0xD3u, 0x8Du } };
 
 /* IMouseDevice: {88EDF458-F2C8-49F4-BE1F-C256B388BC11} */
 static const GUID SCARLETT_IID_IMouseDevice =

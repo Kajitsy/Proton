@@ -423,7 +423,7 @@ static HRESULT create_storage_ptr_list(
  * Windows.Storage.StorageFile & StorageFolder
  * ============================================================================ */
 
-static HRESULT winrt_sys_create_storage_file(const wchar_t *path, void **out_file);
+HRESULT winrt_sys_create_storage_file(const wchar_t *path, void **out_file);
 
 typedef struct WinrtStorageFileObj {
     const WinrtStorageFileVtbl *lpVtbl;
@@ -641,7 +641,7 @@ static const WinrtStorageItemVtbl g_storage_file_item_vtbl = {
     sf_file_item_date, sf_file_item_isoftype
 };
 
-static HRESULT winrt_sys_create_storage_file(const wchar_t *path, void **out_file) {
+HRESULT winrt_sys_create_storage_file(const wchar_t *path, void **out_file) {
     if (!out_file) return E_POINTER;
     *out_file = NULL;
     WinrtStorageFileObj *obj = (WinrtStorageFileObj *)winrt_sys_alloc(sizeof(*obj));

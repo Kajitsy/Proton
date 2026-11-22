@@ -1909,6 +1909,20 @@ def is_uwp_import_dll(dll_name):
         return False
     return low == "uwphost.dll" or low == "xinputuap.dll" or low.endswith("_app.dll")
 
+def pe64_imports_uwphost_execute_assembly(exe_path):
+    norm_path = normalize_candidate_exe_path(exe_path)
+    if not norm_path or not is_pe64_binary(norm_path):
+        return False
+    imported = [d.lower() for d in get_pe64_imported_dlls(norm_path)]
+    if "uwphost.dll" not in imported:
+        return False
+    try:
+        with open(norm_path, "rb") as f:
+            data = f.read(1024 * 1024)
+        return b"ExecuteAssembly\x00" in data
+    except OSError:
+        return False
+
 def detect_uwp_from_executable(exe_path):
     norm_path = normalize_candidate_exe_path(exe_path)
     if not norm_path or not is_pe64_binary(norm_path):
@@ -2685,6 +2699,33 @@ class Session:
             prefix_dir,
             argv=argv,
         )
+        if self.uwp_enabled and compatdata_inst is not None:
+            sys32_dir = os.path.join(prefix_dir.rstrip("/"), "drive_c/windows/system32")
+            scarlett_pe_dir = os.path.join(lib_dir.rstrip("/"), "wine/scarlett/x86_64-windows")
+            if os.path.isdir(sys32_dir) and os.path.isdir(scarlett_pe_dir):
+                for dll in UWP_BRIDGE_DLLS:
+                    src = os.path.join(scarlett_pe_dir, f"{dll}.dll")
+                    if not os.path.exists(src):
+                        continue
+                    for name in (f"{dll}.dll", f"{dll.lower()}.dll"):
+                        dst = os.path.join(sys32_dir, name)
+                        if os.path.lexists(dst):
+                            if os.path.islink(dst) and os.readlink(dst) == src:
+                                continue
+                            os.unlink(dst)
+                        os.symlink(src, dst)
+        if self.uwp_enabled:
+            effective_argv = list(argv) if argv is not None else (sys.argv[2:] + self.cmdlineappend)
+            has_server_name = any(a.lower().startswith("-servername:") for a in effective_argv)
+            if not has_server_name:
+                for arg in effective_argv:
+                    if pe64_imports_uwphost_execute_assembly(arg):
+                        aumid = self.env.get("PROTON_UWP_AUMID", "")
+                        app_id = aumid.split("!", 1)[1].strip() if "!" in aumid else "App"
+                        if not app_id:
+                            app_id = "App"
+                        self.cmdlineappend.append(f"-ServerName:{app_id}.AppX")
+                        break
         return self.uwp_enabled
 
     def run_proc(self, args, local_env=None):

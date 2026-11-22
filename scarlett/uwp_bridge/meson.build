@@ -163,7 +163,7 @@ if is_windows_pe
   endif
 
   # Build all 14 System *_APP.dll / XINPUTUAP.dll forwarders
-  if not is_variable('uwp_sys_forwarders_built') and fs.is_dir('forwarders/sys')
+  if not is_variable('uwp_sys_forwarders_built') and not is_variable('sys_forwarder_dlls') and fs.is_dir('forwarders/sys')
     _uwp_sys_dlls = [
       'KERNEL32_APP',
       'USER32_APP',
@@ -223,7 +223,7 @@ if is_windows_pe
   endif
 
   # Build all 7 MSVC CRT *_APP.dll forwarders
-  if not is_variable('uwp_crt_forwarders_built') and fs.is_dir('forwarders/crt')
+  if not is_variable('uwp_crt_forwarders_built') and not is_variable('crt_app_targets') and fs.is_dir('forwarders/crt')
     _uwp_crt_dlls = [
       'VCRUNTIME140_APP',
       'VCRUNTIME140_1_APP',

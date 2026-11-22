@@ -41,6 +41,15 @@ void crt_app_zero(void *dst, size_t len) {
     }
 }
 
+static void crt_app_copy_bytes(void *dst, const void *src, size_t len) {
+    volatile uint8_t *d = (volatile uint8_t *)dst;
+    const uint8_t *s = (const uint8_t *)src;
+    if (!d || !s) return;
+    for (size_t i = 0; i < len; ++i) {
+        d[i] = s[i];
+    }
+}
+
 void crt_app_copy_cstr(char *dst, size_t cap, const char *src) {
     if (!dst || cap == 0u) return;
     if (!src) {
@@ -367,7 +376,7 @@ void crt_app_stub_get_last_context(scarlett_stub_context_t *out_ctx) {
 #else
     pthread_mutex_lock(&g_stub_mutex);
 #endif
-    *out_ctx = g_last_stub_ctx;
+    crt_app_copy_bytes(out_ctx, &g_last_stub_ctx, sizeof(*out_ctx));
 #ifdef _WIN32
     crt_spin_unlock(&g_stub_lock);
 #else
@@ -432,7 +441,7 @@ scarlett_hresult_t crt_app_stub_dispatch(
 #else
     pthread_mutex_lock(&g_stub_mutex);
 #endif
-    g_last_stub_ctx = ctx;
+    crt_app_copy_bytes(&g_last_stub_ctx, &ctx, sizeof(g_last_stub_ctx));
     sink_fn = g_stub_sink;
     sink_ud = g_stub_sink_ud;
 #ifdef _WIN32

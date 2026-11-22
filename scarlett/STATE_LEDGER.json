@@ -25,8 +25,9 @@
     "silent_stubs_allowed": false,
     "strict_mode_env": "PROTON_XBOX_STRICT"
   },
-  "phase": "Phase_7_SIGNED_OFF",
-  "current_phase": 7,
+  "phase": "Phase_8_UWP_BRIDGE_VERIFIED",
+  "current_phase": 8,
+  "uwp_bridge_abi_path": "scarlett/docs/UWP_BRIDGE_ABI.md",
   "worktrees": {
     "phase0-contracts": { "status": "merged", "commit": "212f47cda28c061e18e64cad695882c80218a66a" },
     "phase0-infra": { "status": "merged", "commit": "b6b4038d88333532c0f65b13785aae1d18babc96" },
@@ -40,7 +41,15 @@
     "wt-rdna2-lifter": { "status": "merged", "commit": "e828df074b11f28c30ea2959f919aa7cbced1ae2" },
     "wt-dstorage-io": { "status": "merged", "commit": "e804143ce18d061e8eb8b42f125da5589fc67dff" },
     "wt-qa-arena": { "status": "merged", "commit": "21d4ef3821cea5899bc2fcc122c3791f52d0a76b" },
-    "wt-qa-hardening": { "status": "merged", "commit": "03a167ba8f954fd935de636f1cbbeee65409a9bc" }
+    "wt-qa-hardening": { "status": "merged", "commit": "03a167ba8f954fd935de636f1cbbeee65409a9bc" },
+    "wt-uwp-forwarders-sys": { "status": "merged", "commit": "e619595" },
+    "wt-uwp-forwarders-crt": { "status": "merged", "commit": "0793ad283379c2b6183109f71a313ce88a9813d8" },
+    "wt-uwphost-core": { "status": "merged", "commit": "3a7a38340fb4593ebbb0f5f8026473ad0122ed47" },
+    "wt-uwphost-winrt-ui": { "status": "merged", "commit": "aa09b9e" },
+    "wt-uwphost-winrt-sys": { "status": "merged", "commit": "24a0ca5f82854e14bca4a6dce9375ac4ca58da9b" },
+    "wt-uwp-integrator": { "status": "merged", "commit": "0c4f590" },
+    "wt-dxvk-corewindow": { "status": "submodule_branch", "repo": "dxvk", "commit": "bc02bc78" },
+    "wt-uwp-wine": { "status": "submodule_branch", "repo": "wine" }
   },
   "verified_exports_count": {
     "xgameruntime": 182,
@@ -52,11 +61,15 @@
     "dstorage_xs": 11,
     "xg_xs": 32,
     "audio_input_media": 42,
-    "pe64_isolated_objects": 19
+    "pe64_isolated_objects": 19,
+    "uwp_bridge_dlls": 22,
+    "uwp_crt_forwarder_exports": 2163,
+    "uwphost_exports": 15
   },
   "open_blockers": [
-    "steamrt4 container image & pressure-vessel full container make redist not cached locally ([NOT_EXECUTED_LOCALLY]); host GCC 16.2 / Clang 23.1 PE64 freestanding + CMake/Ninja + RelWithDebInfo -Werror + ASAN/LSAN/UBSAN + Vulkan 1.4 + spirv-val + io_uring + libopus + FFmpeg 100% verified",
-    "VK_LAYER_KHRONOS_validation not installed on host ([NOT_EXECUTED_LOCALLY])"
+    "VK_LAYER_KHRONOS_validation not installed on host ([NOT_EXECUTED_LOCALLY])",
+    "HedgePhysics.exe requires external Microsoft.NET.CoreRuntime.1.1 (coreclr.dll / PROTON_UWP_CORECLR_PATH) to execute managed C# IL (HedgePhysics.App + WinRTBridge.WinRTBridge); native UWPHOST.dll!ExecuteAssembly + UnityPlayer.AppCallbacks activation verified",
+    "gzdoom.exe exits 0 cleanly after CoreWindow/LocalState/FolderPicker initialization when no Doom IWAD (.wad) file is provided in LocalState or package directory"
   ],
   "perf_baselines": {
     "cold_pso_p99_ms": 0.181,
@@ -108,6 +121,11 @@
       "status": "completed",
       "merged_commit": "06cb11aa5fe23f5492c586792e8574ee9f290d5f",
       "exit_gate": "49/49 default + 49/49 RelWithDebInfo GCC16 -Werror PASS, 9/9 ASAN+LSAN+UBSAN + 3/3 LSAN+UBSAN PASS, 19/19 PE64 COFF llvm-nm clean, proton-scarlett-inspect + run_ci_matrix.sh + ci_report.json PASS, 0 PC Proton regressions, steamrt4/pressure-vessel honestly tagged [NOT_EXECUTED_LOCALLY], Neon Sign-off APPROVED"
+    },
+    "phase_8": {
+      "name": "UWP Bridge (21 *_APP.dll/XINPUTUAP forwarders, UWPHOST.dll, WinRT CoreApplication/CoreWindow/Dispatcher, DXVK CreateSwapChainForCoreWindow & CreateDirect3D11DeviceFromDXGIDevice, steamrt4 build/dist, gzdoom.exe & HedgePhysics.exe verification)",
+      "status": "completed",
+      "exit_gate": "54/54 CTest + winrt_ui/winrt_sys + 6/6 proton_uwp_env + 7/7 proton_scarlett_env PASS; steamrt4 make scarlett/dxvk/wine-incremental/dist exit 0; uwp_corewindow_dx11_test.exe 13/13 PASS on NVIDIA GeForce GTX 1050 Ti (exit 0); gzdoom.exe zero 0xC0000139, HWND 1280x720 + WinRT CoreApplication/FolderPicker/StorageApplicationPermissions/ApplicationData PASS (exit 0 without IWAD); HedgePhysics.exe zero 0xC0000139, auto -ServerName:App.AppX, UWPHOST!ExecuteAssembly -> UnityPlayer.AppCallbacks activated hr=0x00000000 + ThreadPool/Package/ApplicationData PASS (honestly bounded by external coreclr.dll)"
     }
   }
 }

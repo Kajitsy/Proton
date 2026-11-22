@@ -52,6 +52,24 @@ HRESULT uwp_winrt_sys_get_activation_factory(
     if (wcscmp(class_name, L"Windows.Foundation.PropertyValue") == 0) {
         return winrt_sys_get_property_value_factory(iid, out_factory);
     }
+    if (wcscmp(class_name, L"Windows.Storage.Pickers.FolderPicker") == 0) {
+        return winrt_sys_get_folder_picker_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Storage.AccessCache.StorageApplicationPermissions") == 0) {
+        return winrt_sys_get_storage_app_perms_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Security.Cryptography.CryptographicBuffer") == 0) {
+        return winrt_sys_get_cryptographic_buffer_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.UI.Popups.PopupMenu") == 0) {
+        return winrt_sys_get_popup_menu_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.UI.Popups.UICommand") == 0) {
+        return winrt_sys_get_uicommand_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.System.Threading.ThreadPool") == 0) {
+        return winrt_sys_get_thread_pool_factory(iid, out_factory);
+    }
 
     return CLASS_E_CLASSNOTAVAILABLE;
 }
@@ -116,7 +134,12 @@ HRESULT winrt_sys_dup_hstring(HSTRING src, HSTRING *out_hstr) {
     if (src == NULL) {
         return S_OK;
     }
-    return WindowsDuplicateString(src, out_hstr);
+    UINT32 len = 0u;
+    const wchar_t *raw = WindowsGetStringRawBuffer(src, &len);
+    if (len == 0u) {
+        return S_OK;
+    }
+    return WindowsCreateString(raw ? raw : L"", len, out_hstr);
 }
 
 const wchar_t *winrt_sys_hstring_buf(HSTRING hstr, uint32_t *out_len) {
