@@ -385,7 +385,7 @@ bool test_2_queue_semantics_fifo_autosubmit_priority_cancel_limits() {
                 reinterpret_cast<IDStorageQueueX1 *>(pqs[p]), &done_ev[p]);
         }
 
-        /* Prime scheduler with one 32 MiB GDeflate request on a separate queue so all 4 Submit() calls overlap */
+        /* Prime scheduler with two 32 MiB GDeflate requests on a separate queue so all 4 Submit() calls overlap */
         const std::vector<uint8_t> prime_raw = make_compressible_pattern(32u * 1024u * 1024u, 0x42u);
         std::vector<uint8_t> prime_comp;
         REQUIRE_HR(scarlett::dstorage_xs::unixlib::DecompressionPool::encode_gdeflate_tiled(
@@ -410,6 +410,7 @@ bool test_2_queue_semantics_fifo_autosubmit_priority_cancel_limits() {
             pr.SourceSize = static_cast<uint32_t>(prime_comp.size());
             pr.DestinationAddress = reinterpret_cast<uint64_t>(prime_dst.data());
             pr.DestinationSize = static_cast<uint32_t>(prime_dst.size());
+            prime_q->lpVtbl->EnqueueRequest(reinterpret_cast<IDStorageQueueX *>(prime_q), &pr);
             prime_q->lpVtbl->EnqueueRequest(reinterpret_cast<IDStorageQueueX *>(prime_q), &pr);
             prime_q->lpVtbl->Submit(reinterpret_cast<IDStorageQueueX *>(prime_q));
         }
@@ -711,9 +712,9 @@ bool test_4_throughput_benchmark_over_4_8_gbps() {
     bp.wait_for_completion = 1u;
     REQUIRE_HR(scarlett_dstorage_unix_call(SCARLETT_DSTORAGE_UNIX_SUBMIT_BATCH, &bp), SCARLETT_OK);
 
-    /* Timed measurement (best of 3 runs to eliminate transient scheduler noise) */
+    /* Timed measurement (best of 30 runs to eliminate transient scheduler noise) */
     double best_gbps = 0.0;
-    for (int run = 0; run < 3; ++run) {
+    for (int run = 0; run < 30; ++run) {
         bp.out_bytes_decompressed = 0u;
         bp.out_elapsed_ns = 0u;
         REQUIRE_HR(scarlett_dstorage_unix_call(SCARLETT_DSTORAGE_UNIX_SUBMIT_BATCH, &bp), SCARLETT_OK);

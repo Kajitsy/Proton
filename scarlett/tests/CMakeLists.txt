@@ -125,6 +125,19 @@ if(SCARLETT_ARENA_CLANG AND SCARLETT_ARENA_LLD_LINK AND SCARLETT_ARENA_DLLTOOL)
     )
 endif()
 
+if(NOT DEFINED ARENA_PE_EXE)
+    set(ARENA_PE_EXE "")
+endif()
+
+add_test(
+    NAME test_proton_scarlett_inspect
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_proton_scarlett_inspect.py"
+        "${SCARLETT_REPO_ROOT}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/arena/package"
+        "${ARENA_PE_EXE}"
+)
+
 if(SCARLETT_BUILD_UNIXLIB)
     add_executable(scarlett_arena_linux
         arena/main.cpp

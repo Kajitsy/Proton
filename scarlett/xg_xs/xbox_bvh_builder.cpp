@@ -910,11 +910,20 @@ scarlett_hresult_t bvh_intersect_ray(
                 hits[hit_cnt++] = {box.child_ptrs[c], t_near};
             }
         }
-        // Sort descending by t_near so closest child is popped first from stack
-        std::sort(hits.begin(), hits.begin() + hit_cnt,
-                  [](const StackEntry& a, const StackEntry& b) {
-                      return a.t_near > b.t_near;
-                  });
+        // Sort descending by t_near using a 4-element sorting network (5 compare-swaps)
+        // so the closest child sits at hits[hit_cnt - 1] and is popped first from stack.
+        auto cmp_swap = [&](int i, int j) noexcept {
+            if (j < hit_cnt && hits[i].t_near < hits[j].t_near) {
+                std::swap(hits[i], hits[j]);
+            }
+        };
+        if (hit_cnt > 1) {
+            cmp_swap(0, 1);
+            cmp_swap(2, 3);
+            cmp_swap(0, 2);
+            cmp_swap(1, 3);
+            cmp_swap(1, 2);
+        }
         for (int i = 0; i < hit_cnt && sp < static_cast<int>(stack.size()); ++i) {
             stack[sp++] = hits[i];
         }

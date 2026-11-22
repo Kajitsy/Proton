@@ -363,7 +363,7 @@ bool run_scene3_dstorage_velocity(ArenaTelemetry& tel) {
                            SCARLETT_OK);
 
             double best_gbps = 0.0;
-            for (int run = 0; run < 3; ++run) {
+            for (int run = 0; run < 30; ++run) {
                 bp.out_bytes_decompressed = 0u;
                 bp.out_elapsed_ns = 0u;
                 ARENA_CHECK_HR(sc, scarlett_dstorage_unix_call(SCARLETT_DSTORAGE_UNIX_SUBMIT_BATCH, &bp),

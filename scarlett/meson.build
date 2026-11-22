@@ -39,6 +39,17 @@ if get_option('install_version')
   )
 endif
 
+if not is_windows_pe
+  install_data('tools/proton-scarlett-inspect',
+    install_mode: 'rwxr-xr-x',
+    install_dir: get_option('prefix') / 'bin',
+  )
+  install_data('profiles/scarlett_app_db.toml',
+    install_mode: 'rw-r--r--',
+    install_dir: get_option('prefix') / 'share/scarlett',
+  )
+endif
+
 subdir('xdl')
 subdir('loader')
 subdir('xmem')

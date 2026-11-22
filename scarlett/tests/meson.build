@@ -19,6 +19,16 @@ test_phase0_exe = executable('test_phase0_scaffold',
 
 test('phase0_cpp_scaffold_smoke', test_phase0_exe)
 
+meson_python3 = find_program('python3', required: true)
+test('test_proton_scarlett_inspect', meson_python3,
+  args: [
+    meson.current_source_dir() / 'test_proton_scarlett_inspect.py',
+    meson.project_source_root() / '..',
+    meson.current_source_dir() / 'arena/package',
+    '',
+  ],
+)
+
 arena_opus_dep = dependency('opus', required: true)
 arena_deflate_dep = dependency('libdeflate', required: true)
 arena_threads_dep = dependency('threads', required: true)

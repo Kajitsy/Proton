@@ -237,6 +237,18 @@ struct PortState {
             }
         }
         workers.clear();
+
+        /* Drain any remaining un-dispatched items (e.g., manual queues closed without Dispatch) */
+        std::deque<TaskItem> leftover;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            leftover.swap(items);
+        }
+        for (auto &it : leftover) {
+            if (it.callback != nullptr) {
+                it.callback(it.context, true);
+            }
+        }
     }
 
     void worker_loop() {
@@ -335,10 +347,10 @@ struct PortState {
 
         std::vector<MonitorEntry> mons;
         {
-            std::lock_guard<std::mutex> lock(mutex);
+            std::unique_lock<std::mutex> lock(mutex);
             if (terminating) {
                 /* Execute canceled immediately if queue is terminating */
-                lock.~lock_guard();
+                lock.unlock();
                 cb(ctx, true);
                 return;
             }

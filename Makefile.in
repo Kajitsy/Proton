@@ -39,6 +39,7 @@ ifeq ($(SRCDIR),)
 endif
 
 SOURCE_DATE_EPOCH ?= $(shell date +%s)
+BASE_SOURCE_DATE_EPOCH ?= $(SOURCE_DATE_EPOCH)
 MFLAGS += BASE_SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)
 unexport SOURCE_DATE_EPOCH
 
@@ -833,15 +834,29 @@ $(eval $(call rules-meson,vkd3d-proton,i386,windows))
 $(eval $(call rules-meson,vkd3d-proton,x86_64,windows))
 $(eval $(call rules-meson,vkd3d-proton,arm64ec,windows))
 
+SCARLETT_VKD3D_PROTON_OVERLAY ?= 0
+
 $(OBJ)/.vkd3d-proton-post-source:
 	sed -re 's#@VCS_TAG@#$(shell git -C $(SRCDIR)/vkd3d-proton describe --always --exclude=* --abbrev=15 --dirty=0 || echo deadbeef)#' \
 	    $(SRCDIR)/vkd3d-proton/vkd3d_build.h.in > $(VKD3D_PROTON_SRC)/vkd3d_build.h.in
 	sed -re 's#@VCS_TAG@#$(shell git -C $(SRCDIR)/vkd3d-proton describe --always --tags --dirty=+ || echo deadbeef)#' \
 	    $(SRCDIR)/vkd3d-proton/vkd3d_version.h.in > $(VKD3D_PROTON_SRC)/vkd3d_version.h.in
+	@if [ "$(SCARLETT_VKD3D_PROTON_OVERLAY)" = "1" ]; then \
+	    bash "$(SRCDIR)/scarlett/d3d12_xs/vkd3d_proton_dropin/apply_to_vkd3d_proton.sh" --vkd3d-dir "$(VKD3D_PROTON_SRC)"; \
+	    if [ -f "$(VKD3D_PROTON_SRC)/subprojects/dxil-spirv/meson.build" ]; then \
+	        bash "$(SRCDIR)/scarlett/rdna2_lifter/vkd3d_proton_dropin/apply_to_dxil_spirv.sh" --vkd3d-dir "$(VKD3D_PROTON_SRC)"; \
+	    fi; \
+	fi
 	mkdir -p $(DST_LIBDIR)/wine/vkd3d-proton
 	rm -rf $(DST_LIBDIR)/wine/vkd3d-proton/version
 	echo "$(shell git -C $(SRCDIR) submodule status -- vkd3d-proton || echo no-git-repo-info)" > $(DST_LIBDIR)/wine/vkd3d-proton/version
 	touch $@
+
+.PHONY: scarlett-vkd3d-overlay-check
+scarlett-vkd3d-overlay-check:
+	bash "$(SRCDIR)/scarlett/d3d12_xs/vkd3d_proton_dropin/apply_to_vkd3d_proton.sh" --check
+	bash "$(SRCDIR)/scarlett/rdna2_lifter/vkd3d_proton_dropin/apply_to_dxil_spirv.sh" --check
+	bash "$(SRCDIR)/scarlett/rdna2_lifter/vkd3d_proton_dropin/apply_to_dxil_spirv.sh" --dry-run
 
 
 ##
@@ -904,11 +919,28 @@ $(OBJ)/.scarlett-x86_64-post-build:
 	if [ -f "$(SCARLETT_x86_64_OBJ)/compile_commands.json" ]; then \
 	    mkdir -p "$(OBJ)/compile_commands"; \
 	    sed "s#$(SCARLETT_SRC)#$(SCARLETT_ORIGIN)#g" "$(SCARLETT_x86_64_OBJ)/compile_commands.json" > "$(OBJ)/compile_commands/scarlett.json"; \
+	elif [ -f "$(OBJ)/obj-scarlett-x86_64-unix/compile_commands.json" ]; then \
+	    mkdir -p "$(OBJ)/compile_commands"; \
+	    sed "s#$(SCARLETT_SRC)#$(SCARLETT_ORIGIN)#g" "$(OBJ)/obj-scarlett-x86_64-unix/compile_commands.json" > "$(OBJ)/compile_commands/scarlett.json"; \
 	fi
 	touch $@
 
+SCARLETT_INSPECT_DST := $(DST_DIR)/bin/proton-scarlett-inspect
+SCARLETT_APP_DB_DST := $(DST_DIR)/share/scarlett/scarlett_app_db.toml
+
+$(SCARLETT_INSPECT_DST): $(SCARLETT_SRC)/tools/proton-scarlett-inspect | scarlett-source $(DST_DIR)
+	mkdir -p $(dir $@)
+	install -m 0755 $< $@
+
+$(SCARLETT_APP_DB_DST): $(SCARLETT_SRC)/profiles/scarlett_app_db.toml | scarlett-source $(DST_DIR)
+	mkdir -p $(dir $@)
+	install -m 0644 $< $@
+
+scarlett: $(SCARLETT_INSPECT_DST) $(SCARLETT_APP_DB_DST)
+all-dist: $(SCARLETT_INSPECT_DST) $(SCARLETT_APP_DB_DST)
+
 .PHONY: scarlett-tests
-scarlett-tests: | scarlett-source
+scarlett-tests: | scarlett-source scarlett-vkd3d-overlay-check
 	cmake -S "$(SCARLETT_SRC)" -B "$(OBJ)/obj-scarlett-tests" -G Ninja \
 	    -DSCARLETT_BUILD_HOST_TESTS=ON \
 	    -DSCARLETT_BUILD_PE=OFF \
@@ -1620,7 +1652,9 @@ targets:
 	$(info make install           - install the proton build locally in $(STEAM_DIR))
 	$(info make deploy            - create a build ready to be uploaded to steamworks in deploy/)
 	$(info make redist            - create an easily sharable proton redistributable in redist/)
-	$(info make module=xyz module - build the selected wine dll)
+	$(info make scarlett          - build Proton-Scarlett runtime DLLs, unixlibs, and proton-scarlett-inspect)
+	$(info make scarlett-tests    - build and run Proton-Scarlett host CTest and env suites)
+	$(info make module=xyz module - build the selected wine dll (or module=scarlett))
 
 
 .PHONY: default

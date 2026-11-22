@@ -336,6 +336,9 @@ scarlett_hresult_t IoUringEngine::read_batch_sync(const IoBatchItem *items, size
                     static_cast<int>(b));
             } else {
                 ::io_uring_prep_read(sqe, it.fd, it.dst, it.size, it.offset);
+                if (batch_len >= 4u && it.size >= (1024u * 1024u)) {
+                    sqe->flags |= IOSQE_ASYNC;
+                }
             }
             ::io_uring_sqe_set_data64(sqe, static_cast<uint64_t>(b));
             ++submitted_here;

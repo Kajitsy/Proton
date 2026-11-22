@@ -1125,6 +1125,32 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
                              std::vector<uint32_t> &fallbacks) -> scarlett_hresult_t {
         jobs.clear();
         fallbacks.clear();
+        size_t total_tiles = 0u;
+        for (uint32_t i = begin_idx; i < end_idx; ++i) {
+            const DSTORAGE_REQUEST &req = reqs[i];
+            const uint8_t *src_ptr = (slices[i].fd >= 0)
+                                         ? (batch_read_buf_.data() + slices[i].staging_offset)
+                                         : slices[i].mem_ptr;
+            if (req.Options.ZlibDecompress != 0u &&
+                req.Options.BcpackMode == 0u &&
+                req.Options.DestinationIsPhysicalPages == 0u &&
+                req.Options.SwizzleMode == DSTORAGE_SWIZZLE_NONE &&
+                req.SourceSize >= sizeof(scarlett_gdeflate_header_t)) {
+                scarlett_gdeflate_header_t hdr{};
+                std::memcpy(&hdr, src_ptr, sizeof(hdr));
+                if (hdr.magic == SCARLETT_DSTORAGE_GDEFLATE_MAGIC) {
+                    if (hdr.tile_count == 0u ||
+                        hdr.total_uncompressed_bytes > req.DestinationSize ||
+                        req.SourceSize < sizeof(hdr) +
+                            static_cast<size_t>(hdr.tile_count) * sizeof(scarlett_gdeflate_tile_desc_t)) {
+                        return SCARLETT_E_DSTORAGE_DECOMPRESSION_ERROR;
+                    }
+                    total_tiles += hdr.tile_count;
+                }
+            }
+        }
+        jobs.resize(total_tiles);
+        size_t write_idx = 0u;
         for (uint32_t i = begin_idx; i < end_idx; ++i) {
             const DSTORAGE_REQUEST &req = reqs[i];
             const uint8_t *src_ptr = (slices[i].fd >= 0)
@@ -1141,12 +1167,6 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
                 scarlett_gdeflate_header_t hdr{};
                 std::memcpy(&hdr, src_ptr, sizeof(hdr));
                 if (hdr.magic == SCARLETT_DSTORAGE_GDEFLATE_MAGIC) {
-                    if (hdr.tile_count == 0u ||
-                        hdr.total_uncompressed_bytes > req.DestinationSize ||
-                        req.SourceSize < sizeof(hdr) +
-                            static_cast<size_t>(hdr.tile_count) * sizeof(scarlett_gdeflate_tile_desc_t)) {
-                        return SCARLETT_E_DSTORAGE_DECOMPRESSION_ERROR;
-                    }
                     const auto *descs = reinterpret_cast<const scarlett_gdeflate_tile_desc_t *>(
                         src_ptr + sizeof(hdr));
                     for (uint32_t t = 0; t < hdr.tile_count; ++t) {
@@ -1155,13 +1175,12 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
                             static_cast<uint64_t>(d.uncompressed_offset) + d.uncompressed_size > req.DestinationSize) {
                             return SCARLETT_E_DSTORAGE_DECOMPRESSION_ERROR;
                         }
-                        DecompTileJob job{};
+                        DecompTileJob &job = jobs[write_idx++];
                         job.src = src_ptr + d.compressed_offset;
                         job.src_size = d.compressed_size;
                         job.dst = dst_ptr + d.uncompressed_offset;
                         job.dst_size = d.uncompressed_size;
                         job.is_zlib_wrapper = false;
-                        jobs.push_back(job);
                     }
                     continue;
                 }
@@ -1182,9 +1201,11 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
         return SCARLETT_OK;
     };
 
-    /* Overlap io_uring read of second wave with parallel decompression of first wave */
+    /* Overlap io_uring read of second wave with parallel decompression only for huge multi-chunk
+     * batches (> 256 MiB read) where I/O exceeds thread-pool barrier + thread spawn overhead. */
     std::vector<uint32_t> fallback_indices;
-    if (io_items.size() >= 4u && io_items.size() == params.request_count) {
+    if (io_items.size() >= 4u && io_items.size() == params.request_count &&
+        total_file_read_bytes > (UINT64_C(256) * 1024u * 1024u)) {
         const uint32_t split = static_cast<uint32_t>(io_items.size() / 4u);
         scarlett_hresult_t io1_hr = io_engine_.read_batch_sync(io_items.data(), split);
         if (scarlett_failed(io1_hr)) {
