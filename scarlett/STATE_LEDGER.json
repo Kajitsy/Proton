@@ -25,8 +25,8 @@
     "silent_stubs_allowed": false,
     "strict_mode_env": "PROTON_XBOX_STRICT"
   },
-  "phase": "Phase_3",
-  "current_phase": 3,
+  "phase": "Phase_4",
+  "current_phase": 4,
   "worktrees": {
     "phase0-contracts": { "status": "merged", "commit": "212f47cda28c061e18e64cad695882c80218a66a" },
     "phase0-infra": { "status": "merged", "commit": "b6b4038d88333532c0f65b13785aae1d18babc96" },
@@ -34,26 +34,28 @@
     "wt-loader-vfs": { "status": "merged", "commit": "0462d760dcb74ce827329e572542634da515754f" },
     "wt-xmem-uma": { "status": "merged", "commit": "14f5e202f12438f76a482e0f7b80c7b8e84d1e3c" },
     "wt-gdk-runtime": { "status": "merged", "commit": "213a9f07cf9978c596269558cab469d72ce08774" },
-    "wt-audio-input-media": { "status": "merged", "commit": "aa334b7b02e4be8d99b654970f318bfc6203d58b" }
+    "wt-audio-input-media": { "status": "merged", "commit": "aa334b7b02e4be8d99b654970f318bfc6203d58b" },
+    "wt-xg-bvh-pix": { "status": "merged", "commit": "a8bb55a12186bc82bb279b1a597ab143f3acd95a" },
+    "wt-d3d12xs-core": { "status": "merged", "commit": "b97d54a314e706789ec209df780a19b174eddffd" }
   },
   "verified_exports_count": {
     "xgameruntime": 182,
-    "d3d12_xs": 0,
+    "d3d12_xs": 27,
     "xmem": 37,
     "loader": 14,
     "xdl_schemas": 6,
     "dstorage_xs": 0,
-    "xg_xs": 0,
+    "xg_xs": 32,
     "audio_input_media": 42
   },
   "open_blockers": [
-    "steamrt4 container image not cached locally ([NOT_EXECUTED_LOCALLY]); host GCC 16.2 / Clang 23.1 PE64 freestanding + CMake/Ninja verified"
+    "steamrt4 container image not cached locally ([NOT_EXECUTED_LOCALLY]); host GCC 16.2 / Clang 23.1 PE64 freestanding + CMake/Ninja + Vulkan 1.4 + spirv-val verified"
   ],
   "perf_baselines": {
     "cold_pso_p99_ms": null,
     "spirv_adaptive_reduction_pct": null,
     "dstorage_gbps": null,
-    "arena_frametime_p99_ms": null
+    "arena_frametime_p99_ms": 0.0011
   },
   "phases": {
     "phase_0": {
@@ -76,13 +78,13 @@
     },
     "phase_3": {
       "name": "Graphics Core (d3d12_xs.dll, xg_xs.dll, XboxBvhBuilder.dll, pixevt.dll, PresentX & Frame Pacing)",
-      "status": "in_progress",
-      "exit_gate": "DXIL fast-path, CreatePlacedResourceX + UMA pre-submit flush, deswizzle 8-128 bpp >4GiB, VK_EXT_descriptor_heap NVIDIA 610.xx/1M fallback, HDR PresentX + WaitFrameEventX p99 < 1.5ms + Alt+Enter"
+      "status": "completed",
+      "exit_gate": "DXIL fast-path, CreatePlacedResourceX + UMA pre-submit flush (0-frame lag), deswizzle 8-128 bpp >4GiB + spirv-val, VK_EXT_descriptor_heap NVIDIA 610.xx/1M fallback, HDR PresentX + WaitFrameEventX p99 < 1.5ms + Alt+Enter — 37/37 ctest PASS"
     },
     "phase_4": {
-      "name": "d3d12_xs.dll, xg_xs.dll, XboxBvhBuilder.dll & pixevt.dll",
-      "status": "pending",
-      "exit_gate": "CreatePlacedResourceX, queues 0x2/0x10, VK_EXT_descriptor_heap with NVIDIA 610.xx/1M fallback, PresentX HDR10/GameDVR, WaitFrameEventX, xg_xs >4GiB, SFS coalescing"
+      "name": "Adaptive RDNA2 (GFX10.3) -> SPIR-V 1.5/1.6 Lifter (Neon XHigh + >=2000 Shader Corpus)",
+      "status": "in_progress",
+      "exit_gate": ">=2000 RDNA2 micro-shaders pass spirv-val --target-env vulkan1.4, 0 adaptive vs exact buffer mismatches, cold PSO p99 < 200ms, >=25% NVIDIA / >=50% AMD code reduction"
     },
     "phase_5": {
       "name": "dstorage_xs.dll & dstorage_xs_unix.so",

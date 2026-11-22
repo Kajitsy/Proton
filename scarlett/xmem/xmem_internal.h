@@ -212,6 +212,7 @@ public:
 
     scarlett_uma_tier_t active_tier() const noexcept;
     void get_flush_stats(uint64_t &out_flushes, uint64_t &out_pages) const noexcept;
+    static bool is_alive() noexcept;
 
 private:
     UmaBridge();

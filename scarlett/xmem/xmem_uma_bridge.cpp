@@ -275,6 +275,12 @@ bool ranges_overlap_u64(uint64_t a_start, uint64_t a_len,
 
 } // namespace
 
+static std::atomic<bool> g_uma_bridge_alive{false};
+
+bool UmaBridge::is_alive() noexcept {
+    return g_uma_bridge_alive.load(std::memory_order_acquire);
+}
+
 UmaBridge &UmaBridge::instance() {
     static UmaBridge bridge;
     return bridge;
@@ -285,9 +291,11 @@ UmaBridge::UmaBridge() {
     os_page_size_ = (psz > 0) ? static_cast<uint64_t>(psz) : UINT64_C(4096);
     forced_tier_ = parse_env_uma_tier();
     initialize_from_host();
+    g_uma_bridge_alive.store(true, std::memory_order_release);
 }
 
 UmaBridge::~UmaBridge() {
+    g_uma_bridge_alive.store(false, std::memory_order_release);
     reset_all();
     stop_uffd_thread();
     if (uffd_fd_ >= 0) {

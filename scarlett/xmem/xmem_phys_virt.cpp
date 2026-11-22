@@ -183,7 +183,10 @@ MemoryManager &MemoryManager::instance() {
 
 MemoryManager::MemoryManager()
     : strict_mode_(parse_env_strict_mode()),
-      console_model_(parse_env_console_model()) {}
+      console_model_(parse_env_console_model()) {
+    /* Ensure UmaBridge is constructed before MemoryManager so it outlives ~MemoryManager(). */
+    (void)UmaBridge::instance();
+}
 
 MemoryManager::~MemoryManager() {
     reset_all();
@@ -271,7 +274,9 @@ scarlett_hresult_t MemoryManager::set_model(scarlett_console_model_t model,
 }
 
 void MemoryManager::release_reservation_locked(VirtualReservation &res) {
-    UmaBridge::instance().unregister_range(res.base_va, res.size_bytes);
+    if (UmaBridge::is_alive()) {
+        UmaBridge::instance().unregister_range(res.base_va, res.size_bytes);
+    }
 
     for (const auto &span : res.mapped_spans) {
         if (span.is_external_pfn) {
@@ -318,7 +323,9 @@ void MemoryManager::release_reservation_locked(VirtualReservation &res) {
 void MemoryManager::reset_all() {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    UmaBridge::instance().reset_all();
+    if (UmaBridge::is_alive()) {
+        UmaBridge::instance().reset_all();
+    }
 
     for (auto &kv : reservations_) {
         release_reservation_locked(kv.second);

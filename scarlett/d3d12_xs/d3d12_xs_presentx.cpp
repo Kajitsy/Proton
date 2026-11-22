@@ -29,7 +29,8 @@ namespace {
 constexpr uint64_t kNsPerUs = UINT64_C(1000);
 constexpr uint64_t kNsPerMs = UINT64_C(1000000);
 constexpr uint64_t kNsPerSec = UINT64_C(1000000000);
-/* Wake 400us early via TIMER_ABSTIME, then precision-spin to absorb Linux hrtimer slack */
+/* Wake 400us early via TIMER_ABSTIME, then precision-spin to absorb Linux hrtimer slack
+ * while keeping the thread interactive under Linux EEVDF scheduler. */
 constexpr uint64_t kPrecisionSpinMarginNs = UINT64_C(400000);
 
 void cpu_relax() noexcept {
