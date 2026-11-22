@@ -1,0 +1,5 @@
+LIBRARY dstorage_xs.dll
+EXPORTS
+    DStorageGetFactory @1
+    DStorageSetConfiguration
+    DStorageCreateCompressionCodec
