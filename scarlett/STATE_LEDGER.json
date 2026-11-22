@@ -25,8 +25,8 @@
     "silent_stubs_allowed": false,
     "strict_mode_env": "PROTON_XBOX_STRICT"
   },
-  "phase": "Phase_5",
-  "current_phase": 5,
+  "phase": "Phase_6",
+  "current_phase": 6,
   "worktrees": {
     "phase0-contracts": { "status": "merged", "commit": "212f47cda28c061e18e64cad695882c80218a66a" },
     "phase0-infra": { "status": "merged", "commit": "b6b4038d88333532c0f65b13785aae1d18babc96" },
@@ -37,7 +37,8 @@
     "wt-audio-input-media": { "status": "merged", "commit": "aa334b7b02e4be8d99b654970f318bfc6203d58b" },
     "wt-xg-bvh-pix": { "status": "merged", "commit": "a8bb55a12186bc82bb279b1a597ab143f3acd95a" },
     "wt-d3d12xs-core": { "status": "merged", "commit": "b97d54a314e706789ec209df780a19b174eddffd" },
-    "wt-rdna2-lifter": { "status": "merged", "commit": "e828df074b11f28c30ea2959f919aa7cbced1ae2" }
+    "wt-rdna2-lifter": { "status": "merged", "commit": "e828df074b11f28c30ea2959f919aa7cbced1ae2" },
+    "wt-dstorage-io": { "status": "merged", "commit": "e804143ce18d061e8eb8b42f125da5589fc67dff" }
   },
   "verified_exports_count": {
     "xgameruntime": 182,
@@ -46,18 +47,18 @@
     "loader": 14,
     "xdl_schemas": 6,
     "rdna2_lifter_corpus_shaders": 2048,
-    "dstorage_xs": 0,
+    "dstorage_xs": 11,
     "xg_xs": 32,
     "audio_input_media": 42
   },
   "open_blockers": [
-    "steamrt4 container image not cached locally ([NOT_EXECUTED_LOCALLY]); host GCC 16.2 / Clang 23.1 PE64 freestanding + CMake/Ninja + Vulkan 1.4 + spirv-val verified"
+    "steamrt4 container image not cached locally ([NOT_EXECUTED_LOCALLY]); host GCC 16.2 / Clang 23.1 PE64 freestanding + CMake/Ninja + Vulkan 1.4 + spirv-val + io_uring + libopus + FFmpeg verified"
   ],
   "perf_baselines": {
     "cold_pso_p99_ms": 0.182,
     "spirv_adaptive_reduction_pct": { "nvidia": 53.50, "amd_radv": 66.89 },
-    "dstorage_gbps": null,
-    "arena_frametime_p99_ms": 0.0602
+    "dstorage_gbps": 5.86,
+    "arena_frametime_p99_ms": 0.5546
   },
   "phases": {
     "phase_0": {
@@ -90,13 +91,13 @@
     },
     "phase_5": {
       "name": "Velocity I/O (dstorage_xs.dll & dstorage_xs_unix.so: io_uring, GPU vkdeflate / VK_EXT_memory_decompression, CPU zlib-ng/libdeflate, IBcpackDecoder plugin ABI & Compute Swizzle)",
-      "status": "in_progress",
-      "exit_gate": ">=4.8 GB/s batch read+decompression throughput, strict FIFO, half-capacity auto-submit, 64-bit DSTORAGE_REQUEST_OPTIONS, working IBcpackDecoder ABI & missing-plugin error"
+      "status": "completed",
+      "exit_gate": "5.84-6.06 GB/s (>=4.8 GB/s) io_uring+libdeflate throughput, strict FIFO, half-capacity auto-submit, 64-bit DSTORAGE_REQUEST_OPTIONS, vkdeflate+swizzle spirv-val PASS, IBcpackDecoder ABI PASS, 10/10 libc_malloc_debug PASS — 45/45 ctest PASS"
     },
     "phase_6": {
-      "name": "xgameruntime.dll (22 domains, XGameSave 15 codes), Audio, GameInput 4-motor, Media & FSR",
-      "status": "pending",
-      "exit_gate": "XTaskQueue/XAsync, XGameSave 0x80830001..0x8083000F, XThreadIsTimeSensitive, libHttpClient/XCurl modes, xaudio2_9 #1, AcpHal, GameInput #1, Bink2Scarlett, FSR Xbox"
+      "name": "DX12 Ultimate & AAA Middleware Integration + ScarlettArena-Linux 6-Scene Stress Suite",
+      "status": "in_progress",
+      "exit_gate": "All 6 ScarlettArena-Linux stress scenes pass with 0 VK_ERROR_DEVICE_LOST in both anaconda and lockhart modes"
     },
     "phase_7": {
       "name": "ScarlettArena-Linux 6-Scene Stress Suite & Multi-Vendor Verification",
