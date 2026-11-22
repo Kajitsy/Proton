@@ -1,0 +1,17 @@
+LIBRARY UWPHOST.dll
+EXPORTS
+    DllMain
+    DllGetActivationFactory
+    ExecuteAssembly
+    UwpHostInitialize
+    UwpHostRun
+    UwpHostTryGetActivationFactory
+    UwpHostLogUnknownClass
+    RoInitialize
+    RoUninitialize
+    RoGetActivationFactory
+    RoActivateInstance
+    WindowsCreateString
+    WindowsCreateStringReference
+    WindowsGetStringRawBuffer
+    WindowsDeleteString
