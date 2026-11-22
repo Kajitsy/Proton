@@ -1,0 +1,11 @@
+# Source files for scarlett/uwp_bridge/winrt_ui (UWPHOST.dll WinRT UI subsystem)
+# Include directory: scarlett/uwp_bridge/winrt_ui and scarlett/uwp_bridge/include
+# Required PE64 Win32 libraries: kernel32, user32, gdi32, ole32
+
+winrt_ui_common.c
+winrt_display_info.c
+winrt_app_view.c
+winrt_sys_nav.c
+winrt_core_cursor_mouse.c
+winrt_display_request_hdmi.c
+winrt_api_info.c
