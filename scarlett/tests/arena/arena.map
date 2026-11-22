@@ -1,0 +1,6 @@
+{
+    global:
+        *;
+    local:
+        __wine_unix_call_funcs;
+};
