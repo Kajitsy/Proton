@@ -1,0 +1,7 @@
+LIBRARY XboxBvhBuilder.dll
+EXPORTS
+    XboxBvhGetPrebuildInfo
+    XboxBvhBuildAccelerationStructure
+    XboxBvhIntersectRay
+    XboxBvhMapToVulkanBuildInfo
+    XboxBvhBuildProceduralGeometry

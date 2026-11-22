@@ -1,0 +1,14 @@
+LIBRARY xg_xs.dll
+EXPORTS
+    XGCreateTexture2DComputer
+    XGCreateTexture1DComputer
+    XGCreateTexture3DComputer
+    XGComputeOptimalSwizzleMode
+    XGComputeOptimalTileMode
+    XGTextureAddressComputer_GetResourceLayout
+    XGTextureAddressComputer_GetSubresourceLayout
+    XGTextureAddressComputer_GetTexelElementOffsetBytes
+    XGTextureAddressComputer_CopyIntoSubresource
+    XGTextureAddressComputer_CopyFromSubresource
+    XGSelectTransferPath
+    XGSparseCoalesceBinds

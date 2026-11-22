@@ -1,0 +1,11 @@
+LIBRARY pixevt.dll
+EXPORTS
+    PIXBeginEvent
+    PIXEndEvent
+    PIXSetMarker
+    PIXBeginEventOnCommandList
+    PIXEndEventOnCommandList
+    PIXSetMarkerOnCommandList
+    PIXGetEventStackDepth
+    PIXSetEventsEnabled
+    PIXGpuCaptureNextFrames
