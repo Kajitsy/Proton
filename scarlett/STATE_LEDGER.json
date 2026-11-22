@@ -25,7 +25,7 @@
     "silent_stubs_allowed": false,
     "strict_mode_env": "PROTON_XBOX_STRICT"
   },
-  "phase": "Phase_7",
+  "phase": "Phase_7_SIGNED_OFF",
   "current_phase": 7,
   "worktrees": {
     "phase0-contracts": { "status": "merged", "commit": "212f47cda28c061e18e64cad695882c80218a66a" },
@@ -39,7 +39,8 @@
     "wt-d3d12xs-core": { "status": "merged", "commit": "b97d54a314e706789ec209df780a19b174eddffd" },
     "wt-rdna2-lifter": { "status": "merged", "commit": "e828df074b11f28c30ea2959f919aa7cbced1ae2" },
     "wt-dstorage-io": { "status": "merged", "commit": "e804143ce18d061e8eb8b42f125da5589fc67dff" },
-    "wt-qa-arena": { "status": "merged", "commit": "21d4ef3821cea5899bc2fcc122c3791f52d0a76b" }
+    "wt-qa-arena": { "status": "merged", "commit": "21d4ef3821cea5899bc2fcc122c3791f52d0a76b" },
+    "wt-qa-hardening": { "status": "merged", "commit": "03a167ba8f954fd935de636f1cbbeee65409a9bc" }
   },
   "verified_exports_count": {
     "xgameruntime": 182,
@@ -50,16 +51,18 @@
     "rdna2_lifter_corpus_shaders": 2048,
     "dstorage_xs": 11,
     "xg_xs": 32,
-    "audio_input_media": 42
+    "audio_input_media": 42,
+    "pe64_isolated_objects": 19
   },
   "open_blockers": [
-    "steamrt4 container image not cached locally ([NOT_EXECUTED_LOCALLY]); host GCC 16.2 / Clang 23.1 PE64 freestanding + CMake/Ninja + Vulkan 1.4 + spirv-val + io_uring + libopus + FFmpeg verified"
+    "steamrt4 container image & pressure-vessel full container make redist not cached locally ([NOT_EXECUTED_LOCALLY]); host GCC 16.2 / Clang 23.1 PE64 freestanding + CMake/Ninja + RelWithDebInfo -Werror + ASAN/LSAN/UBSAN + Vulkan 1.4 + spirv-val + io_uring + libopus + FFmpeg 100% verified",
+    "VK_LAYER_KHRONOS_validation not installed on host ([NOT_EXECUTED_LOCALLY])"
   ],
   "perf_baselines": {
-    "cold_pso_p99_ms": 0.182,
+    "cold_pso_p99_ms": 0.181,
     "spirv_adaptive_reduction_pct": { "nvidia": 53.50, "amd_radv": 66.89 },
-    "dstorage_gbps": 6.07,
-    "arena_frametime_p99_ms": { "anaconda": 0.6467, "lockhart": 0.5034 }
+    "dstorage_gbps": { "unit": 5.885, "anaconda": 6.168, "lockhart": 5.977 },
+    "arena_frametime_p99_ms": { "anaconda": 0.2597, "lockhart": 0.0626 }
   },
   "phases": {
     "phase_0": {
@@ -102,8 +105,9 @@
     },
     "phase_7": {
       "name": "Packaging, Hardening, proton-scarlett-inspect, run_ci_matrix.sh, ASAN/LSAN & Final Neon Sign-off",
-      "status": "in_progress",
-      "exit_gate": "make redist & Makefile.in verified, proton-scarlett-inspect CLI + run_ci_matrix.sh + ci_report.json, ASAN/LSAN/RelWithDebInfo clean, zero PC Proton 11.0 regressions, Final Neon Sign-off"
+      "status": "completed",
+      "merged_commit": "06cb11aa5fe23f5492c586792e8574ee9f290d5f",
+      "exit_gate": "49/49 default + 49/49 RelWithDebInfo GCC16 -Werror PASS, 9/9 ASAN+LSAN+UBSAN + 3/3 LSAN+UBSAN PASS, 19/19 PE64 COFF llvm-nm clean, proton-scarlett-inspect + run_ci_matrix.sh + ci_report.json PASS, 0 PC Proton regressions, steamrt4/pressure-vessel honestly tagged [NOT_EXECUTED_LOCALLY], Neon Sign-off APPROVED"
     }
   }
 }
