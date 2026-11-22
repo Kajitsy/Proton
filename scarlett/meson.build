@@ -42,6 +42,7 @@ endif
 subdir('xdl')
 subdir('loader')
 subdir('xmem')
+subdir('rdna2_lifter')
 subdir('d3d12_xs')
 subdir('dstorage_xs')
 subdir('xg_xs')
