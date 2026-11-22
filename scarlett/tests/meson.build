@@ -28,6 +28,11 @@ test('test_proton_scarlett_inspect', meson_python3,
     '',
   ],
 )
+test('test_proton_uwp_env', meson_python3,
+  args: [
+    meson.current_source_dir() / 'test_proton_uwp_env.py',
+  ],
+)
 
 arena_opus_dep = dependency('opus', required: true)
 arena_deflate_dep = dependency('libdeflate', required: true)

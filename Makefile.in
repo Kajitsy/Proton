@@ -906,6 +906,7 @@ $(OBJ)/.scarlett-x86_64-post-build:
 	mkdir -p $(SCARLETT_x86_64_DST)/lib/wine/scarlett/x86_64-unix
 	mkdir -p $(DST_LIBDIR)/wine/scarlett/x86_64-windows
 	mkdir -p $(DST_LIBDIR)/wine/scarlett/x86_64-unix
+	chmod -R u+w $(DST_LIBDIR)/wine/scarlett 2>/dev/null || true
 	rm -rf "$(OBJ)/obj-scarlett-x86_64-unix/meson-private/coredata.dat"
 	mkdir -p "$(OBJ)/obj-scarlett-x86_64-unix"
 	env $(SCARLETT_x86_64_UNIX_ENV) \
@@ -954,6 +955,7 @@ scarlett-tests: | scarlett-source scarlett-vkd3d-overlay-check
 	fi
 	ctest --test-dir "$(OBJ)/obj-scarlett-tests" --output-on-failure
 	python3 "$(SCARLETT_SRC)/tests/test_proton_scarlett_env.py"
+	python3 "$(SCARLETT_SRC)/tests/test_proton_uwp_env.py"
 
 
 ##

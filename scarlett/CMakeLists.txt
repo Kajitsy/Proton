@@ -37,6 +37,7 @@ add_subdirectory(dstorage_xs)
 add_subdirectory(xg_xs)
 add_subdirectory(xgameruntime)
 add_subdirectory(audio_media)
+add_subdirectory(uwp_bridge)
 
 # Mirror compile_commands.json into compile_commands/scarlett.json for IDE and CI tooling
 add_custom_target(scarlett_compile_commands ALL

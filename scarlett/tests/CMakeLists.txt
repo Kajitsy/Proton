@@ -36,6 +36,11 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_proton_scarlett_env.py"
 )
 
+add_test(
+    NAME phase0_proton_uwp_env_py
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_proton_uwp_env.py"
+)
+
 # ============================================================================
 # Phase 6: ScarlettArena-Linux (PE64 Binary + 148B DDS+DX10 + 6 Stress Scenes)
 # ============================================================================

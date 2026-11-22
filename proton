@@ -9,9 +9,11 @@ import filecmp
 import os
 import shutil
 import errno
+import hashlib
 import platform
 import resource
 import stat
+import struct
 import subprocess
 import sys
 import shlex
@@ -1718,6 +1720,363 @@ def apply_scarlett_environment(env, dlloverrides, lib_dir, prefix_dir, argv=None
 
     return True
 
+UWP_BRIDGE_DLLS = (
+    "UWPHOST",
+    "VCRUNTIME140_APP",
+    "VCRUNTIME140_1_APP",
+    "MSVCP140_APP",
+    "MSVCP140_1_APP",
+    "MSVCP140_2_APP",
+    "CONCRT140_APP",
+    "vccorlib140_app",
+    "KERNEL32_APP",
+    "USER32_APP",
+    "GDI32_APP",
+    "ADVAPI32_APP",
+    "OLE32_APP",
+    "COMBASE_APP",
+    "RPCRT4_APP",
+    "WS2_32_APP",
+    "WINHTTP_APP",
+    "CRYPT32_APP",
+    "BCRYPT_APP",
+    "MMDEVAPI_APP",
+    "XINPUT1_4_APP",
+    "XINPUTUAP",
+)
+
+_UWP_CROCKFORD_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"
+
+def unix_path_to_wine_z(path):
+    if not path:
+        return ""
+    if len(path) >= 2 and path[1] == ":":
+        return path
+    abs_path = os.path.abspath(path)
+    return "Z:" + abs_path.replace("/", "\\")
+
+def compute_uwp_publisher_id(publisher):
+    if not publisher:
+        return "0000000000000"
+    digest = hashlib.sha256(publisher.encode("utf-16-le")).digest()[:8]
+    val = int.from_bytes(digest, "big") << 1
+    return "".join(_UWP_CROCKFORD_ALPHABET[(val >> (60 - 5 * i)) & 0x1F] for i in range(13))
+
+def find_appx_manifest(exe_path):
+    if not exe_path:
+        return None
+    start_dir = exe_path if os.path.isdir(exe_path) else os.path.dirname(exe_path)
+    if not start_dir or not os.path.isdir(start_dir):
+        return None
+    parent_dir = os.path.dirname(start_dir)
+    search_dirs = [start_dir]
+    if parent_dir and parent_dir != start_dir:
+        search_dirs.append(parent_dir)
+    for directory in search_dirs:
+        direct_path = os.path.join(directory, "AppxManifest.xml")
+        if os.path.isfile(direct_path):
+            return os.path.abspath(direct_path)
+        try:
+            for entry in os.listdir(directory):
+                if entry.lower() == "appxmanifest.xml":
+                    candidate = os.path.join(directory, entry)
+                    if os.path.isfile(candidate):
+                        return os.path.abspath(candidate)
+        except OSError:
+            pass
+    return None
+
+def get_pe64_imported_dlls(path):
+    if not path or not os.path.isfile(path):
+        return []
+    try:
+        file_size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            if f.read(2) != b"MZ":
+                return []
+            f.seek(0x3C)
+            raw_ofs = f.read(4)
+            if len(raw_ofs) != 4:
+                return []
+            pe_offset = int.from_bytes(raw_ofs, "little")
+            if pe_offset <= 0 or pe_offset > 0x100000 or pe_offset + 24 > file_size:
+                return []
+            f.seek(pe_offset)
+            if f.read(4) != b"PE\x00\x00":
+                return []
+            coff = f.read(20)
+            if len(coff) != 20:
+                return []
+            machine, num_sections, _, _, _, opt_size, _ = struct.unpack("<HHIIIHH", coff)
+            opt_off = pe_offset + 24
+            if machine != 0x8664 or opt_size < 112 or opt_off + opt_size > file_size:
+                return []
+            f.seek(opt_off)
+            opt_hdr = f.read(opt_size)
+            opt_magic = struct.unpack_from("<H", opt_hdr, 0)[0]
+            if opt_magic != 0x020B:
+                return []
+            num_rva = min(struct.unpack_from("<I", opt_hdr, 108)[0], 16)
+            if num_rva < 2 or 112 + num_rva * 8 > len(opt_hdr):
+                return []
+            import_rva, _ = struct.unpack_from("<II", opt_hdr, 112 + 1 * 8)
+            delay_rva = 0
+            if num_rva > 13:
+                delay_rva, _ = struct.unpack_from("<II", opt_hdr, 112 + 13 * 8)
+            if import_rva == 0 and delay_rva == 0:
+                return []
+
+            sec_off = opt_off + opt_size
+            if sec_off + num_sections * 40 > file_size:
+                return []
+            f.seek(sec_off)
+            sections = []
+            for _ in range(num_sections):
+                sec = f.read(40)
+                if len(sec) != 40:
+                    break
+                vsize, va, raw_size, raw_ptr = struct.unpack_from("<IIII", sec, 8)
+                sections.append((va, vsize, raw_ptr, raw_size))
+
+            def rva_to_offset(rva):
+                for va, vsize, raw_ptr, raw_size in sections:
+                    if raw_ptr > 0 and raw_size > 0 and va <= rva < va + raw_size:
+                        return raw_ptr + (rva - va)
+                for va, vsize, raw_ptr, raw_size in sections:
+                    span = max(vsize, raw_size)
+                    if raw_ptr > 0 and va <= rva < va + span and (rva - va) < raw_size:
+                        return raw_ptr + (rva - va)
+                nonzero_vas = [va for va, _, _, _ in sections if va > 0]
+                if nonzero_vas and rva < min(nonzero_vas):
+                    return rva
+                return None
+
+            def read_cstr_rva(rva):
+                off = rva_to_offset(rva)
+                if off is None or off >= file_size:
+                    return ""
+                f.seek(off)
+                raw = f.read(260)
+                return raw.split(b"\x00", 1)[0].decode("ascii", errors="ignore")
+
+            dlls = []
+            if import_rva != 0:
+                imp_off = rva_to_offset(import_rva)
+                if imp_off is not None:
+                    for idx in range(4096):
+                        pos = imp_off + idx * 20
+                        if pos + 20 > file_size:
+                            break
+                        f.seek(pos)
+                        desc = f.read(20)
+                        if len(desc) != 20:
+                            break
+                        oft, ts, fwd, name_rva, ft = struct.unpack("<IIIII", desc)
+                        if (oft | ts | fwd | name_rva | ft) == 0:
+                            break
+                        if name_rva != 0:
+                            name = read_cstr_rva(name_rva)
+                            if name:
+                                dlls.append(name)
+
+            if delay_rva != 0:
+                dly_off = rva_to_offset(delay_rva)
+                if dly_off is not None:
+                    for idx in range(4096):
+                        pos = dly_off + idx * 32
+                        if pos + 32 > file_size:
+                            break
+                        f.seek(pos)
+                        desc = f.read(32)
+                        if len(desc) != 32:
+                            break
+                        fields = struct.unpack("<IIIIIIII", desc)
+                        if all(v == 0 for v in fields):
+                            break
+                        gr_attrs, dll_name_rva = fields[0], fields[1]
+                        if (gr_attrs & 1) != 0 and dll_name_rva != 0:
+                            name = read_cstr_rva(dll_name_rva)
+                            if name:
+                                dlls.append(name)
+
+            return dlls
+    except OSError:
+        return []
+
+def is_uwp_import_dll(dll_name):
+    low = (dll_name or "").strip().lower()
+    if not low:
+        return False
+    return low == "uwphost.dll" or low == "xinputuap.dll" or low.endswith("_app.dll")
+
+def detect_uwp_from_executable(exe_path):
+    norm_path = normalize_candidate_exe_path(exe_path)
+    if not norm_path or not is_pe64_binary(norm_path):
+        return False
+    if detect_scarlett_from_executable(norm_path):
+        return False
+    if find_appx_manifest(norm_path) is not None:
+        return True
+    for dll_name in get_pe64_imported_dlls(norm_path):
+        if is_uwp_import_dll(dll_name):
+            return True
+    return False
+
+def parse_appx_manifest(manifest_path):
+    info = {
+        "name": "ProtonUWPApp",
+        "publisher": "",
+        "version": "1.0.0.0",
+        "architecture": "x64",
+        "publisher_id": "0000000000000",
+        "family_name": "ProtonUWPApp_0000000000000",
+        "full_name": "ProtonUWPApp_1.0.0.0_x64__0000000000000",
+        "app_id": "App",
+        "aumid": "ProtonUWPApp_0000000000000!App",
+    }
+    if not manifest_path or not os.path.isfile(manifest_path):
+        return info
+    try:
+        tree = ET.parse(manifest_path)
+        root = tree.getroot()
+    except (ET.ParseError, OSError):
+        return info
+
+    name = ""
+    publisher = ""
+    version = ""
+    arch = ""
+    app_id = ""
+
+    for elem in root.iter():
+        tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+        if tag == "Identity":
+            if not name:
+                name = (elem.attrib.get("Name") or "").strip()
+            if not publisher:
+                publisher = (elem.attrib.get("Publisher") or "").strip()
+            if not version:
+                version = (elem.attrib.get("Version") or "").strip()
+            if not arch:
+                arch = (elem.attrib.get("ProcessorArchitecture") or "").strip()
+        elif tag == "Application" and not app_id:
+            app_id = (elem.attrib.get("Id") or "").strip()
+
+    if not name:
+        name = "ProtonUWPApp"
+    if not version:
+        version = "1.0.0.0"
+    if not arch:
+        arch = "x64"
+    if not app_id:
+        app_id = "App"
+
+    publisher_id = compute_uwp_publisher_id(publisher)
+    family_name = f"{name}_{publisher_id}"
+    full_name = f"{name}_{version}_{arch}__{publisher_id}"
+    aumid = f"{family_name}!{app_id}"
+
+    info.update({
+        "name": name,
+        "publisher": publisher,
+        "version": version,
+        "architecture": arch,
+        "publisher_id": publisher_id,
+        "family_name": family_name,
+        "full_name": full_name,
+        "app_id": app_id,
+        "aumid": aumid,
+    })
+    return info
+
+def resolve_uwp_mode(env, argv=None):
+    raw_mode = env.get("PROTON_UWP_BRIDGE", "auto").strip().lower()
+    if raw_mode in ("0", "false", "no", "off"):
+        return False
+    if raw_mode in ("1", "true", "yes", "on"):
+        return True
+    if argv is None:
+        argv = sys.argv[2:] if len(sys.argv) > 2 else []
+    for arg in argv:
+        if detect_uwp_from_executable(arg):
+            return True
+    return False
+
+def apply_uwp_environment(env, dlloverrides, lib_dir, prefix_dir, argv=None):
+    if not resolve_uwp_mode(env, argv):
+        return False
+
+    if argv is None:
+        argv = sys.argv[2:] if len(sys.argv) > 2 else []
+
+    candidate_exe = None
+    for arg in argv:
+        if detect_uwp_from_executable(arg):
+            candidate_exe = normalize_candidate_exe_path(arg)
+            break
+    if candidate_exe is None:
+        for arg in argv:
+            norm = normalize_candidate_exe_path(arg)
+            if norm and is_pe64_binary(norm):
+                candidate_exe = norm
+                break
+
+    manifest_path = find_appx_manifest(candidate_exe) if candidate_exe else None
+    if not manifest_path and env.get("PROTON_UWP_MANIFEST"):
+        manifest_path = normalize_candidate_exe_path(env["PROTON_UWP_MANIFEST"])
+
+    pkg_dir_unix = ""
+    if manifest_path:
+        pkg_dir_unix = os.path.dirname(manifest_path)
+    elif candidate_exe:
+        pkg_dir_unix = os.path.dirname(candidate_exe)
+
+    info = parse_appx_manifest(manifest_path)
+
+    env["PROTON_UWP_BRIDGE"] = "1"
+    if manifest_path:
+        env.setdefault("PROTON_UWP_MANIFEST", unix_path_to_wine_z(manifest_path))
+    if pkg_dir_unix:
+        env.setdefault("PROTON_UWP_PACKAGE_DIR", unix_path_to_wine_z(pkg_dir_unix))
+
+    env.setdefault("PROTON_UWP_PACKAGE_NAME", info["name"])
+    env.setdefault("PROTON_UWP_PACKAGE_PUBLISHER", info["publisher"])
+    env.setdefault("PROTON_UWP_PACKAGE_VERSION", info["version"])
+    env.setdefault("PROTON_UWP_PACKAGE_FULL_NAME", info["full_name"])
+    env.setdefault("PROTON_UWP_PACKAGE_FAMILY_NAME", info["family_name"])
+    env.setdefault("PROTON_UWP_AUMID", info["aumid"])
+
+    family_name = env["PROTON_UWP_PACKAGE_FAMILY_NAME"]
+    clean_prefix = (prefix_dir or "").rstrip("/")
+    if clean_prefix:
+        pkg_appdata_unix = os.path.join(
+            clean_prefix, "drive_c", "users", "steamuser", "AppData", "Local", "Packages", family_name
+        )
+        for state_sub in ("LocalState", "RoamingState", "TempState"):
+            makedirs(os.path.join(pkg_appdata_unix, state_sub))
+
+    win_state_base = f"C:\\users\\steamuser\\AppData\\Local\\Packages\\{family_name}"
+    env.setdefault("PROTON_UWP_LOCAL_STATE", f"{win_state_base}\\LocalState")
+    env.setdefault("PROTON_UWP_ROAMING_STATE", f"{win_state_base}\\RoamingState")
+    env.setdefault("PROTON_UWP_TEMP_STATE", f"{win_state_base}\\TempState")
+
+    clean_lib_dir = lib_dir.rstrip("/")
+    scarlett_pe_dir = os.path.join(clean_lib_dir, "wine/scarlett/x86_64-windows")
+    scarlett_unix_dir = os.path.join(clean_lib_dir, "wine/scarlett/x86_64-unix")
+
+    existing_winedll = [p for p in env.get("WINEDLLPATH", "").split(":") if p]
+    if scarlett_pe_dir not in existing_winedll or scarlett_unix_dir not in existing_winedll:
+        prepend_to_env_str(env, "WINEDLLPATH", scarlett_pe_dir + ":" + scarlett_unix_dir, ":")
+
+    existing_ld = [p for p in env.get(ld_path_var, "").split(":") if p]
+    if scarlett_unix_dir not in existing_ld:
+        prepend_to_env_str(env, ld_path_var, scarlett_unix_dir, ":")
+
+    for dll in UWP_BRIDGE_DLLS:
+        dlloverrides[dll] = "b"
+
+    return True
+
 class Session:
     def __init__(self):
         self.log_file = None
@@ -1741,6 +2100,7 @@ class Session:
         self.compat_config = default_compat_config()
         self.cmdlineappend = []
         self.scarlett_enabled = False
+        self.uwp_enabled = False
 
         if "STEAM_COMPAT_CONFIG" in os.environ:
             config = os.environ["STEAM_COMPAT_CONFIG"]
@@ -2276,6 +2636,7 @@ class Session:
                 self.env["PROTON_LIMIT_ADDRESS_SPACE"] = "1"
 
         self.configure_scarlett(g_proton, g_compatdata, sys.argv[2:] + self.cmdlineappend)
+        self.configure_uwp(g_proton, g_compatdata, sys.argv[2:] + self.cmdlineappend)
 
         s = ""
         for dll in self.dlloverrides:
@@ -2313,6 +2674,18 @@ class Session:
         if self.scarlett_enabled and compatdata_inst is not None:
             makedirs(self.env["PROTON_XBOX_OVERLAY_DIR"])
         return self.scarlett_enabled
+
+    def configure_uwp(self, proton_inst=None, compatdata_inst=None, argv=None):
+        lib_dir = proton_inst.lib_dir if proton_inst is not None else "files/lib/"
+        prefix_dir = compatdata_inst.prefix_dir if compatdata_inst is not None else "pfx/"
+        self.uwp_enabled = apply_uwp_environment(
+            self.env,
+            self.dlloverrides,
+            lib_dir,
+            prefix_dir,
+            argv=argv,
+        )
+        return self.uwp_enabled
 
     def run_proc(self, args, local_env=None):
         if local_env is None:

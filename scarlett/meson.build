@@ -60,6 +60,7 @@ subdir('dstorage_xs')
 subdir('xg_xs')
 subdir('xgameruntime')
 subdir('audio_media')
+subdir('uwp_bridge')
 
 if get_option('build_tests') and not is_windows_pe
   subdir('tests')
