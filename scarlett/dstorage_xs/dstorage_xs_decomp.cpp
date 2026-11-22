@@ -196,6 +196,7 @@ scarlett_hresult_t DecompressionPool::decompress_tiles_parallel(
     if (jobs == nullptr) {
         return SCARLETT_E_POINTER;
     }
+    std::lock_guard<std::mutex> call_lock(call_mutex_);
     if (!initialized_) {
         initialize();
     }
@@ -314,8 +315,15 @@ scarlett_hresult_t DecompressionPool::decompress(
     /* Single-stream zlib / raw deflate (< 64 KiB or >= 64 KiB single stream) */
     const bool looks_zlib = (src_size >= 2u && (src[0] & 0x0Fu) == 0x08u);
     uint64_t written = 0;
-    scarlett_hresult_t hr = decompress_single_with_libdeflate(
-        decompressors_[0], src, src_size, dst, dst_size, looks_zlib, &written);
+    scarlett_hresult_t hr = SCARLETT_OK;
+    {
+        std::lock_guard<std::mutex> call_lock(call_mutex_);
+        if (!initialized_) {
+            initialize();
+        }
+        hr = decompress_single_with_libdeflate(
+            decompressors_[0], src, src_size, dst, dst_size, looks_zlib, &written);
+    }
     if (scarlett_succeeded(hr)) {
         total_bytes_decompressed_.fetch_add(written, std::memory_order_relaxed);
         if (out_written != nullptr) {

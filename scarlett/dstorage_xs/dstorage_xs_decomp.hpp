@@ -72,6 +72,7 @@ private:
     void worker_loop(uint32_t worker_idx);
     void run_batch_slice(uint32_t worker_idx, ActiveBatch &batch);
 
+    std::mutex call_mutex_;
     std::mutex dispatch_mutex_;
     std::condition_variable cv_start_;
     std::condition_variable cv_done_;

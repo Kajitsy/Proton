@@ -1081,7 +1081,8 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
                     params.out_status = SCARLETT_E_DSTORAGE_INVALID_FILE_HANDLE;
                     return params.out_status;
                 }
-                if (reqs[i].FileOffset + reqs[i].SourceSize > fit->second.size_bytes) {
+                if (reqs[i].FileOffset > fit->second.size_bytes ||
+                    reqs[i].SourceSize > fit->second.size_bytes - reqs[i].FileOffset) {
                     params.out_status = SCARLETT_E_DSTORAGE_END_OF_FILE;
                     return params.out_status;
                 }
@@ -1121,7 +1122,7 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
 
     auto collect_tiles = [&](uint32_t begin_idx, uint32_t end_idx,
                              std::vector<DecompTileJob> &jobs,
-                             std::vector<uint32_t> &fallbacks) {
+                             std::vector<uint32_t> &fallbacks) -> scarlett_hresult_t {
         jobs.clear();
         fallbacks.clear();
         for (uint32_t i = begin_idx; i < end_idx; ++i) {
@@ -1139,19 +1140,26 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
                 req.SourceSize >= sizeof(scarlett_gdeflate_header_t)) {
                 scarlett_gdeflate_header_t hdr{};
                 std::memcpy(&hdr, src_ptr, sizeof(hdr));
-                if (hdr.magic == SCARLETT_DSTORAGE_GDEFLATE_MAGIC &&
-                    hdr.tile_count > 0u &&
-                    hdr.total_uncompressed_bytes <= req.DestinationSize &&
-                    req.SourceSize >= sizeof(hdr) +
-                        static_cast<size_t>(hdr.tile_count) * sizeof(scarlett_gdeflate_tile_desc_t)) {
+                if (hdr.magic == SCARLETT_DSTORAGE_GDEFLATE_MAGIC) {
+                    if (hdr.tile_count == 0u ||
+                        hdr.total_uncompressed_bytes > req.DestinationSize ||
+                        req.SourceSize < sizeof(hdr) +
+                            static_cast<size_t>(hdr.tile_count) * sizeof(scarlett_gdeflate_tile_desc_t)) {
+                        return SCARLETT_E_DSTORAGE_DECOMPRESSION_ERROR;
+                    }
                     const auto *descs = reinterpret_cast<const scarlett_gdeflate_tile_desc_t *>(
                         src_ptr + sizeof(hdr));
                     for (uint32_t t = 0; t < hdr.tile_count; ++t) {
+                        const scarlett_gdeflate_tile_desc_t &d = descs[t];
+                        if (static_cast<uint64_t>(d.compressed_offset) + d.compressed_size > req.SourceSize ||
+                            static_cast<uint64_t>(d.uncompressed_offset) + d.uncompressed_size > req.DestinationSize) {
+                            return SCARLETT_E_DSTORAGE_DECOMPRESSION_ERROR;
+                        }
                         DecompTileJob job{};
-                        job.src = src_ptr + descs[t].compressed_offset;
-                        job.src_size = descs[t].compressed_size;
-                        job.dst = dst_ptr + descs[t].uncompressed_offset;
-                        job.dst_size = descs[t].uncompressed_size;
+                        job.src = src_ptr + d.compressed_offset;
+                        job.src_size = d.compressed_size;
+                        job.dst = dst_ptr + d.uncompressed_offset;
+                        job.dst_size = d.uncompressed_size;
                         job.is_zlib_wrapper = false;
                         jobs.push_back(job);
                     }
@@ -1160,6 +1168,7 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
             }
             fallbacks.push_back(i);
         }
+        return SCARLETT_OK;
     };
 
     auto run_fallbacks = [&](const std::vector<uint32_t> &fallbacks) -> scarlett_hresult_t {
@@ -1189,9 +1198,8 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
                 io_items.data() + split, io_items.size() - split);
         });
 
-        collect_tiles(0u, split, batch_tile_jobs_, fallback_indices);
-        scarlett_hresult_t d1_hr = SCARLETT_OK;
-        if (!batch_tile_jobs_.empty()) {
+        scarlett_hresult_t d1_hr = collect_tiles(0u, split, batch_tile_jobs_, fallback_indices);
+        if (scarlett_succeeded(d1_hr) && !batch_tile_jobs_.empty()) {
             d1_hr = decomp_pool_.decompress_tiles_parallel(
                 batch_tile_jobs_.data(), batch_tile_jobs_.size());
         }
@@ -1209,9 +1217,13 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
             return d1_hr;
         }
 
-        collect_tiles(split, params.request_count, batch_tile_jobs_, fallback_indices);
+        scarlett_hresult_t d2_hr = collect_tiles(split, params.request_count, batch_tile_jobs_, fallback_indices);
+        if (scarlett_failed(d2_hr)) {
+            params.out_status = d2_hr;
+            return d2_hr;
+        }
         if (!batch_tile_jobs_.empty()) {
-            scarlett_hresult_t d2_hr = decomp_pool_.decompress_tiles_parallel(
+            d2_hr = decomp_pool_.decompress_tiles_parallel(
                 batch_tile_jobs_.data(), batch_tile_jobs_.size());
             if (scarlett_failed(d2_hr)) {
                 params.out_status = d2_hr;
@@ -1233,7 +1245,11 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
                 return io_hr;
             }
         }
-        collect_tiles(0u, params.request_count, batch_tile_jobs_, fallback_indices);
+        scarlett_hresult_t c_hr = collect_tiles(0u, params.request_count, batch_tile_jobs_, fallback_indices);
+        if (scarlett_failed(c_hr)) {
+            params.out_status = c_hr;
+            return c_hr;
+        }
         if (!batch_tile_jobs_.empty()) {
             scarlett_hresult_t decomp_hr = decomp_pool_.decompress_tiles_parallel(
                 batch_tile_jobs_.data(), batch_tile_jobs_.size());

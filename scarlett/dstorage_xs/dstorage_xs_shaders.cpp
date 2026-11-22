@@ -47,7 +47,7 @@ struct VkExtensionProperties {
     uint32_t specVersion;
 };
 
-struct VkPhysicalDeviceProperties {
+struct alignas(8) VkPhysicalDeviceProperties {
     uint32_t apiVersion;
     uint32_t driverVersion;
     uint32_t vendorID;
@@ -55,9 +55,12 @@ struct VkPhysicalDeviceProperties {
     uint32_t deviceType;
     char deviceName[256];
     uint8_t pipelineCacheUUID[16];
-    uint8_t limits[504];
-    uint8_t sparseProperties[20];
+    uint32_t _pad0;
+    uint8_t rest[1024];
 };
+static_assert(sizeof(VkPhysicalDeviceProperties) >= 824 &&
+                  alignof(VkPhysicalDeviceProperties) >= 8,
+              "VkPhysicalDeviceProperties must match Vulkan ABI size and alignment");
 
 constexpr uint32_t kVkStructureTypeApplicationInfo = 0u;
 constexpr uint32_t kVkStructureTypeInstanceCreateInfo = 1u;
