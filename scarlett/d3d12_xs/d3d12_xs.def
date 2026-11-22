@@ -1,0 +1,29 @@
+LIBRARY d3d12_xs.dll
+EXPORTS
+    D3D12XboxCreateDevice @1
+    D3D12XboxDestroyDeviceX
+    D3D12XboxQueryDeviceCapsX
+    D3D12XboxCreateCommandQueueX
+    D3D12XboxCreateCommandListX
+    D3D12XboxCreatePlacedResourceX
+    D3D12XboxDestroyResourceX
+    D3D12XboxCreateDescriptorHeapX
+    D3D12XboxWriteDescriptorX
+    D3D12XboxEvaluateDescriptorPolicyX
+    D3D12XboxRecordEnhancedBarrierX
+    D3D12XboxExecuteIndirectX
+    D3D12XboxExecuteCommandListsX
+    D3D12XboxStripDxilContainerX
+    D3D12XboxSetFrameIntervalX
+    D3D12XboxScheduleFrameEventX
+    D3D12XboxWaitFrameEventX
+    D3D12XboxPresentX
+    D3D12XboxResizeSwapChainX
+    D3D12XboxSuspendX
+    D3D12XboxResumeX
+    D3D12XboxDumpDredFaultX
+    D3D12GetDebugInterface
+    D3D12XboxCreateMeshPipelineState
+    D3D12SerializeRootSignature
+    D3D12CreateRootSignatureDeserializer
+    D3D12XboxCreateReservedResourceDebugX
