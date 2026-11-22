@@ -24,3 +24,11 @@ EXPORTS
     KernelXWaitForMultipleObjects
     KernelXReadSyncState
     KernelXCloseSyncHandle
+    GetCurrentPackageFullName
+    GetCurrentPackageId
+    GetCurrentPackageFamilyName
+    GetCurrentApplicationUserModelId
+    GetPackagePathByFullName
+    GetCurrentPackagePath
+    AppPolicyGetProcessTerminationMethod
+    AppPolicyGetWindowingModel
