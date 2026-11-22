@@ -11,6 +11,7 @@
  */
 
 #include "xmem_pe_bridge.h"
+#include "uwp_bridge/forwarders/sys/uwp_pkg_identity.h"
 
 static uint32_t g_esram_stub_hits = 0u;
 
@@ -542,6 +543,121 @@ SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL KernelXCloseSyncHandle(
 
     int32_t rc = xmem_pe_unix_call(SCARLETT_XMEM_UNIX_SYNC_OP, &params);
     return scarlett_failed(rc) ? rc : params.out_status;
+}
+
+/* ============================================================================
+ * UWP / Scarlett Package Identity & AppPolicy Exports
+ * ============================================================================ */
+
+#if !defined(_WIN32)
+static const uwp_pkg_provider_t *g_kernelx_host_pkg_provider = NULL;
+
+void kernelx_set_host_pkg_provider(const uwp_pkg_provider_t *provider) {
+    g_kernelx_host_pkg_provider = provider;
+}
+#endif
+
+static void kernelx_resolve_pkg(uwp_pkg_resolved_t *out) {
+#if defined(_WIN32)
+    uwp_pkg_resolve_win32(0, out);
+#else
+    if (g_kernelx_host_pkg_provider != NULL) {
+        uwp_pkg_resolve_with_provider(g_kernelx_host_pkg_provider, 0, out);
+    } else {
+        uwp_pkg_zero(out, sizeof(*out));
+    }
+#endif
+}
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL GetCurrentPackageFullName(
+    uint32_t *package_full_name_length,
+    uint16_t *package_full_name) {
+    uwp_pkg_resolved_t pkg;
+    kernelx_resolve_pkg(&pkg);
+    if (!pkg.valid) {
+        return UWP_APPMODEL_ERROR_NO_PACKAGE;
+    }
+    return uwp_pkg_copy_out_u16(pkg.full_name, package_full_name_length, package_full_name);
+}
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL GetCurrentPackageId(
+    uint32_t *buffer_length,
+    uint8_t *buffer) {
+    uwp_pkg_resolved_t pkg;
+    kernelx_resolve_pkg(&pkg);
+    if (!pkg.valid) {
+        return UWP_APPMODEL_ERROR_NO_PACKAGE;
+    }
+    return uwp_pkg_copy_out_package_id(&pkg, buffer_length, buffer);
+}
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL GetCurrentPackageFamilyName(
+    uint32_t *package_family_name_length,
+    uint16_t *package_family_name) {
+    uwp_pkg_resolved_t pkg;
+    kernelx_resolve_pkg(&pkg);
+    if (!pkg.valid) {
+        return UWP_APPMODEL_ERROR_NO_PACKAGE;
+    }
+    return uwp_pkg_copy_out_u16(
+        pkg.family_name, package_family_name_length, package_family_name);
+}
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL GetCurrentApplicationUserModelId(
+    uint32_t *application_user_model_id_length,
+    uint16_t *application_user_model_id) {
+    uwp_pkg_resolved_t pkg;
+    kernelx_resolve_pkg(&pkg);
+    if (!pkg.valid || pkg.aumid[0] == 0u) {
+        return UWP_APPMODEL_ERROR_NO_APPLICATION;
+    }
+    return uwp_pkg_copy_out_u16(
+        pkg.aumid, application_user_model_id_length, application_user_model_id);
+}
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL GetPackagePathByFullName(
+    const uint16_t *package_full_name,
+    uint32_t *path_length,
+    uint16_t *path) {
+    if (path_length == NULL || package_full_name == NULL) {
+        return UWP_ERROR_INVALID_PARAMETER;
+    }
+    uwp_pkg_resolved_t pkg;
+    kernelx_resolve_pkg(&pkg);
+    return uwp_pkg_get_path_by_full_name(&pkg, package_full_name, path_length, path);
+}
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL GetCurrentPackagePath(
+    uint32_t *path_length,
+    uint16_t *path) {
+    uwp_pkg_resolved_t pkg;
+    kernelx_resolve_pkg(&pkg);
+    if (!pkg.valid || pkg.package_dir[0] == 0u) {
+        return UWP_APPMODEL_ERROR_NO_PACKAGE;
+    }
+    return uwp_pkg_copy_out_u16(pkg.package_dir, path_length, path);
+}
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL AppPolicyGetProcessTerminationMethod(
+    void *process_token,
+    uint32_t *policy) {
+    (void)process_token;
+    if (policy == NULL) {
+        return UWP_ERROR_INVALID_PARAMETER;
+    }
+    *policy = UWP_APPPOLICY_TERM_TERMINATE_PROCESS;
+    return UWP_ERROR_SUCCESS;
+}
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL AppPolicyGetWindowingModel(
+    void *process_token,
+    uint32_t *policy) {
+    (void)process_token;
+    if (policy == NULL) {
+        return UWP_ERROR_INVALID_PARAMETER;
+    }
+    *policy = UWP_APPPOLICY_WIN_UNIVERSAL;
+    return UWP_ERROR_SUCCESS;
 }
 
 #if defined(_WIN32)
