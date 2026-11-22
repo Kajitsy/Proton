@@ -791,7 +791,7 @@ bool test_6_frame_pacing_and_dual_plane_hdr10_presentx() {
     /* Set 60 FPS interval (16667 us) */
     CHECK_HR(D3D12XboxSetFrameIntervalX(dev->unix_device_handle, 16667u, 0u, 0u, 0u), SCARLETT_OK);
 
-    constexpr int kFrames = 35;
+    constexpr int kFrames = 100;
     std::vector<double> abs_jitters_ms;
     abs_jitters_ms.reserve(kFrames);
 
