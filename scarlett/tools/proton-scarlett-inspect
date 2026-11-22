@@ -1,0 +1,1146 @@
+#!/usr/bin/env python3
+"""
+Proton-Scarlett Package & Binary Inspector (`proton-scarlett-inspect`)
+
+Clean-room static inspection tool for Xbox Series X|S (Gaming.Xbox.Scarlett.x64)
+game directories. Never loads proprietary keys or bypasses DRM: encrypted XVC/XVD
+packages immediately report SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import struct
+import sys
+import xml.etree.ElementTree as ET
+from typing import Any
+
+try:
+    import tomllib  # Python 3.11+
+except ImportError:  # pragma: no cover
+    tomllib = None  # type: ignore[assignment]
+
+
+SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED = "SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED"
+SCARLETT_ERR_ENCRYPTED_HRESULT = "0xA05C0001"
+
+XVD_MAGIC = b"msft-xvd"
+XVD_HEADER_OFFSET = 0x200
+XVD_HEADER_SIZE = 0x200
+XVD_PAGE_SIZE = 0x1000
+XVD_FLAG_ENCRYPTION_DISABLED = 0x00000002
+XVD_FLAG_ENCRYPTED_EXPLICIT = 0x00000010
+XVC_INFO_MAGIC = 0x49435658  # "XVCI"
+XVC_REGION_FLAG_ENCRYPTED = 0x00000001
+
+DDS_MAGIC = 0x20534444       # "DDS "
+DDS_FOURCC_DX10 = 0x30315844 # "DX10"
+DDPF_FOURCC = 0x4
+
+DXGI_FORMAT_NAMES = {
+    28: "DXGI_FORMAT_R8G8B8A8_UNORM",
+    29: "DXGI_FORMAT_R8G8B8A8_UNORM_SRGB",
+    71: "DXGI_FORMAT_BC1_UNORM",
+    74: "DXGI_FORMAT_BC2_UNORM",
+    77: "DXGI_FORMAT_BC3_UNORM",
+    80: "DXGI_FORMAT_BC4_UNORM",
+    83: "DXGI_FORMAT_BC5_UNORM",
+    95: "DXGI_FORMAT_BC6H_UF16",
+    98: "DXGI_FORMAT_BC7_UNORM",
+    99: "DXGI_FORMAT_BC7_UNORM_SRGB",
+}
+
+SCARLETT_CONSOLE_DLLS = (
+    "xgameruntime",
+    "xgameplatform",
+    "d3d12_xs",
+    "xg_xs",
+    "xmem",
+    "kernelx",
+    "pixevt",
+    "dstorage_xs",
+    "XboxBvhBuilder",
+    "GameInput",
+    "xaudio2_9",
+    "AcpHal",
+    "Bink2Scarlett",
+    "amd_fidelityfx_loader_xbox",
+    "amd_fidelityfx_upscaler_xbox",
+    "libHttpClient",
+    "XCurl",
+    "api-ms-win-core-psm-appnotify-l1-1-0",
+)
+
+# Fallback export registry (augmented dynamically from scarlett/**/*.def when available)
+BUILTIN_DEF_EXPORTS: dict[str, dict[str, set[Any]]] = {
+    "acphal.dll": {
+        "names": {
+            "ApuCreateHeap", "ApuAlloc", "ApuFree", "AcpHalCreate", "AcpHalRelease",
+            "AcpHalAllocateShapeContexts", "AcpHalReleaseShapeContexts",
+            "AcpHalDecodeXma2", "AcpHalSubmitFlowgraph",
+        },
+        "ordinals": set(),
+    },
+    "amd_fidelityfx_loader_xbox.dll": {
+        "names": {
+            "ffxCreateContext", "ffxDestroyContext", "ffxConfigure",
+            "ffxQuery", "ffxLoadInterface",
+        },
+        "ordinals": set(),
+    },
+    "amd_fidelityfx_upscaler_xbox.dll": {
+        "names": {
+            "ffxFsr3ContextCreate", "ffxFsr3ContextDestroy", "ffxFsr3ContextDispatch",
+            "ffxFsr3GetUpscaleRatioFromQualityMode", "ffxFsr3GetRenderResolutionFromQualityMode",
+            "ffxFsr3GetJitterPhaseCount", "ffxFsr3GetJitterOffset",
+            "ffxFsr4GetVersion", "ffxFsr4SetDebugHook",
+        },
+        "ordinals": set(),
+    },
+    "api-ms-win-core-psm-appnotify-l1-1-0.dll": {
+        "names": {
+            "RegisterAppStateChangeNotification", "UnregisterAppStateChangeNotification",
+            "RegisterAppConstrainedChangeNotification", "UnregisterAppConstrainedChangeNotification",
+            "RegisterAppStateChangeNotificationEx",
+        },
+        "ordinals": set(),
+    },
+    "bink2scarlett.dll": {
+        "names": {
+            "BinkOpen", "BinkClose", "BinkDoFrame", "BinkNextFrame", "BinkWait",
+            "BinkCopyToBuffer", "BinkCopyToBufferRect", "BinkSetSoundOnOff",
+            "BinkSetVolume", "BinkPause", "BinkGoto", "BinkGetSummary", "BinkSetIOSize",
+        },
+        "ordinals": set(),
+    },
+    "d3d12_xs.dll": {
+        "names": {
+            "D3D12XboxCreateDevice", "D3D12XboxDestroyDeviceX", "D3D12XboxQueryDeviceCapsX",
+            "D3D12XboxCreateCommandQueueX", "D3D12XboxCreateCommandListX",
+            "D3D12XboxCreatePlacedResourceX", "D3D12XboxDestroyResourceX",
+            "D3D12XboxCreateDescriptorHeapX", "D3D12XboxWriteDescriptorX",
+            "D3D12XboxEvaluateDescriptorPolicyX", "D3D12XboxRecordEnhancedBarrierX",
+            "D3D12XboxExecuteIndirectX", "D3D12XboxExecuteCommandListsX",
+            "D3D12XboxStripDxilContainerX", "D3D12XboxSetFrameIntervalX",
+            "D3D12XboxScheduleFrameEventX", "D3D12XboxWaitFrameEventX",
+            "D3D12XboxPresentX", "D3D12XboxResizeSwapChainX",
+            "D3D12XboxSuspendX", "D3D12XboxResumeX", "D3D12XboxDumpDredFaultX",
+            "D3D12GetDebugInterface", "D3D12XboxCreateMeshPipelineState",
+            "D3D12SerializeRootSignature", "D3D12CreateRootSignatureDeserializer",
+            "D3D12XboxCreateReservedResourceDebugX",
+        },
+        "ordinals": {1},
+    },
+    "dstorage_xs.dll": {
+        "names": {
+            "DStorageGetFactory", "DStorageSetConfiguration",
+            "DStorageCreateCompressionCodec",
+        },
+        "ordinals": {1},
+    },
+    "gameinput.dll": {
+        "names": {"GameInputCreate", "GameInputCreateDispatcher"},
+        "ordinals": {1, 2},
+    },
+    "kernelx.dll": {
+        "names": {
+            "TitleMemoryStatus", "JobTitleMemoryStatus", "KernelXVirtualAlloc",
+            "KernelXVirtualFree", "KernelXVirtualQuery", "AllocateTitlePhysicalPages",
+            "FreeTitlePhysicalPages", "MapTitleEsramPages", "XThreadGetProcessorTopology",
+            "XThreadSetXboxCoreAffinity", "XThreadSetTimeSensitive",
+            "XThreadIsTimeSensitive", "XThreadAssertNotTimeSensitive",
+            "KernelXCreateEvent", "KernelXSetEvent", "KernelXResetEvent",
+            "KernelXPulseEvent", "KernelXCreateSemaphore", "KernelXReleaseSemaphore",
+            "KernelXCreateMutex", "KernelXReleaseMutex", "KernelXWaitForMultipleObjects",
+            "KernelXReadSyncState", "KernelXCloseSyncHandle",
+        },
+        "ordinals": set(),
+    },
+    "libhttpclient.dll": {
+        "names": {
+            "HCInitialize", "HCCleanup", "HCGetLibVersion", "HCCallCreate",
+            "HCCallDuplicateHandle", "HCCallCloseHandle", "HCCallRequestSetUrl",
+            "HCCallRequestSetRequestBodyBytes", "HCCallRequestSetRequestBodyString",
+            "HCCallRequestSetHeader", "HCCallRequestSetTimeout", "HCCallPerformAsync",
+            "HCCallResponseGetStatusCode", "HCCallResponseGetNetworkErrorCode",
+            "HCCallResponseGetResponseString", "HCCallResponseGetResponseBodyBytesSize",
+            "HCCallResponseGetResponseBodyBytes", "HCCallResponseGetHeader",
+            "HCWebSocketCreate", "HCWebSocketConnectAsync", "HCWebSocketSendMessageAsync",
+            "HCWebSocketDisconnect", "HCWebSocketCloseHandle",
+            "HCGlobalSetHttpCallPerformFunction",
+        },
+        "ordinals": set(),
+    },
+    "pixevt.dll": {
+        "names": {
+            "PIXBeginEvent", "PIXEndEvent", "PIXSetMarker",
+            "PIXBeginEventOnCommandList", "PIXEndEventOnCommandList",
+            "PIXSetMarkerOnCommandList", "PIXGetEventStackDepth",
+            "PIXSetEventsEnabled", "PIXGpuCaptureNextFrames",
+        },
+        "ordinals": set(),
+    },
+    "xaudio2_9.dll": {
+        "names": {"XAudio2Create", "CreateAudioVolumeMeter", "CreateAudioReverb"},
+        "ordinals": {1, 2, 3},
+    },
+    "xboxbvhbuilder.dll": {
+        "names": {
+            "XboxBvhGetPrebuildInfo", "XboxBvhBuildAccelerationStructure",
+            "XboxBvhIntersectRay", "XboxBvhMapToVulkanBuildInfo",
+            "XboxBvhBuildProceduralGeometry",
+        },
+        "ordinals": set(),
+    },
+    "xcurl.dll": {
+        "names": {
+            "curl_global_init", "curl_global_cleanup", "curl_version",
+            "curl_easy_init", "curl_easy_cleanup", "curl_easy_setopt",
+            "curl_easy_perform", "curl_easy_getinfo", "curl_easy_strerror",
+            "curl_slist_append", "curl_slist_free_all", "curl_multi_init",
+            "curl_multi_cleanup", "curl_multi_add_handle", "curl_multi_remove_handle",
+            "curl_multi_perform", "curl_multi_poll", "curl_share_init",
+        },
+        "ordinals": set(),
+    },
+    "xg_xs.dll": {
+        "names": {
+            "XGCreateTexture2DComputer", "XGCreateTexture1DComputer",
+            "XGCreateTexture3DComputer", "XGComputeOptimalSwizzleMode",
+            "XGComputeOptimalTileMode", "XGTextureAddressComputer_GetResourceLayout",
+            "XGTextureAddressComputer_GetSubresourceLayout",
+            "XGTextureAddressComputer_GetTexelElementOffsetBytes",
+            "XGTextureAddressComputer_CopyIntoSubresource",
+            "XGTextureAddressComputer_CopyFromSubresource",
+            "XGSelectTransferPath", "XGSparseCoalesceBinds",
+        },
+        "ordinals": set(),
+    },
+    "xgameplatform.dll": {
+        "names": {
+            "XGamePlatformResolveApiSet", "XGamePlatformGetTitleMetadata",
+            "XGamePlatformGetPackageFullName", "XGamePlatformGetConsoleModel",
+            "XGamePlatformCreateActivationContext",
+            "RegisterAppStateChangeNotification", "UnregisterAppStateChangeNotification",
+            "RegisterAppConstrainedChangeNotification",
+            "UnregisterAppConstrainedChangeNotification",
+        },
+        "ordinals": set(),
+    },
+    "xgameruntime.dll": {
+        "names": {
+            "InitializeApiImpl", "QueryApiImpl", "XGameRuntimeInitialize",
+            "XGameRuntimeUninitialize", "XGameRuntimeIsFeatureAvailable",
+            "XGameRuntimeGetDiagnostics", "XTaskQueueCreate",
+            "XTaskQueueCreateComposite", "XTaskQueueGetPort",
+            "XTaskQueueDuplicateHandle", "XTaskQueueCloseHandle",
+            "XTaskQueueGetCurrentProcessTaskQueue",
+            "XTaskQueueSetCurrentProcessTaskQueue", "XTaskQueueSubmitCallback",
+            "XTaskQueueSubmitDelayedCallback", "XTaskQueueDispatch",
+            "XTaskQueueTerminate", "XTaskQueueRegisterMonitor",
+            "XTaskQueueUnregisterMonitor", "XAsyncBegin", "XAsyncSchedule",
+            "XAsyncComplete", "XAsyncGetStatus", "XAsyncGetResultSize",
+            "XAsyncGetResult", "XAsyncCancel", "XAsyncRun",
+            "XSystemGetDeviceType", "XSystemGetConsoleId",
+            "XSystemGetXboxLiveSandboxId", "XSystemGetAnalyticsInfo",
+            "XSystemGetAppSpecificDeviceId", "XThreadIsTimeSensitive",
+            "XThreadSetTimeSensitive", "XUserAddAsync", "XUserAddResult",
+            "XUserDuplicateHandle", "XUserCloseHandle",
+        },
+        "ordinals": set(),
+    },
+    "xmem.dll": {
+        "names": {
+            "XMemInitialize", "XMemSetConsoleModel", "XMemAllocatePhysicalPages",
+            "XMemFreePhysicalPages", "XMemVirtualAlloc", "XMemVirtualFree",
+            "XMemMapPhysicalPages", "XMemMapPhysicalPagesScatter",
+            "XMemUnmapPhysicalPages", "XMemVirtualQuery",
+            "XMemGetWorkingSetStatistics", "XMemMakeTag", "XMemAllocDefault",
+            "XMemFreeDefault", "XMemSizeDefault", "XMemUmaProbe",
+            "XMemUmaExport", "XMemUmaFlushBeforeSubmit", "XMemUmaTrackHotResource",
+        },
+        "ordinals": set(),
+    },
+}
+
+
+def align_up(value: int, alignment: int) -> int:
+    if alignment <= 1:
+        return value
+    return ((value + alignment - 1) // alignment) * alignment
+
+
+def resolve_default_app_db() -> str | None:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, "..", "profiles", "scarlett_app_db.toml"),
+        os.path.join(script_dir, "..", "share", "scarlett", "scarlett_app_db.toml"),
+        os.path.join(script_dir, "..", "lib", "wine", "scarlett", "scarlett_app_db.toml"),
+    ]
+    for c in candidates:
+        norm = os.path.abspath(c)
+        if os.path.isfile(norm):
+            return norm
+    return None
+
+
+def load_def_exports() -> tuple[dict[str, dict[str, set[Any]]], list[str]]:
+    exports: dict[str, dict[str, set[Any]]] = {
+        k: {"names": set(v["names"]), "ordinals": set(v["ordinals"])}
+        for k, v in BUILTIN_DEF_EXPORTS.items()
+    }
+    def_sources: list[str] = []
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    scarlett_root = os.path.abspath(os.path.join(script_dir, ".."))
+    if os.path.isdir(scarlett_root):
+        for root, _, files in os.walk(scarlett_root):
+            for fname in sorted(files):
+                if not fname.lower().endswith(".def"):
+                    continue
+                fpath = os.path.join(root, fname)
+                def_sources.append(fpath)
+                lib_key = fname.lower()
+                names: set[str] = set()
+                ordinals: set[int] = set()
+                in_exports = False
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                        for raw_line in f:
+                            line = raw_line.split(";", 1)[0].strip()
+                            if not line:
+                                continue
+                            upper = line.upper()
+                            if upper.startswith("LIBRARY "):
+                                lib_val = line.split(None, 1)[1].strip().strip('"').lower()
+                                if not lib_val.endswith(".dll"):
+                                    lib_val += ".dll"
+                                lib_key = lib_val
+                                continue
+                            if upper == "EXPORTS":
+                                in_exports = True
+                                continue
+                            if not in_exports:
+                                continue
+                            tokens = line.split()
+                            sym = tokens[0].split("=", 1)[0].strip()
+                            if sym:
+                                names.add(sym)
+                            for tok in tokens[1:]:
+                                if tok.startswith("@") and tok[1:].isdigit():
+                                    ordinals.add(int(tok[1:]))
+                    exports[lib_key] = {"names": names, "ordinals": ordinals}
+                except OSError:
+                    continue
+    return exports, def_sources
+
+
+def parse_toml_file(path: str) -> dict[str, Any]:
+    with open(path, "rb") as f:
+        raw_bytes = f.read()
+    if tomllib is not None:
+        return tomllib.loads(raw_bytes.decode("utf-8"))
+
+    # Minimal fallback parser for environments without tomllib (< Python 3.11)
+    data: dict[str, Any] = {}
+    cur_section: dict[str, Any] = data
+    for raw_line in raw_bytes.decode("utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            parts = [p.strip() for p in line[1:-1].split(".")]
+            cur_section = data
+            for part in parts:
+                cur_section = cur_section.setdefault(part, {})
+            continue
+        if "=" in line:
+            key, val_s = [x.strip() for x in line.split("=", 1)]
+            if val_s.startswith('"') and val_s.endswith('"'):
+                val: Any = val_s[1:-1]
+            elif val_s == "true":
+                val = True
+            elif val_s == "false":
+                val = False
+            elif val_s.startswith("[") and val_s.endswith("]"):
+                inner = val_s[1:-1].strip()
+                val = [x.strip().strip('"') for x in inner.split(",") if x.strip()] if inner else []
+            else:
+                try:
+                    val = int(val_s)
+                except ValueError:
+                    val = val_s
+            cur_section[key] = val
+    return data
+
+
+def find_game_config(game_dir: str) -> str | None:
+    direct = os.path.join(game_dir, "MicrosoftGame.Config")
+    if os.path.isfile(direct):
+        return direct
+    try:
+        for entry in sorted(os.listdir(game_dir)):
+            if entry.lower() == "microsoftgame.config":
+                cand = os.path.join(game_dir, entry)
+                if os.path.isfile(cand):
+                    return cand
+    except OSError:
+        pass
+    return None
+
+
+def parse_microsoft_game_config(game_dir: str) -> dict[str, Any]:
+    cfg_path = find_game_config(game_dir)
+    result: dict[str, Any] = {
+        "found": cfg_path is not None,
+        "path": cfg_path,
+        "valid": False,
+        "is_scarlett_target": False,
+        "target_device_families": [],
+        "target_device_family_normalized": None,
+        "title_id": None,
+        "msa_app_id": None,
+        "identity": {},
+        "display_name": None,
+        "virtual_machine": None,
+        "executables": [],
+        "error": None,
+    }
+    if cfg_path is None:
+        result["error"] = "MicrosoftGame.Config not found"
+        return result
+
+    try:
+        tree = ET.parse(cfg_path)
+        root = tree.getroot()
+    except (ET.ParseError, OSError) as exc:
+        result["error"] = f"Failed to parse MicrosoftGame.Config: {exc}"
+        return result
+
+    result["valid"] = True
+    families: list[str] = []
+    executables: list[dict[str, Any]] = []
+
+    for elem in root.iter():
+        tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+        low_tag = tag.lower()
+        if low_tag == "identity":
+            result["identity"] = {
+                "name": elem.attrib.get("Name"),
+                "publisher": elem.attrib.get("Publisher"),
+                "version": elem.attrib.get("Version"),
+            }
+        elif low_tag == "titleid" and elem.text:
+            result["title_id"] = elem.text.strip()
+        elif low_tag == "msaappid" and elem.text:
+            result["msa_app_id"] = elem.text.strip()
+        elif low_tag == "shellvisuals":
+            dn = elem.attrib.get("DefaultDisplayName")
+            if dn:
+                result["display_name"] = dn
+        elif low_tag == "virtualmachine":
+            result["virtual_machine"] = {
+                "enabled": elem.attrib.get("Enabled", "").lower() == "true",
+                "virtual_machine_id": elem.attrib.get("VirtualMachineId"),
+            }
+        elif low_tag == "targetdevicefamily":
+            if elem.text and elem.text.strip():
+                families.append(elem.text.strip())
+            for k, v in elem.attrib.items():
+                clean_k = k.split("}")[-1] if "}" in k else k
+                if clean_k.lower() in ("name", "value") and v.strip():
+                    families.append(v.strip())
+        elif low_tag == "executable":
+            exe_name = elem.attrib.get("Name")
+            exe_tdf = None
+            for k, v in elem.attrib.items():
+                clean_k = k.split("}")[-1] if "}" in k else k
+                if clean_k.lower() == "targetdevicefamily" and v.strip():
+                    exe_tdf = v.strip()
+                    families.append(exe_tdf)
+            resolved = None
+            if exe_name:
+                cand = os.path.join(game_dir, exe_name.replace("\\", os.sep))
+                if os.path.isfile(cand):
+                    resolved = os.path.abspath(cand)
+                else:
+                    for root_dir, _, files in os.walk(game_dir):
+                        for fn in files:
+                            if fn.lower() == os.path.basename(exe_name).lower():
+                                resolved = os.path.abspath(os.path.join(root_dir, fn))
+                                break
+                        if resolved:
+                            break
+            executables.append({
+                "name": exe_name,
+                "id": elem.attrib.get("Id"),
+                "target_device_family": exe_tdf,
+                "override_display_name": elem.attrib.get("OverrideDisplayName"),
+                "resolved_path": resolved,
+            })
+
+    dedup_families = list(dict.fromkeys(families))
+    is_scarlett = any(
+        ("scarlett" in fam.lower() or "xboxgen9" in fam.lower())
+        for fam in dedup_families
+    )
+    result["target_device_families"] = dedup_families
+    result["is_scarlett_target"] = is_scarlett
+    if is_scarlett:
+        result["target_device_family_normalized"] = "Gaming.Xbox.Scarlett.x64"
+    elif dedup_families:
+        result["target_device_family_normalized"] = dedup_families[0]
+    if not result["display_name"]:
+        if executables and executables[0].get("override_display_name"):
+            result["display_name"] = executables[0]["override_display_name"]
+        elif result["identity"].get("name"):
+            result["display_name"] = result["identity"]["name"]
+    result["executables"] = executables
+    return result
+
+
+def read_cstr(buf: bytes, offset: int, limit: int = 512) -> str:
+    if offset < 0 or offset >= len(buf):
+        return ""
+    end = buf.find(b"\x00", offset, min(len(buf), offset + limit))
+    if end == -1:
+        end = min(len(buf), offset + limit)
+    return buf[offset:end].decode("ascii", errors="replace")
+
+
+def rva_to_offset(rva: int, sections: list[tuple[int, int, int, int]]) -> int | None:
+    if rva == 0:
+        return None
+    for vaddr, vsize, raw_ptr, raw_size in sections:
+        span = max(vsize, raw_size)
+        if vaddr <= rva < vaddr + span:
+            file_off = raw_ptr + (rva - vaddr)
+            return file_off
+    return None
+
+
+def inspect_pe64_binary(
+    exe_path: str,
+    def_exports: dict[str, dict[str, set[Any]]],
+) -> dict[str, Any]:
+    info: dict[str, Any] = {
+        "path": os.path.abspath(exe_path),
+        "filename": os.path.basename(exe_path),
+        "valid_pe64": False,
+        "machine": None,
+        "optional_magic": None,
+        "subsystem": None,
+        "entry_point_rva": None,
+        "size_of_image": None,
+        "imports": [],
+        "scarlett_imports": [],
+        "missing_scarlett_exports": [],
+        "error": None,
+    }
+    try:
+        with open(exe_path, "rb") as f:
+            data = f.read()
+    except OSError as exc:
+        info["error"] = f"Cannot read PE binary: {exc}"
+        return info
+
+    if len(data) < 0x40 or data[0:2] != b"MZ":
+        info["error"] = "Missing MZ DOS header"
+        return info
+
+    pe_off = struct.unpack_from("<I", data, 0x3C)[0]
+    if pe_off <= 0 or pe_off + 24 > len(data) or data[pe_off : pe_off + 4] != b"PE\x00\x00":
+        info["error"] = "Missing PE\\0\\0 signature"
+        return info
+
+    machine, num_sections, _, _, _, size_opt_hdr, _ = struct.unpack_from(
+        "<HHIIIHH", data, pe_off + 4
+    )
+    info["machine"] = f"0x{machine:04X}"
+    opt_off = pe_off + 24
+    if opt_off + size_opt_hdr > len(data) or size_opt_hdr < 112:
+        info["error"] = "Truncated PE OptionalHeader"
+        return info
+
+    opt_magic = struct.unpack_from("<H", data, opt_off)[0]
+    info["optional_magic"] = f"0x{opt_magic:04X}"
+    if machine != 0x8664 or opt_magic != 0x020B:
+        info["error"] = (
+            f"Not a PE64 (AMD64/PE32+) binary: machine=0x{machine:04X}, magic=0x{opt_magic:04X}"
+        )
+        return info
+
+    info["valid_pe64"] = True
+    info["entry_point_rva"] = f"0x{struct.unpack_from('<I', data, opt_off + 16)[0]:08X}"
+    info["size_of_image"] = struct.unpack_from("<I", data, opt_off + 56)[0]
+    info["subsystem"] = struct.unpack_from("<H", data, opt_off + 68)[0]
+    num_rva_and_sizes = struct.unpack_from("<I", data, opt_off + 108)[0]
+
+    # Parse section table
+    sec_off = opt_off + size_opt_hdr
+    sections: list[tuple[int, int, int, int]] = []
+    for i in range(num_sections):
+        entry_off = sec_off + i * 40
+        if entry_off + 40 > len(data):
+            break
+        vsize, vaddr, raw_size, raw_ptr = struct.unpack_from("<4I", data, entry_off + 8)
+        sections.append((vaddr, vsize, raw_ptr, raw_size))
+
+    if num_rva_and_sizes < 2 or opt_off + 112 + 16 > len(data):
+        return info
+
+    import_rva, import_size = struct.unpack_from("<2I", data, opt_off + 112 + 8)
+    if import_rva == 0 or import_size == 0:
+        return info
+
+    imp_file_off = rva_to_offset(import_rva, sections)
+    if imp_file_off is None:
+        return info
+
+    while imp_file_off + 20 <= len(data):
+        orig_first_thunk, _, _, name_rva, first_thunk = struct.unpack_from(
+            "<5I", data, imp_file_off
+        )
+        imp_file_off += 20
+        if orig_first_thunk == 0 and name_rva == 0 and first_thunk == 0:
+            break
+        name_off = rva_to_offset(name_rva, sections)
+        dll_name = read_cstr(data, name_off) if name_off is not None else "<unknown>"
+        dll_key = dll_name.lower()
+
+        thunk_rva = orig_first_thunk if orig_first_thunk != 0 else first_thunk
+        thunk_off = rva_to_offset(thunk_rva, sections)
+        symbols: list[str] = []
+        matched: list[str] = []
+        missing: list[str] = []
+
+        is_scarlett = dll_key in def_exports
+        known = def_exports.get(dll_key, {"names": set(), "ordinals": set()})
+
+        if thunk_off is not None:
+            while thunk_off + 8 <= len(data):
+                val = struct.unpack_from("<Q", data, thunk_off)[0]
+                thunk_off += 8
+                if val == 0:
+                    break
+                if (val & (1 << 63)) != 0:
+                    ord_num = val & 0xFFFF
+                    sym_label = f"@{ord_num}"
+                    symbols.append(sym_label)
+                    if is_scarlett:
+                        if ord_num in known["ordinals"]:
+                            matched.append(sym_label)
+                        else:
+                            missing.append(sym_label)
+                else:
+                    hint_rva = val & 0x7FFFFFFF
+                    hint_off = rva_to_offset(hint_rva, sections)
+                    sym_name = read_cstr(data, hint_off + 2) if hint_off is not None else ""
+                    if sym_name:
+                        symbols.append(sym_name)
+                        if is_scarlett:
+                            if sym_name in known["names"]:
+                                matched.append(sym_name)
+                            else:
+                                missing.append(sym_name)
+
+        rec = {
+            "dll": dll_name,
+            "is_scarlett_dll": is_scarlett,
+            "symbols": symbols,
+        }
+        info["imports"].append(rec)
+        if is_scarlett:
+            info["scarlett_imports"].append({
+                "dll": dll_name,
+                "symbols": symbols,
+                "matched_exports": matched,
+                "missing_exports": missing,
+            })
+            for m in missing:
+                info["missing_scarlett_exports"].append(f"{dll_name}!{m}")
+
+    return info
+
+
+def inspect_xvd_xvc_images(game_dir: str) -> list[dict[str, Any]]:
+    images: list[dict[str, Any]] = []
+    for root, _, files in os.walk(game_dir):
+        for fname in sorted(files):
+            fpath = os.path.join(root, fname)
+            low = fname.lower()
+            is_ext = low.endswith((".xvd", ".xvc", ".msixvc"))
+            try:
+                fsize = os.path.getsize(fpath)
+            except OSError:
+                continue
+            if not is_ext and fsize < XVD_HEADER_OFFSET + XVD_HEADER_SIZE:
+                continue
+            try:
+                with open(fpath, "rb") as f:
+                    if fsize < XVD_HEADER_OFFSET + XVD_HEADER_SIZE:
+                        if is_ext:
+                            images.append({
+                                "path": os.path.abspath(fpath),
+                                "valid_xvd_header": False,
+                                "encrypted": False,
+                                "error": "SCARLETT_ERR_INVALID_PACKAGE_HEADER",
+                            })
+                        continue
+                    f.seek(XVD_HEADER_OFFSET)
+                    hdr = f.read(XVD_HEADER_SIZE)
+                    if hdr[0:8] != XVD_MAGIC:
+                        if is_ext:
+                            images.append({
+                                "path": os.path.abspath(fpath),
+                                "valid_xvd_header": False,
+                                "encrypted": False,
+                                "error": "SCARLETT_ERR_INVALID_PACKAGE_HEADER",
+                            })
+                        continue
+
+                    volume_flags, format_version = struct.unpack_from("<2I", hdr, 0x08)
+                    drive_size = struct.unpack_from("<Q", hdr, 0x18)[0]
+                    xvd_type, content_type, emb_len, user_len, xvc_len, dyn_len, block_sz = (
+                        struct.unpack_from("<7I", hdr, 0x84)
+                    )
+                    sandbox_id = hdr[0xA0:0xB0].split(b"\x00", 1)[0].decode(
+                        "ascii", errors="replace"
+                    )
+
+                    encrypted = (
+                        (volume_flags & XVD_FLAG_ENCRYPTION_DISABLED) == 0
+                        or (volume_flags & XVD_FLAG_ENCRYPTED_EXPLICIT) != 0
+                    )
+                    reason = None
+                    if encrypted:
+                        reason = "volume_flags indicate encryption enabled"
+
+                    xvc_present = xvc_len > 0
+                    xvc_info: dict[str, Any] = {"present": xvc_present}
+                    if xvc_len >= 80:
+                        cursor = XVD_PAGE_SIZE
+                        cursor = align_up(cursor + align_up(emb_len, XVD_PAGE_SIZE), XVD_PAGE_SIZE)
+                        cursor = align_up(cursor + align_up(user_len, XVD_PAGE_SIZE), XVD_PAGE_SIZE)
+                        if cursor + xvc_len <= fsize:
+                            f.seek(cursor)
+                            xvc_buf = f.read(xvc_len)
+                            b1_magic, b1_ver = struct.unpack_from("<2I", xvc_buf, 0)
+                            if b1_magic == XVC_INFO_MAGIC:
+                                key_cnt, enc_flags, reg_cnt, chk_cnt, upd_cnt, chk_sz = (
+                                    struct.unpack_from("<6I", xvc_buf, 0x18)
+                                )
+                                primary_key_id = xvc_buf[0x30:0x40]
+                                xvc_info.update({
+                                    "version": b1_ver,
+                                    "key_count": key_cnt,
+                                    "encryption_flags": enc_flags,
+                                    "region_count": reg_cnt,
+                                    "chunk_count": chk_cnt,
+                                    "update_segment_count": upd_cnt,
+                                    "chunk_size_bytes": chk_sz,
+                                })
+                                if key_cnt != 0 or enc_flags != 0 or any(primary_key_id):
+                                    encrypted = True
+                                    reason = "XVC Block 1 specifies non-zero keys or encryption flags"
+                                reg_off = 80
+                                for _ in range(reg_cnt):
+                                    if reg_off + 112 > len(xvc_buf):
+                                        break
+                                    _, reg_flags, key_id_idx = struct.unpack_from(
+                                        "<IIH", xvc_buf, reg_off
+                                    )
+                                    if (reg_flags & XVC_REGION_FLAG_ENCRYPTED) != 0 or (
+                                        key_id_idx not in (0, 0xFFFF)
+                                    ):
+                                        encrypted = True
+                                        reason = "XVC region entry marked encrypted"
+                                        break
+                                    reg_off += 112
+
+                    images.append({
+                        "path": os.path.abspath(fpath),
+                        "valid_xvd_header": True,
+                        "format_version": format_version,
+                        "volume_flags": f"0x{volume_flags:08X}",
+                        "drive_size": drive_size,
+                        "xvd_type": xvd_type,
+                        "content_type": content_type,
+                        "block_size": block_sz,
+                        "sandbox_id": sandbox_id,
+                        "xvc": xvc_info,
+                        "encrypted": encrypted,
+                        "encryption_reason": reason,
+                        "error": (
+                            SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED if encrypted else None
+                        ),
+                        "hresult": SCARLETT_ERR_ENCRYPTED_HRESULT if encrypted else "0x00000000",
+                    })
+            except OSError as exc:
+                images.append({
+                    "path": os.path.abspath(fpath),
+                    "valid_xvd_header": False,
+                    "encrypted": False,
+                    "error": f"IO error: {exc}",
+                })
+    return images
+
+
+def inspect_dds_assets(game_dir: str) -> list[dict[str, Any]]:
+    assets: list[dict[str, Any]] = []
+    for root, _, files in os.walk(game_dir):
+        for fname in sorted(files):
+            if not fname.lower().endswith(".dds"):
+                continue
+            fpath = os.path.join(root, fname)
+            entry: dict[str, Any] = {
+                "path": os.path.abspath(fpath),
+                "rel_path": os.path.relpath(fpath, game_dir),
+                "valid_148b_dds_dx10": False,
+                "header_bytes": 0,
+                "width": 0,
+                "height": 0,
+                "dxgi_format": 0,
+                "dxgi_format_name": "UNKNOWN",
+                "payload_bytes": 0,
+                "error": None,
+            }
+            try:
+                with open(fpath, "rb") as f:
+                    data = f.read()
+            except OSError as exc:
+                entry["error"] = f"Cannot read DDS asset: {exc}"
+                assets.append(entry)
+                continue
+
+            if len(data) < 148:
+                entry["error"] = f"File smaller than 148-byte DDS+DX10 header ({len(data)} B)"
+                assets.append(entry)
+                continue
+
+            magic, dw_size, _, height, width, _, _, mips = struct.unpack_from("<8I", data, 0)
+            pf_size, pf_flags, fourcc = struct.unpack_from("<3I", data, 4 + 72)
+            dxgi_fmt, dim, _, arr, _ = struct.unpack_from("<5I", data, 128)
+
+            entry["width"] = width
+            entry["height"] = height
+            entry["dxgi_format"] = dxgi_fmt
+            entry["dxgi_format_name"] = DXGI_FORMAT_NAMES.get(dxgi_fmt, f"DXGI_{dxgi_fmt}")
+            entry["payload_bytes"] = len(data) - 148
+
+            if magic != DDS_MAGIC:
+                entry["error"] = f"Invalid DDS magic 0x{magic:08X}"
+            elif dw_size != 124 or pf_size != 32:
+                entry["error"] = f"Invalid DDS header sizes ({dw_size}/{pf_size})"
+            elif (pf_flags & DDPF_FOURCC) == 0 or fourcc != DDS_FOURCC_DX10:
+                entry["error"] = "Missing DX10 FourCC in DDS_PIXELFORMAT"
+            elif width == 0 or height == 0 or dim < 1 or dim > 4 or arr == 0:
+                entry["error"] = "Invalid DDS+DX10 dimensions or arraySize"
+            else:
+                expected_payload: int | None = None
+                if dxgi_fmt == 98 and dim == 3:
+                    expected_payload = ((width + 3) // 4) * ((height + 3) // 4) * 16 * arr
+                elif dxgi_fmt == 28 and dim == 3:
+                    expected_payload = width * height * 4 * arr
+                if expected_payload is not None and len(data) != 148 + expected_payload:
+                    entry["error"] = (
+                        f"Payload size mismatch: got {len(data) - 148} B, expected {expected_payload} B"
+                    )
+                else:
+                    entry["valid_148b_dds_dx10"] = True
+                    entry["header_bytes"] = 148
+
+            assets.append(entry)
+    return assets
+
+
+def match_app_db_profile(
+    app_db: dict[str, Any] | None,
+    config_info: dict[str, Any],
+    pe_reports: list[dict[str, Any]],
+) -> tuple[str, dict[str, Any]]:
+    defaults: dict[str, Any] = dict((app_db or {}).get("defaults", {}))
+    profiles: dict[str, Any] = dict((app_db or {}).get("profiles", {}))
+
+    haystack_parts: list[str] = []
+    for fam in config_info.get("target_device_families", []):
+        haystack_parts.append(fam)
+        haystack_parts.append(f"TargetDeviceFamily:{fam}")
+    if config_info.get("display_name"):
+        haystack_parts.append(str(config_info["display_name"]))
+    ident_name = (config_info.get("identity") or {}).get("name")
+    if ident_name:
+        haystack_parts.append(str(ident_name))
+    for exe in config_info.get("executables", []):
+        if exe.get("name"):
+            haystack_parts.append(str(exe["name"]))
+
+    for pe in pe_reports:
+        haystack_parts.append(pe.get("filename", ""))
+        try:
+            with open(pe["path"], "rb") as f:
+                blob = f.read(1024 * 1024)
+            ascii_strings = re.findall(rb"[A-Za-z0-9_.\-]{4,64}", blob)
+            haystack_parts.extend(s.decode("ascii", errors="ignore") for s in ascii_strings[:512])
+        except OSError:
+            pass
+
+    haystack_low = "\n".join(haystack_parts).lower()
+
+    matched_name = "generic_gen9"
+    # Prioritize specific engine/harness profiles before generic_gen9
+    ordered = [k for k in profiles.keys() if k != "generic_gen9"]
+    if "generic_gen9" in profiles:
+        ordered.append("generic_gen9")
+
+    selected_prof: dict[str, Any] = dict(defaults)
+    for prof_name in ordered:
+        prof = profiles[prof_name]
+        heuristics = prof.get("match_heuristics", [])
+        if any(str(h).lower() in haystack_low for h in heuristics):
+            matched_name = prof_name
+            selected_prof.update(prof)
+            break
+    else:
+        if "generic_gen9" in profiles:
+            selected_prof.update(profiles["generic_gen9"])
+
+    return matched_name, selected_prof
+
+
+def build_recommendations(
+    profile_name: str,
+    profile_data: dict[str, Any],
+    config_info: dict[str, Any],
+) -> tuple[dict[str, str], str]:
+    env_vars = {
+        "PROTON_XBOX_SCARLETT": "auto" if config_info.get("is_scarlett_target") else "1",
+        "PROTON_XBOX_MODEL": str(profile_data.get("console_model", "anaconda")),
+        "PROTON_XBOX_SHADER_MODE": str(profile_data.get("shader_mode", "adaptive")),
+        "PROTON_XBOX_NET_MODE": str(profile_data.get("net_mode", "offline")),
+        "PROTON_XBOX_STRICT": "1" if profile_data.get("strict_stubs", False) else "0",
+        "PROTON_XBOX_UMA_TIER": str(profile_data.get("uma_tier", "auto")),
+        "PROTON_XBOX_DESCRIPTOR_BACKEND": str(profile_data.get("descriptor_backend", "auto")),
+        "PROTON_XBOX_WAVE64_STRATEGY": str(profile_data.get("wave64_strategy", "adaptive")),
+        "PROTON_XBOX_RT_BVH4_STRATEGY": str(
+            profile_data.get("rt_bvh4_strategy", "ray_query_or_bda")
+        ),
+        "PROTON_XBOX_DSTORAGE_IO_URING": (
+            "1" if profile_data.get("dstorage_io_uring", True) else "0"
+        ),
+        "PROTON_XBOX_DSTORAGE_GPU_DEFLATE": (
+            "1" if profile_data.get("dstorage_gpu_deflate", True) else "0"
+        ),
+        "PROTON_XBOX_PROFILE": profile_name,
+    }
+    overrides = ";".join(f"{dll}=b" for dll in SCARLETT_CONSOLE_DLLS)
+    return env_vars, overrides
+
+
+def inspect_game_dir(
+    game_dir: str,
+    app_db_path: str | None = None,
+) -> dict[str, Any]:
+    abs_dir = os.path.abspath(game_dir)
+    def_exports, def_sources = load_def_exports()
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    config_info = parse_microsoft_game_config(abs_dir)
+    if not config_info["found"] or not config_info["valid"]:
+        errors.append(config_info["error"] or "Invalid MicrosoftGame.Config")
+    elif not config_info["is_scarlett_target"]:
+        warnings.append(
+            "TargetDeviceFamily does not specify Gaming.Xbox.Scarlett.x64 / XboxGen9"
+        )
+
+    # Collect PE64 executables to inspect
+    candidate_exes: list[str] = []
+    for exe in config_info.get("executables", []):
+        if exe.get("resolved_path"):
+            candidate_exes.append(exe["resolved_path"])
+        elif exe.get("name"):
+            errors.append(f"Executable declared in MicrosoftGame.Config not found: {exe['name']}")
+    if not candidate_exes:
+        for root, _, files in os.walk(abs_dir):
+            for fname in sorted(files):
+                if fname.lower().endswith(".exe"):
+                    candidate_exes.append(os.path.abspath(os.path.join(root, fname)))
+
+    pe_reports: list[dict[str, Any]] = []
+    for exe_path in dict.fromkeys(candidate_exes):
+        rep = inspect_pe64_binary(exe_path, def_exports)
+        pe_reports.append(rep)
+        if not rep["valid_pe64"]:
+            errors.append(f"{rep['filename']}: {rep['error']}")
+        if rep["missing_scarlett_exports"]:
+            errors.append(
+                f"{rep['filename']}: unmapped Scarlett imports: "
+                + ", ".join(rep["missing_scarlett_exports"])
+            )
+
+    if not pe_reports:
+        warnings.append("No PE64 executables found in game directory")
+
+    xvd_images = inspect_xvd_xvc_images(abs_dir)
+    has_encrypted_xvc = False
+    for img in xvd_images:
+        if img.get("encrypted"):
+            has_encrypted_xvc = True
+            if SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED not in errors:
+                errors.append(SCARLETT_ERR_ENCRYPTED_PACKAGE_UNSUPPORTED)
+        elif img.get("error"):
+            errors.append(f"{os.path.basename(img['path'])}: {img['error']}")
+
+    dds_assets = inspect_dds_assets(abs_dir)
+    for asset in dds_assets:
+        if not asset["valid_148b_dds_dx10"]:
+            errors.append(f"{asset['rel_path']}: {asset['error']}")
+
+    resolved_db = app_db_path or resolve_default_app_db()
+    app_db_data: dict[str, Any] | None = None
+    if resolved_db and os.path.isfile(resolved_db):
+        app_db_data = parse_toml_file(resolved_db)
+    else:
+        warnings.append("scarlett_app_db.toml not found; using built-in defaults")
+
+    profile_name, profile_data = match_app_db_profile(app_db_data, config_info, pe_reports)
+    rec_env, rec_overrides = build_recommendations(profile_name, profile_data, config_info)
+
+    status = "FAIL" if errors else "PASS"
+    return {
+        "tool": "proton-scarlett-inspect",
+        "schema_version": "1.0.0",
+        "game_dir": abs_dir,
+        "status": status,
+        "has_encrypted_xvc": has_encrypted_xvc,
+        "errors": errors,
+        "warnings": warnings,
+        "microsoft_game_config": config_info,
+        "pe64_binaries": pe_reports,
+        "def_tables_loaded": len(def_exports),
+        "def_sources_scanned": len(def_sources),
+        "xvd_xvc_images": xvd_images,
+        "dds_dx10_assets": dds_assets,
+        "app_db": {
+            "path": resolved_db,
+            "matched_profile": profile_name,
+            "display_name": profile_data.get("display_name", profile_name),
+            "engine_class": profile_data.get("engine_class", "unknown"),
+        },
+        "recommended_env": rec_env,
+        "recommended_winedlloverrides": rec_overrides,
+    }
+
+
+def render_human_report(report: dict[str, Any]) -> str:
+    lines: list[str] = []
+    lines.append(f"=== proton-scarlett-inspect: {report['game_dir']} ===")
+    lines.append(f"Status: {report['status']}")
+
+    cfg = report["microsoft_game_config"]
+    if cfg["found"] and cfg["valid"]:
+        lines.append(
+            f"MicrosoftGame.Config: TitleId={cfg['title_id']} MSAAppId={cfg['msa_app_id']} "
+            f"TargetDeviceFamily={cfg['target_device_families']} "
+            f"Scarlett={cfg['is_scarlett_target']}"
+        )
+    else:
+        lines.append(f"MicrosoftGame.Config: MISSING/INVALID ({cfg['error']})")
+
+    for pe in report["pe64_binaries"]:
+        sc_dlls = [x["dll"] for x in pe["scarlett_imports"]]
+        lines.append(
+            f"PE64 Binary: {pe['filename']} valid={pe['valid_pe64']} "
+            f"machine={pe['machine']} magic={pe['optional_magic']} "
+            f"scarlett_dlls={len(sc_dlls)} ({', '.join(sc_dlls)})"
+        )
+        if pe["missing_scarlett_exports"]:
+            lines.append(f"  Missing .def exports: {', '.join(pe['missing_scarlett_exports'])}")
+
+    for img in report["xvd_xvc_images"]:
+        lines.append(
+            f"XVD/XVC Image: {os.path.basename(img['path'])} valid={img['valid_xvd_header']} "
+            f"encrypted={img['encrypted']} error={img['error']}"
+        )
+
+    valid_dds = sum(1 for a in report["dds_dx10_assets"] if a["valid_148b_dds_dx10"])
+    lines.append(
+        f"DDS+DX10 Assets: {valid_dds}/{len(report['dds_dx10_assets'])} valid 148-byte headers"
+    )
+    for asset in report["dds_dx10_assets"]:
+        lines.append(
+            f"  - {asset['rel_path']}: {asset['width']}x{asset['height']} "
+            f"{asset['dxgi_format_name']} hdr={asset['header_bytes']}B valid={asset['valid_148b_dds_dx10']}"
+        )
+
+    db = report["app_db"]
+    lines.append(
+        f"Matched Profile: {db['matched_profile']} ({db['display_name']}, engine={db['engine_class']})"
+    )
+    lines.append("Recommended Environment:")
+    for k, v in report["recommended_env"].items():
+        lines.append(f"  {k}={v}")
+    lines.append(f"Recommended WINEDLLOVERRIDES:\n  {report['recommended_winedlloverrides']}")
+
+    if report["warnings"]:
+        lines.append("Warnings:")
+        for w in report["warnings"]:
+            lines.append(f"  [WARN] {w}")
+    if report["errors"]:
+        lines.append("Errors:")
+        for e in report["errors"]:
+            lines.append(f"  [ERR] {e}")
+
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="proton-scarlett-inspect",
+        description="Inspect an Xbox Series X|S (Gaming.Xbox.Scarlett.x64) game directory for Proton-Scarlett.",
+    )
+    parser.add_argument("game_dir", help="Path to the extracted game directory")
+    parser.add_argument("--json", action="store_true", help="Emit JSON output")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Return non-zero exit code on encrypted XVC, invalid config/PE64/DDS, or warnings",
+    )
+    parser.add_argument(
+        "--app-db",
+        default=None,
+        help="Path to scarlett_app_db.toml profile database",
+    )
+    args = parser.parse_args(argv)
+
+    if not os.path.isdir(args.game_dir):
+        err_payload = {
+            "tool": "proton-scarlett-inspect",
+            "status": "FAIL",
+            "errors": [f"Game directory does not exist: {args.game_dir}"],
+        }
+        if args.json:
+            print(json.dumps(err_payload, indent=2))
+        else:
+            print(f"[ERR] Game directory does not exist: {args.game_dir}", file=sys.stderr)
+        return 2
+
+    report = inspect_game_dir(args.game_dir, app_db_path=args.app_db)
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(render_human_report(report))
+
+    if args.strict and (report["errors"] or report["warnings"]):
+        return 3 if report["has_encrypted_xvc"] else 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

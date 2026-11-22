@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <thread>
@@ -46,11 +47,14 @@ bool run_scene5_presentx_pacing(ArenaTelemetry& tel) {
         return false;
     }
 
-    /* 1. 100-frame 60 Hz Pacing + Dual-Plane HDR10 PQ + GameDVR PresentX */
+    /* 1. 240-frame 60 Hz Pacing + Dual-Plane HDR10 PQ + GameDVR PresentX */
+    /* Let OS scheduler settle after Scene 3/4 CPU bursts before measuring frame-pacing jitter. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ARENA_CHECK_HR(sc, D3D12XboxSetFrameIntervalX(dev->unix_device_handle, 16667u, 0u, 0u, 0u),
                    SCARLETT_OK);
 
-    constexpr int kFrames = 100;
+    constexpr int kWarmupFrames = 5;
+    constexpr int kFrames = 240;
     std::vector<double> abs_jitters_ms;
     abs_jitters_ms.reserve(kFrames);
 
@@ -58,7 +62,7 @@ bool run_scene5_presentx_pacing(ArenaTelemetry& tel) {
     bool gamedvr_ok = true;
     uint64_t prev_token = 0u;
 
-    for (int f = 0; f < kFrames; ++f) {
+    for (int f = -kWarmupFrames; f < kFrames; ++f) {
         uint64_t token = 0u;
         uint64_t target_ns = 0u;
         ARENA_CHECK_HR(sc,
@@ -78,7 +82,9 @@ bool run_scene5_presentx_pacing(ArenaTelemetry& tel) {
         ARENA_CHECK(sc, wait_info.out_token == token);
 
         const double jitter_ms = std::abs(static_cast<double>(wait_info.out_jitter_ns)) / 1.0e6;
-        abs_jitters_ms.push_back(jitter_ms);
+        if (f >= 0) {
+            abs_jitters_ms.push_back(jitter_ms);
+        }
 
         D3D12XBOX_PRESENT_PLANE_PARAMETERS planes[2]{};
         planes[0].ColorSpace = SCARLETT_COLOR_SPACE_G2084_P2020;

@@ -141,7 +141,8 @@ void DecompressionPool::shutdown() {
 void DecompressionPool::run_batch_slice(uint32_t worker_idx, ActiveBatch &batch) {
     struct libdeflate_decompressor *decomp = decompressors_[worker_idx];
     const size_t total = batch.job_count;
-    constexpr size_t kGrain = 16u;
+    constexpr size_t kGrain = 8u;
+    uint64_t worker_bytes = 0u;
 
     while (true) {
         const size_t start = batch.next_idx.fetch_add(kGrain, std::memory_order_relaxed);
@@ -158,8 +159,13 @@ void DecompressionPool::run_batch_slice(uint32_t worker_idx, ActiveBatch &batch)
                 int32_t expected = SCARLETT_OK;
                 batch.first_error.compare_exchange_strong(
                     expected, hr, std::memory_order_acq_rel);
+            } else {
+                worker_bytes += job.dst_size;
             }
         }
+    }
+    if (worker_bytes != 0u) {
+        total_bytes_decompressed_.fetch_add(worker_bytes, std::memory_order_relaxed);
     }
 }
 
@@ -252,11 +258,6 @@ scarlett_hresult_t DecompressionPool::decompress_tiles_parallel(
         return err;
     }
 
-    uint64_t bytes = 0;
-    for (size_t i = 0; i < job_count; ++i) {
-        bytes += jobs[i].dst_size;
-    }
-    total_bytes_decompressed_.fetch_add(bytes, std::memory_order_relaxed);
     return SCARLETT_OK;
 }
 

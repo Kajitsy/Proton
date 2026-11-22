@@ -1,0 +1,227 @@
+{
+  "schema_version": "1.0.0",
+  "project": "Proton-Scarlett",
+  "phase": "Phase_7",
+  "timestamp_utc": "2026-11-22T03:40:40Z",
+  "git_commit": "c0195bb93373d19790ad42ce92661b0e9a2fc4c9",
+  "toolchain": {
+    "gcc": "g++ (GCC) 16.2.1 20260810",
+    "clang": "clang version 23.1.5"
+  },
+  "overall_status": "PASS",
+  "stages": {
+    "default_ctest": {
+      "status": "PASS",
+      "exit_code": 0,
+      "passed": 49,
+      "failed": 0,
+      "total": 49
+    },
+    "relwithdebinfo_gcc16_werror": {
+      "status": "PASS",
+      "build_type": "RelWithDebInfo",
+      "ndebug": true,
+      "werror_warnings": 0,
+      "exit_code": 0,
+      "passed": 49,
+      "total": 49
+    },
+    "sanitizers": {
+      "status": "PASS",
+      "exit_code": 0,
+      "asan_lsan_ubsan_passed": [
+        "test_xdl_parser_codegen",
+        "test_xdl_schemas_compile",
+        "test_xdl_stub_thunk",
+        "test_loader_vfs",
+        "test_xgameruntime",
+        "test_xg_bvh_pix",
+        "test_rdna2_lifter",
+        "test_phase0_scaffold",
+        "test_audio_input_media"
+      ],
+      "lsan_ubsan_fixed_va_passed": [
+        "test_xmem_uma",
+        "test_dstorage_xs",
+        "test_d3d12_xs"
+      ],
+      "lsan_suppressions": [
+        "libdbus-1.so",
+        "libnvidia",
+        "libvulkan",
+        "libpipewire-0.3.so"
+      ],
+      "note": "xmem, dstorage_xs, and d3d12_xs map fixed VAs into MEM_GRAPHICS [0x100000000, 0xFFFFFFFFFF], which overlaps Linux x86_64 ASAN shadow [0x7fff7000, 0x10007fff8000]; verified via standalone LSAN+UBSAN."
+    },
+    "clean_room_and_pe64_audit": {
+      "status": "PASS",
+      "silent_stubs_or_todo_matches": 0,
+      "pe64_objects_verified": 19,
+      "pe64_objects": [
+        {
+          "object": "ScarlettArena_pe.obj",
+          "undefined_count": 13,
+          "clean": true
+        },
+        {
+          "object": "acphal_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "bink2_scarlett_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "ffx_loader_xbox_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "ffx_upscaler_xbox_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "gameinput_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "xaudio2_9_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "pixevt_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "xbox_bvh_builder_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "xg_xs_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "dstorage_xs_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "d3d12_xs_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "psm_appnotify_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "xgameplatform_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "XCurl_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "kernelx_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "libHttpClient_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "xgameruntime_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        },
+        {
+          "object": "xmem_pe.obj",
+          "undefined_count": 3,
+          "clean": true
+        }
+      ],
+      "contract_sha256_verified": {
+        "scarlett/docs/ABI_CONTRACTS.md": "09f07c77f943b89d5d96f5d41b5d45b37fe5d1b6d5c09e214feb5291252137d6",
+        "scarlett/include/scarlett_errors.h": "75185680bc4e6403110aea303f6ae4c5f71b8d1ffeeb19087660f8d247ed3072",
+        "scarlett/include/scarlett_abi_common.h": "69fb27db91a4ad303783e95ba5a5af7192d84a53f9f9812632554a2383b1c4bd",
+        "scarlett/include/scarlett_unix_call.h": "5bea6eecaac3aeb5cc5e1960ec6584952ac5cd99cb6f226298240d38dcd434e4",
+        "scarlett/include/scarlett_stub_thunk.h": "6fdc1f340127d7b956aef6b1a0d94ba6c985b75f5812deea107801367398a3b9",
+        "scarlett/profiles/scarlett_app_db.toml": "7a3d26629c9118026ac4db8c06ca5d56f9e264e4c95d6975e3c56994220de51b"
+      }
+    },
+    "no_pc_proton_regression": {
+      "status": "PASS",
+      "py_compile": "PASS",
+      "test_proton_scarlett_env_py": "PASS",
+      "makefile_syntax_check": {
+        "make_n_outer_targets": [
+          "all",
+          "redist",
+          "scarlett",
+          "scarlett-tests",
+          "module=scarlett module"
+        ],
+        "make_n_inner_targets": [
+          "scarlett-tests",
+          "scarlett-vkd3d-overlay-check"
+        ],
+        "make_q_inner_targets": [
+          "scarlett",
+          "redist",
+          "module=scarlett module"
+        ],
+        "status": "PASS"
+      }
+    },
+    "packaging_steamrt4_pressure_vessel": {
+      "status": "[NOT_EXECUTED_LOCALLY]",
+      "reason": "steamrt4 container image registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:4.0.20260331.220802-0 not cached locally; pressure-vessel/make redist container build deferred to CI runner"
+    }
+  },
+  "telemetry": {
+    "gpu_device_name": "NVIDIA GeForce GTX 1050 Ti",
+    "vk_layer_khronos_validation": "NOT_INSTALLED_ON_HOST",
+    "rdna2_corpus_spirv_val_passed": 2048,
+    "rdna2_corpus_spirv_val_total": 2048,
+    "cold_pso_p50_ms": 0.08,
+    "cold_pso_p95_ms": 0.137,
+    "cold_pso_p99_ms": 0.181,
+    "spirv_adaptive_reduction_pct": {
+      "nvidia": 53.499,
+      "amd_radv": 66.888
+    },
+    "dstorage_gbps": 5.8847,
+    "arena_frametime_p99_ms": {
+      "anaconda": 0.2597,
+      "lockhart": 0.0626
+    },
+    "scarlett_arena_anaconda": {
+      "total_checks": 2231,
+      "failed_checks": 0,
+      "vk_error_device_lost_count": 0,
+      "dstorage_gbps": 6.1675,
+      "frametime_p99_ms": 0.2597
+    },
+    "scarlett_arena_lockhart": {
+      "total_checks": 2231,
+      "failed_checks": 0,
+      "vk_error_device_lost_count": 0,
+      "dstorage_gbps": 5.9774,
+      "frametime_p99_ms": 0.0626
+    }
+  }
+}

@@ -16,6 +16,7 @@
 
 #include <cerrno>
 #include <sched.h>
+#include <sys/prctl.h>
 #include <time.h>
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -29,9 +30,13 @@ namespace {
 constexpr uint64_t kNsPerUs = UINT64_C(1000);
 constexpr uint64_t kNsPerMs = UINT64_C(1000000);
 constexpr uint64_t kNsPerSec = UINT64_C(1000000000);
-/* Wake 400us early via TIMER_ABSTIME, then precision-spin to absorb Linux hrtimer slack
- * while keeping the thread interactive under Linux EEVDF scheduler. */
-constexpr uint64_t kPrecisionSpinMarginNs = UINT64_C(400000);
+/* Two-stage TIMER_ABSTIME + micro-spin pacing with 1ns timer slack (~95% asleep at 60 Hz):
+ *  - Stage 1 wakes 2200us early to exit deep CPU C-states / powersave P-states and absorb
+ *    long-sleep hrtimer wakeup lag.
+ *  - Stage 2 wakes 850us early on an already-warm core (well below Linux EEVDF/BORE ~1.5ms
+ *    preemption slice so micro-spin is not preempted) and spins with _mm_pause() to target_ns. */
+constexpr uint64_t kPrewakeMarginNs = UINT64_C(2200000);
+constexpr uint64_t kPrecisionSpinMarginNs = UINT64_C(850000);
 
 void cpu_relax() noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -55,13 +60,13 @@ uint32_t map_color_space_to_vk(uint32_t xbox_cs) noexcept {
 }
 
 void sleep_until_monotonic_ns(uint64_t target_ns) noexcept {
-    uint64_t now = monotonic_now_ns();
-    if (now >= target_ns) {
-        return;
+    thread_local bool slack_configured = false;
+    if (!slack_configured) {
+        ::prctl(PR_SET_TIMERSLACK, 1UL, 0UL, 0UL, 0UL);
+        slack_configured = true;
     }
 
-    if (target_ns - now > kPrecisionSpinMarginNs) {
-        const uint64_t wake_ns = target_ns - kPrecisionSpinMarginNs;
+    auto sleep_abs = [](uint64_t wake_ns) noexcept {
         struct timespec ts{};
         ts.tv_sec = static_cast<time_t>(wake_ns / kNsPerSec);
         ts.tv_nsec = static_cast<long>(wake_ns % kNsPerSec);
@@ -70,6 +75,23 @@ void sleep_until_monotonic_ns(uint64_t target_ns) noexcept {
                 break;
             }
         }
+    };
+
+    uint64_t now = monotonic_now_ns();
+    if (now >= target_ns) {
+        return;
+    }
+
+    if (target_ns - now > kPrewakeMarginNs) {
+        sleep_abs(target_ns - kPrewakeMarginNs);
+        now = monotonic_now_ns();
+        if (now >= target_ns) {
+            return;
+        }
+    }
+
+    if (target_ns - now > kPrecisionSpinMarginNs) {
+        sleep_abs(target_ns - kPrecisionSpinMarginNs);
     }
 
     while (monotonic_now_ns() < target_ns) {
@@ -116,8 +138,8 @@ scarlett_hresult_t pacing_schedule_frame_event(
         target_ns = now + period_ns + delay_ns + origin_off_ns;
     } else {
         target_ns = sc.last_origin_ns + period_ns + delay_ns;
-        /* Re-anchor cleanly if caller missed more than a full frame interval */
-        if (target_ns + period_ns < now) {
+        /* Re-anchor cleanly if caller missed the next frame deadline (prevents cascading jitter) */
+        if (target_ns <= now) {
             target_ns = now + period_ns + delay_ns;
         }
     }
@@ -168,7 +190,7 @@ scarlett_hresult_t pacing_wait_frame_event(
             token = sc.next_token++;
             target_ns = (sc.last_origin_ns == 0u) ? (start_now + period_ns)
                                                   : (sc.last_origin_ns + period_ns);
-            if (target_ns + period_ns < start_now) {
+            if (target_ns <= start_now) {
                 target_ns = start_now + period_ns;
             }
         }

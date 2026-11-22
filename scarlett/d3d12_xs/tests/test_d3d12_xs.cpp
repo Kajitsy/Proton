@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -788,15 +789,19 @@ bool test_6_frame_pacing_and_dual_plane_hdr10_presentx() {
     CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, &dev_raw), SCARLETT_OK);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
 
+    /* Let OS scheduler settle after preceding Vulkan/CPU test bursts before measuring pacing. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
     /* Set 60 FPS interval (16667 us) */
     CHECK_HR(D3D12XboxSetFrameIntervalX(dev->unix_device_handle, 16667u, 0u, 0u, 0u), SCARLETT_OK);
 
-    constexpr int kFrames = 100;
+    constexpr int kWarmupFrames = 5;
+    constexpr int kFrames = 240;
     std::vector<double> abs_jitters_ms;
     abs_jitters_ms.reserve(kFrames);
 
     uint64_t prev_token = 0u;
-    for (int f = 0; f < kFrames; ++f) {
+    for (int f = -kWarmupFrames; f < kFrames; ++f) {
         uint64_t token = 0u;
         uint64_t target_ns = 0u;
         CHECK_HR(D3D12XboxScheduleFrameEventX(dev->unix_device_handle,
@@ -814,7 +819,9 @@ bool test_6_frame_pacing_and_dual_plane_hdr10_presentx() {
         CHECK(wait_info.out_token == token);
 
         const double jitter_ms = std::abs(static_cast<double>(wait_info.out_jitter_ns)) / 1.0e6;
-        abs_jitters_ms.push_back(jitter_ms);
+        if (f >= 0) {
+            abs_jitters_ms.push_back(jitter_ms);
+        }
 
         /* Dual-Plane HDR10 PQ (G2084_P2020) + GameDVR (G22_P709) PresentX */
         D3D12XBOX_PRESENT_PLANE_PARAMETERS planes[2]{};
@@ -838,7 +845,7 @@ bool test_6_frame_pacing_and_dual_plane_hdr10_presentx() {
         CHECK(present_out.out_vk_color_space_plane0 == SCAR_VK_COLOR_SPACE_HDR10_ST2084_EXT);
         CHECK(present_out.out_vk_color_space_plane1 == SCAR_VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
         CHECK(present_out.out_gamedvr_captured == 1u);
-        CHECK(present_out.out_present_serial == static_cast<uint64_t>(f + 1));
+        CHECK(present_out.out_present_serial == static_cast<uint64_t>(f + kWarmupFrames + 1));
     }
 
     /* Also verify 1-plane HDR10 PresentX */
