@@ -25,8 +25,8 @@
     "silent_stubs_allowed": false,
     "strict_mode_env": "PROTON_XBOX_STRICT"
   },
-  "phase": "Phase_6",
-  "current_phase": 6,
+  "phase": "Phase_7",
+  "current_phase": 7,
   "worktrees": {
     "phase0-contracts": { "status": "merged", "commit": "212f47cda28c061e18e64cad695882c80218a66a" },
     "phase0-infra": { "status": "merged", "commit": "b6b4038d88333532c0f65b13785aae1d18babc96" },
@@ -38,7 +38,8 @@
     "wt-xg-bvh-pix": { "status": "merged", "commit": "a8bb55a12186bc82bb279b1a597ab143f3acd95a" },
     "wt-d3d12xs-core": { "status": "merged", "commit": "b97d54a314e706789ec209df780a19b174eddffd" },
     "wt-rdna2-lifter": { "status": "merged", "commit": "e828df074b11f28c30ea2959f919aa7cbced1ae2" },
-    "wt-dstorage-io": { "status": "merged", "commit": "e804143ce18d061e8eb8b42f125da5589fc67dff" }
+    "wt-dstorage-io": { "status": "merged", "commit": "e804143ce18d061e8eb8b42f125da5589fc67dff" },
+    "wt-qa-arena": { "status": "merged", "commit": "21d4ef3821cea5899bc2fcc122c3791f52d0a76b" }
   },
   "verified_exports_count": {
     "xgameruntime": 182,
@@ -57,8 +58,8 @@
   "perf_baselines": {
     "cold_pso_p99_ms": 0.182,
     "spirv_adaptive_reduction_pct": { "nvidia": 53.50, "amd_radv": 66.89 },
-    "dstorage_gbps": 5.86,
-    "arena_frametime_p99_ms": 0.5546
+    "dstorage_gbps": 6.07,
+    "arena_frametime_p99_ms": { "anaconda": 0.6467, "lockhart": 0.5034 }
   },
   "phases": {
     "phase_0": {
@@ -96,13 +97,13 @@
     },
     "phase_6": {
       "name": "DX12 Ultimate & AAA Middleware Integration + ScarlettArena-Linux 6-Scene Stress Suite",
-      "status": "in_progress",
-      "exit_gate": "All 6 ScarlettArena-Linux stress scenes pass with 0 VK_ERROR_DEVICE_LOST in both anaconda and lockhart modes"
+      "status": "completed",
+      "exit_gate": "All 6 ScarlettArena-Linux stress scenes PASS (1452/1452 checks in both anaconda 13.5 GiB and lockhart 8.5 GiB), 0 VK_ERROR_DEVICE_LOST, real PE64 ScarlettArena.exe + 148B DDS+DX10, 5/5+3/3 libc_malloc_debug PASS — 48/48 ctest PASS"
     },
     "phase_7": {
-      "name": "ScarlettArena-Linux 6-Scene Stress Suite & Multi-Vendor Verification",
-      "status": "pending",
-      "exit_gate": "All 6 scenes pass on AMD RADV, NVIDIA 595+/610+, Intel ANV; soak test zero leaks; zero standard Proton 11.0 regressions"
+      "name": "Packaging, Hardening, proton-scarlett-inspect, run_ci_matrix.sh, ASAN/LSAN & Final Neon Sign-off",
+      "status": "in_progress",
+      "exit_gate": "make redist & Makefile.in verified, proton-scarlett-inspect CLI + run_ci_matrix.sh + ci_report.json, ASAN/LSAN/RelWithDebInfo clean, zero PC Proton 11.0 regressions, Final Neon Sign-off"
     }
   }
 }
