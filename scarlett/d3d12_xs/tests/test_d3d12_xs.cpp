@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -787,6 +788,9 @@ bool test_6_frame_pacing_and_dual_plane_hdr10_presentx() {
     void *dev_raw = nullptr;
     CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, &dev_raw), SCARLETT_OK);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
+
+    /* Let OS scheduler settle after preceding Vulkan/CPU test bursts before measuring pacing. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     /* Set 60 FPS interval (16667 us) */
     CHECK_HR(D3D12XboxSetFrameIntervalX(dev->unix_device_handle, 16667u, 0u, 0u, 0u), SCARLETT_OK);

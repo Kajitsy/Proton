@@ -30,9 +30,13 @@ namespace {
 constexpr uint64_t kNsPerUs = UINT64_C(1000);
 constexpr uint64_t kNsPerMs = UINT64_C(1000000);
 constexpr uint64_t kNsPerSec = UINT64_C(1000000000);
-/* Wake 550us early via TIMER_ABSTIME with 1ns timer slack (>96.7% asleep) so EEVDF gives
- * interactive wakeup priority while absorbing up to 2.0ms kernel timer wakeup jitter. */
-constexpr uint64_t kPrecisionSpinMarginNs = UINT64_C(550000);
+/* Two-stage TIMER_ABSTIME + micro-spin pacing with 1ns timer slack (~95% asleep at 60 Hz):
+ *  - Stage 1 wakes 2200us early to exit deep CPU C-states / powersave P-states and absorb
+ *    long-sleep hrtimer wakeup lag.
+ *  - Stage 2 wakes 850us early on an already-warm core (well below Linux EEVDF/BORE ~1.5ms
+ *    preemption slice so micro-spin is not preempted) and spins with _mm_pause() to target_ns. */
+constexpr uint64_t kPrewakeMarginNs = UINT64_C(2200000);
+constexpr uint64_t kPrecisionSpinMarginNs = UINT64_C(850000);
 
 void cpu_relax() noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -76,6 +80,14 @@ void sleep_until_monotonic_ns(uint64_t target_ns) noexcept {
     uint64_t now = monotonic_now_ns();
     if (now >= target_ns) {
         return;
+    }
+
+    if (target_ns - now > kPrewakeMarginNs) {
+        sleep_abs(target_ns - kPrewakeMarginNs);
+        now = monotonic_now_ns();
+        if (now >= target_ns) {
+            return;
+        }
     }
 
     if (target_ns - now > kPrecisionSpinMarginNs) {

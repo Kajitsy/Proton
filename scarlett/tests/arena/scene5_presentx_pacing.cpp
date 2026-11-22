@@ -47,7 +47,7 @@ bool run_scene5_presentx_pacing(ArenaTelemetry& tel) {
         return false;
     }
 
-    /* 1. 150-frame 60 Hz Pacing + Dual-Plane HDR10 PQ + GameDVR PresentX */
+    /* 1. 240-frame 60 Hz Pacing + Dual-Plane HDR10 PQ + GameDVR PresentX */
     /* Let OS scheduler settle after Scene 3/4 CPU bursts before measuring frame-pacing jitter. */
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ARENA_CHECK_HR(sc, D3D12XboxSetFrameIntervalX(dev->unix_device_handle, 16667u, 0u, 0u, 0u),

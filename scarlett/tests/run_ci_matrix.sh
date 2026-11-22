@@ -161,17 +161,17 @@ done
 echo ""
 echo "[Stage 4/6] Clean-Room, Zero Silent Stubs, PE64 isolation & SHA-256 audit..."
 
-# 4a. Zero silent stubs / TODO / FIXME check (constructing pattern dynamically to avoid self-match)
+# 4a. Zero silent stubs or deferred-work markers (constructing pattern dynamically to avoid self-match)
 P_TODO="TO""DO"
 P_FIXME="FIX""ME"
 P_SOK="return[[:space:]]+S_""OK[[:space:]]*;"
 STUB_MATCHES="$(rg -n -e "\b(${P_TODO}|${P_FIXME})\b" -e "${P_SOK}" "${SCARLETT_DIR}" || true)"
 if [[ -n "${STUB_MATCHES}" ]]; then
-    echo "[FAIL] Found forbidden TODO/FIXME/return S_OK; markers:" >&2
+    echo "[FAIL] Found forbidden deferred-work or silent-success markers:" >&2
     echo "${STUB_MATCHES}" >&2
     exit 1
 fi
-echo "  [PASS] Zero TODO / FIXME / silent return S_OK; across scarlett/"
+echo "  [PASS] Zero deferred-work or silent-success markers across scarlett/"
 
 # 4b. PE64 Isolation: check every CMake-built .obj + remaining 5 host *_pe.c files
 PE_EXTRA_DIR="${WORK_DIR}/pe64-extra"
@@ -265,12 +265,12 @@ PY
 # ----------------------------------------------------------------------------
 echo ""
 echo "[Stage 5/6] No PC Proton regression & Makefile.in syntax verification..."
-python3 -m py_compile \
+PYTHONPYCACHEPREFIX="${WORK_DIR}/pycache" python3 -m py_compile \
     "${REPO_ROOT}/proton" \
     "${REPO_ROOT}/default_pfx.py" \
     "${SCARLETT_DIR}/tools/proton-scarlett-inspect"
 
-python3 "${SCARLETT_DIR}/tests/test_proton_scarlett_env.py" \
+PYTHONDONTWRITEBYTECODE=1 python3 "${SCARLETT_DIR}/tests/test_proton_scarlett_env.py" \
     > "${WORK_DIR}/stage5_env_py.log" 2>&1
 
 MAKE_CHECK_DIR="${WORK_DIR}/make-check"
@@ -387,11 +387,15 @@ dstorage_txt = read_text(os.path.join(work_dir, "dstorage_bench.log"))
 
 def parse_ctest_counts(txt):
     m = re.search(r"(\d+)% tests passed,\s*(\d+) tests failed out of (\d+)", txt)
-    if not m:
-        return {"passed": 0, "failed": -1, "total": 0}
-    total = int(m.group(3))
-    failed = int(m.group(2))
-    return {"passed": total - failed, "failed": failed, "total": total}
+    if m:
+        total = int(m.group(3))
+        failed = int(m.group(2))
+        return {"passed": total - failed, "failed": failed, "total": total}
+    m2 = re.search(r"100% tests passed out of (\d+)", txt)
+    if m2:
+        total = int(m2.group(1))
+        return {"passed": total, "failed": 0, "total": total}
+    return {"passed": 0, "failed": -1, "total": 0}
 
 def parse_float(pattern, txt, default=0.0):
     m = re.search(pattern, txt)
@@ -432,7 +436,12 @@ report = {
         "gcc": gcc_ver,
         "clang": clang_ver,
     },
-    "overall_status": "PASS",
+    "overall_status": (
+        "PASS"
+        if (default_counts["failed"] == 0 and default_counts["total"] >= 49
+            and rel_counts["failed"] == 0 and rel_counts["total"] >= 49)
+        else "FAIL"
+    ),
     "stages": {
         "default_ctest": {
             "status": "PASS" if default_counts["failed"] == 0 and default_counts["total"] >= 49 else "FAIL",
@@ -521,6 +530,9 @@ report = {
 with open(report_path, "w", encoding="utf-8") as f:
     json.dump(report, f, indent=2)
     f.write("\n")
+
+if report["overall_status"] != "PASS":
+    raise SystemExit(f"CI report overall_status is {report['overall_status']} (expected PASS)")
 
 print(f"[PASS] Wrote CI report to {report_path}")
 PY
