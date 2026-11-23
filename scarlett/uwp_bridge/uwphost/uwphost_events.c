@@ -8,6 +8,10 @@
 
 #include "uwphost_internal.h"
 
+#ifdef _WIN32
+#include <objbase.h>
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -117,6 +121,24 @@ size_t uwp_event_list_count(uwp_event_list_t *list) {
 /* ============================================================================
  * Shared IInspectable Helpers
  * ============================================================================ */
+
+HRESULT uwp_alloc_iids(const GUID *src, ULONG count, ULONG *out_count, IID **out_iids) {
+    if (!out_count || !out_iids) return E_INVALIDARG;
+    *out_count = 0;
+    *out_iids = NULL;
+    if (!src || count == 0u) return S_OK;
+    size_t sz = (size_t)count * sizeof(IID);
+#ifdef _WIN32
+    IID *buf = (IID *)CoTaskMemAlloc(sz);
+#else
+    IID *buf = (IID *)malloc(sz);
+#endif
+    if (!buf) return E_OUTOFMEMORY;
+    memcpy(buf, src, sz);
+    *out_count = count;
+    *out_iids = buf;
+    return S_OK;
+}
 
 static HRESULT uwp_std_get_iids(ULONG *count, IID **iids) {
     if (!count || !iids) return E_INVALIDARG;
@@ -1458,7 +1480,9 @@ static ULONG UWP_CALL spl_Release(UwpISplashScreen *This) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL spl_GetIids(UwpISplashScreen *This, ULONG *c, IID **i) {
-    (void)This; return uwp_std_get_iids(c, i);
+    (void)This;
+    const GUID list[1] = { UWP_IID_ISplashScreen };
+    return uwp_alloc_iids(list, 1u, c, i);
 }
 static HRESULT UWP_CALL spl_GetRuntimeClassName(UwpISplashScreen *This, UWP_HSTRING *n) {
     (void)This; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Activation.SplashScreen", n);
@@ -1472,8 +1496,8 @@ static HRESULT UWP_CALL spl_get_ImageLocation(UwpISplashScreen *This, UwpRect *v
     uint32_t w = 0, h = 0;
     uwp_core_get_client_size(&w, &h);
     v->X = 0.0f; v->Y = 0.0f;
-    v->Width = (float)(w ? w : 620u);
-    v->Height = (float)(h ? h : 300u);
+    v->Width = (float)(w ? w : 1280u);
+    v->Height = (float)(h ? h : 720u);
     return S_OK;
 }
 static HRESULT UWP_CALL spl_add_Dismissed(UwpISplashScreen *This, UwpTypedEventHandler *h,
@@ -1495,11 +1519,23 @@ static const UwpISplashScreenVtbl g_spl_vtbl = {
 typedef struct UwpLaunchArgsObj {
     UwpIActivatedEventArgs activated;
     UwpILaunchActivatedEventArgs launch;
+    UwpIPrelaunchActivatedEventArgs prelaunch;
+    UwpIApplicationViewActivatedEventArgs app_view;
     volatile int32_t ref;
     UwpSplashScreenObj *splash;
     wchar_t arguments[512];
     wchar_t tile_id[128];
 } UwpLaunchArgsObj;
+
+static HRESULT la_get_iids_impl(ULONG *c, IID **i) {
+    const GUID list[4] = {
+        UWP_IID_IActivatedEventArgs,
+        UWP_IID_ILaunchActivatedEventArgs,
+        UWP_IID_IPrelaunchActivatedEventArgs,
+        UWP_IID_IApplicationViewActivatedEventArgs
+    };
+    return uwp_alloc_iids(list, 4u, c, i);
+}
 
 static void launch_args_free(UwpLaunchArgsObj *o) {
     if (o->splash) o->splash->iface.lpVtbl->Release(&o->splash->iface);
@@ -1520,6 +1556,16 @@ static HRESULT UWP_CALL la_qi_impl(UwpLaunchArgsObj *o, REFIID riid, void **ppv)
         *ppv = &o->launch;
         return S_OK;
     }
+    if (uwp_guid_equal(riid, &UWP_IID_IPrelaunchActivatedEventArgs)) {
+        uwp_atomic_inc(&o->ref);
+        *ppv = &o->prelaunch;
+        return S_OK;
+    }
+    if (uwp_guid_equal(riid, &UWP_IID_IApplicationViewActivatedEventArgs)) {
+        uwp_atomic_inc(&o->ref);
+        *ppv = &o->app_view;
+        return S_OK;
+    }
     *ppv = NULL;
     return E_NOINTERFACE;
 }
@@ -1536,7 +1582,7 @@ static ULONG UWP_CALL la_Release(UwpIActivatedEventArgs *This) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL la_GetIids(UwpIActivatedEventArgs *This, ULONG *c, IID **i) {
-    (void)This; return uwp_std_get_iids(c, i);
+    (void)This; return la_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL la_GetRuntimeClassName(UwpIActivatedEventArgs *This, UWP_HSTRING *n) {
     (void)This; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Activation.LaunchActivatedEventArgs", n);
@@ -1574,7 +1620,7 @@ static ULONG UWP_CALL lla_Release(UwpILaunchActivatedEventArgs *This) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL lla_GetIids(UwpILaunchActivatedEventArgs *This, ULONG *c, IID **i) {
-    (void)This; return uwp_std_get_iids(c, i);
+    (void)This; return la_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL lla_GetRuntimeClassName(UwpILaunchActivatedEventArgs *This, UWP_HSTRING *n) {
     (void)This; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Activation.LaunchActivatedEventArgs", n);
@@ -1591,6 +1637,60 @@ static HRESULT UWP_CALL lla_get_TileId(UwpILaunchActivatedEventArgs *This, UWP_H
     return uwp_hstring_create_from_wstr(o->tile_id, v);
 }
 
+static HRESULT UWP_CALL pla_QueryInterface(UwpIPrelaunchActivatedEventArgs *This, REFIID riid, void **ppv) {
+    return la_qi_impl(UWP_CONTAINING_RECORD(This, UwpLaunchArgsObj, prelaunch), riid, ppv);
+}
+static ULONG UWP_CALL pla_AddRef(UwpIPrelaunchActivatedEventArgs *This) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(This, UwpLaunchArgsObj, prelaunch)->ref);
+}
+static ULONG UWP_CALL pla_Release(UwpIPrelaunchActivatedEventArgs *This) {
+    UwpLaunchArgsObj *o = UWP_CONTAINING_RECORD(This, UwpLaunchArgsObj, prelaunch);
+    int32_t r = uwp_atomic_dec(&o->ref);
+    if (r == 0) launch_args_free(o);
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL pla_GetIids(UwpIPrelaunchActivatedEventArgs *This, ULONG *c, IID **i) {
+    (void)This; return la_get_iids_impl(c, i);
+}
+static HRESULT UWP_CALL pla_GetRuntimeClassName(UwpIPrelaunchActivatedEventArgs *This, UWP_HSTRING *n) {
+    (void)This; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Activation.LaunchActivatedEventArgs", n);
+}
+static HRESULT UWP_CALL pla_GetTrustLevel(UwpIPrelaunchActivatedEventArgs *This, UwpTrustLevel *t) {
+    (void)This; return uwp_std_get_trust_level(t);
+}
+static HRESULT UWP_CALL pla_get_PrelaunchActivated(UwpIPrelaunchActivatedEventArgs *This, uint8_t *v) {
+    (void)This; if (!v) return E_INVALIDARG;
+    *v = 0u;
+    return S_OK;
+}
+
+static HRESULT UWP_CALL ava_QueryInterface(UwpIApplicationViewActivatedEventArgs *This, REFIID riid, void **ppv) {
+    return la_qi_impl(UWP_CONTAINING_RECORD(This, UwpLaunchArgsObj, app_view), riid, ppv);
+}
+static ULONG UWP_CALL ava_AddRef(UwpIApplicationViewActivatedEventArgs *This) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(This, UwpLaunchArgsObj, app_view)->ref);
+}
+static ULONG UWP_CALL ava_Release(UwpIApplicationViewActivatedEventArgs *This) {
+    UwpLaunchArgsObj *o = UWP_CONTAINING_RECORD(This, UwpLaunchArgsObj, app_view);
+    int32_t r = uwp_atomic_dec(&o->ref);
+    if (r == 0) launch_args_free(o);
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL ava_GetIids(UwpIApplicationViewActivatedEventArgs *This, ULONG *c, IID **i) {
+    (void)This; return la_get_iids_impl(c, i);
+}
+static HRESULT UWP_CALL ava_GetRuntimeClassName(UwpIApplicationViewActivatedEventArgs *This, UWP_HSTRING *n) {
+    (void)This; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Activation.LaunchActivatedEventArgs", n);
+}
+static HRESULT UWP_CALL ava_GetTrustLevel(UwpIApplicationViewActivatedEventArgs *This, UwpTrustLevel *t) {
+    (void)This; return uwp_std_get_trust_level(t);
+}
+static HRESULT UWP_CALL ava_get_CurrentlyShownApplicationViewId(UwpIApplicationViewActivatedEventArgs *This, int32_t *v) {
+    (void)This; if (!v) return E_INVALIDARG;
+    *v = 1;
+    return S_OK;
+}
+
 static const UwpIActivatedEventArgsVtbl g_la_vtbl = {
     la_QueryInterface, la_AddRef, la_Release,
     la_GetIids, la_GetRuntimeClassName, la_GetTrustLevel,
@@ -1600,6 +1700,16 @@ static const UwpILaunchActivatedEventArgsVtbl g_lla_vtbl = {
     lla_QueryInterface, lla_AddRef, lla_Release,
     lla_GetIids, lla_GetRuntimeClassName, lla_GetTrustLevel,
     lla_get_Arguments, lla_get_TileId
+};
+static const UwpIPrelaunchActivatedEventArgsVtbl g_pla_vtbl = {
+    pla_QueryInterface, pla_AddRef, pla_Release,
+    pla_GetIids, pla_GetRuntimeClassName, pla_GetTrustLevel,
+    pla_get_PrelaunchActivated
+};
+static const UwpIApplicationViewActivatedEventArgsVtbl g_ava_vtbl = {
+    ava_QueryInterface, ava_AddRef, ava_Release,
+    ava_GetIids, ava_GetRuntimeClassName, ava_GetTrustLevel,
+    ava_get_CurrentlyShownApplicationViewId
 };
 
 UwpIActivatedEventArgs *uwp_create_launch_activated_args(const wchar_t *arguments, const wchar_t *tile_id) {
@@ -1615,6 +1725,8 @@ UwpIActivatedEventArgs *uwp_create_launch_activated_args(const wchar_t *argument
 
     o->activated.lpVtbl = &g_la_vtbl;
     o->launch.lpVtbl = &g_lla_vtbl;
+    o->prelaunch.lpVtbl = &g_pla_vtbl;
+    o->app_view.lpVtbl = &g_ava_vtbl;
     o->ref = 1;
     o->splash = s;
     if (arguments) {
@@ -1943,7 +2055,9 @@ static ULONG UWP_CALL aa_Release(UwpIAsyncAction *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL aa_GetIids(UwpIAsyncAction *T, ULONG *c, IID **i) {
-    (void)T; return uwp_std_get_iids(c, i);
+    (void)T;
+    const GUID list[2] = { UWP_IID_IAsyncAction, UWP_IID_IAsyncInfo };
+    return uwp_alloc_iids(list, 2u, c, i);
 }
 static HRESULT UWP_CALL aa_GetName(UwpIAsyncAction *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.Foundation.IAsyncAction", n);
@@ -2009,7 +2123,9 @@ static ULONG UWP_CALL ai_Release(UwpIAsyncInfo *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL ai_GetIids(UwpIAsyncInfo *T, ULONG *c, IID **i) {
-    (void)T; return uwp_std_get_iids(c, i);
+    (void)T;
+    const GUID list[2] = { UWP_IID_IAsyncAction, UWP_IID_IAsyncInfo };
+    return uwp_alloc_iids(list, 2u, c, i);
 }
 static HRESULT UWP_CALL ai_GetName(UwpIAsyncInfo *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.Foundation.IAsyncAction", n);
@@ -2164,7 +2280,13 @@ static ULONG UWP_CALL ps_Release(UwpIMap *This) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL ps_GetIids(UwpIMap *This, ULONG *c, IID **i) {
-    (void)This; return uwp_std_get_iids(c, i);
+    (void)This;
+    const GUID list[3] = {
+        UWP_IID_IPropertySet,
+        UWP_IID_IMap_HSTRING_IInspectable,
+        UWP_IID_IObservableMap_HSTRING_IInspectable
+    };
+    return uwp_alloc_iids(list, 3u, c, i);
 }
 static HRESULT UWP_CALL ps_GetName(UwpIMap *This, UWP_HSTRING *n) {
     (void)This; return uwp_hstring_create_from_wstr(L"Windows.Foundation.Collections.PropertySet", n);

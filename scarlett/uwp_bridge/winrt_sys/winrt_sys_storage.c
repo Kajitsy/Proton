@@ -33,6 +33,165 @@ typedef struct WinrtStorageFolderStaticsVtbl {
     HRESULT (STDMETHODCALLTYPE *GetFolderFromPathAsync)(void *This, HSTRING path, void **operation);
 } WinrtStorageFolderStaticsVtbl;
 
+typedef struct WinrtStorageFileStaticsVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *GetFileFromPathAsync)(void *This, HSTRING path, void **operation);
+    HRESULT (STDMETHODCALLTYPE *GetFileFromApplicationUriAsync)(void *This, void *uri, void **operation);
+    HRESULT (STDMETHODCALLTYPE *CreateStreamedFileAsync)(void *This, HSTRING name, void *dataReq, void *thumb, void **op);
+    HRESULT (STDMETHODCALLTYPE *ReplaceWithStreamedFileAsync)(void *This, void *file, void *dataReq, void *thumb, void **op);
+    HRESULT (STDMETHODCALLTYPE *CreateStreamedFileFromUriAsync)(void *This, HSTRING name, void *uri, void *thumb, void **op);
+    HRESULT (STDMETHODCALLTYPE *ReplaceWithStreamedFileFromUriAsync)(void *This, void *file, void *uri, void *thumb, void **op);
+} WinrtStorageFileStaticsVtbl;
+
+typedef struct WinrtStorageFolder2Vtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *TryGetItemAsync)(void *This, HSTRING name, void **operation);
+} WinrtStorageFolder2Vtbl;
+
+typedef struct WinrtStorageItem2Vtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *GetParentAsync)(void *This, void **operation);
+    HRESULT (STDMETHODCALLTYPE *IsEqual)(void *This, void *item, boolean *value);
+} WinrtStorageItem2Vtbl;
+
+typedef struct WinrtStorageFile2Vtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *OpenWithOptionsAsync)(void *This, uint32_t accessMode, uint32_t options, void **operation);
+    HRESULT (STDMETHODCALLTYPE *OpenTransactedWriteWithOptionsAsync)(void *This, uint32_t options, void **operation);
+} WinrtStorageFile2Vtbl;
+
+typedef struct WinrtBasicPropertiesVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *get_Size)(void *This, uint64_t *value);
+    HRESULT (STDMETHODCALLTYPE *get_DateModified)(void *This, int64_t *value);
+    HRESULT (STDMETHODCALLTYPE *get_ItemDate)(void *This, int64_t *value);
+} WinrtBasicPropertiesVtbl;
+
+typedef struct WinrtRandomAccessStreamRefVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *OpenReadAsync)(void *This, void **operation);
+} WinrtRandomAccessStreamRefVtbl;
+
+typedef struct WinrtInputStreamRefVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *OpenSequentialReadAsync)(void *This, void **operation);
+} WinrtInputStreamRefVtbl;
+
+typedef struct WinrtRandomAccessStreamVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *get_Size)(void *This, uint64_t *value);
+    HRESULT (STDMETHODCALLTYPE *put_Size)(void *This, uint64_t value);
+    HRESULT (STDMETHODCALLTYPE *GetInputStreamAt)(void *This, uint64_t position, void **stream);
+    HRESULT (STDMETHODCALLTYPE *GetOutputStreamAt)(void *This, uint64_t position, void **stream);
+    HRESULT (STDMETHODCALLTYPE *get_Position)(void *This, uint64_t *value);
+    HRESULT (STDMETHODCALLTYPE *Seek)(void *This, uint64_t position);
+    HRESULT (STDMETHODCALLTYPE *CloneStream)(void *This, void **stream);
+    HRESULT (STDMETHODCALLTYPE *get_CanRead)(void *This, boolean *value);
+    HRESULT (STDMETHODCALLTYPE *get_CanWrite)(void *This, boolean *value);
+} WinrtRandomAccessStreamVtbl;
+
+typedef struct WinrtInputStreamVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *ReadAsync)(void *This, void *buffer, uint32_t count, uint32_t options, void **operation);
+} WinrtInputStreamVtbl;
+
+typedef struct WinrtOutputStreamVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *WriteAsync)(void *This, void *buffer, void **operation);
+    HRESULT (STDMETHODCALLTYPE *FlushAsync)(void *This, void **operation);
+} WinrtOutputStreamVtbl;
+
+typedef struct WinrtClosableVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *Close)(void *This);
+} WinrtClosableVtbl;
+
+typedef struct WinrtContentTypeProviderVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *get_ContentType)(void *This, HSTRING *value);
+} WinrtContentTypeProviderVtbl;
+
+typedef struct WinrtUriProxyVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *get_AbsoluteUri)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_DisplayUri)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_Domain)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_Extension)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_Fragment)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_Host)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_Password)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_Path)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_Query)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_QueryParsed)(void *This, void **decoder);
+    HRESULT (STDMETHODCALLTYPE *get_RawUri)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_SchemeName)(void *This, HSTRING *value);
+} WinrtUriProxyVtbl;
+
 typedef struct WinrtStorageItemVtbl {
     HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
     ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
@@ -233,7 +392,10 @@ typedef struct WinrtMapViewHstringPtrVtbl {
     HRESULT (STDMETHODCALLTYPE *Split)(void *This, void **first, void **second);
 } WinrtMapViewHstringPtrVtbl;
 
-typedef struct WinrtIterableVtbl {
+typedef struct WinrtIterableVtbl WinrtIterableVtbl;
+typedef struct WinrtIteratorPtrVtbl WinrtIteratorPtrVtbl;
+
+struct WinrtIterableVtbl {
     HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
     ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
     ULONG   (STDMETHODCALLTYPE *Release)(void *This);
@@ -241,9 +403,9 @@ typedef struct WinrtIterableVtbl {
     HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
     HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
     HRESULT (STDMETHODCALLTYPE *First)(void *This, void **first);
-} WinrtIterableVtbl;
+};
 
-typedef struct WinrtIteratorPtrVtbl {
+struct WinrtIteratorPtrVtbl {
     HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
     ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
     ULONG   (STDMETHODCALLTYPE *Release)(void *This);
@@ -254,7 +416,7 @@ typedef struct WinrtIteratorPtrVtbl {
     HRESULT (STDMETHODCALLTYPE *get_HasCurrent)(void *This, boolean *value);
     HRESULT (STDMETHODCALLTYPE *MoveNext)(void *This, boolean *value);
     HRESULT (STDMETHODCALLTYPE *GetMany)(void *This, uint32_t itemsSize, void **items, uint32_t *value);
-} WinrtIteratorPtrVtbl;
+};
 
 typedef struct WinrtKvpHstringPtrVtbl {
     HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
@@ -291,12 +453,108 @@ typedef struct WinrtMapChangedHandlerVtbl {
 
 typedef struct WinrtStoragePtrList {
     const WinrtVectorViewPtrVtbl *lpVtbl;
+    const WinrtIterableVtbl      *lpVtblIter;
     volatile LONG ref_count;
     GUID view_iid;
+    GUID iter_iid;
+    GUID iterator_iid;
     wchar_t runtime_class_name[160];
     uint32_t count;
     IUnknown **items;
 } WinrtStoragePtrList;
+
+typedef struct WinrtStoragePtrIter {
+    const WinrtIteratorPtrVtbl *lpVtbl;
+    volatile LONG ref_count;
+    WinrtStoragePtrList *list;
+    uint32_t index;
+} WinrtStoragePtrIter;
+
+static HRESULT STDMETHODCALLTYPE sp_it_qi(void *This, REFIID riid, void **ppv) {
+    WinrtStoragePtrIter *it = (WinrtStoragePtrIter *)This;
+    if (!ppv) return E_POINTER;
+    *ppv = NULL;
+    if (!riid) return E_INVALIDARG;
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IUnknown) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IInspectable) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject) ||
+        winrt_sys_guid_eq(riid, &it->list->iterator_iid)) {
+        InterlockedIncrement(&it->ref_count);
+        *ppv = it;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE sp_it_addref(void *This) {
+    return (ULONG)InterlockedIncrement(&((WinrtStoragePtrIter *)This)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE sp_it_release(void *This) {
+    WinrtStoragePtrIter *it = (WinrtStoragePtrIter *)This;
+    LONG rc = InterlockedDecrement(&it->ref_count);
+    if (rc == 0) {
+        if (it->list) it->list->lpVtbl->Release(&it->list->lpVtbl);
+        winrt_sys_free(it);
+    }
+    return (ULONG)rc;
+}
+static HRESULT STDMETHODCALLTYPE sp_it_getiids(void *This, ULONG *c, IID **i) {
+    WinrtStoragePtrIter *it = (WinrtStoragePtrIter *)This;
+    return winrt_sys_get_iids_copy(&it->list->iterator_iid, 1, c, i);
+}
+static HRESULT STDMETHODCALLTYPE sp_it_rcn(void *This, HSTRING *n) {
+    (void)This;
+    return winrt_sys_make_hstring(L"Windows.Foundation.Collections.IIterator", n);
+}
+static HRESULT STDMETHODCALLTYPE sp_it_tl(void *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE sp_it_cur(void *This, void **val) {
+    WinrtStoragePtrIter *it = (WinrtStoragePtrIter *)This;
+    if (!val) return E_POINTER;
+    *val = NULL;
+    if (it->index >= it->list->count) return E_BOUNDS;
+    IUnknown *elem = it->list->items[it->index];
+    if (elem) elem->lpVtbl->AddRef(elem);
+    *val = elem;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE sp_it_has(void *This, boolean *val) {
+    WinrtStoragePtrIter *it = (WinrtStoragePtrIter *)This;
+    if (!val) return E_POINTER;
+    *val = (it->index < it->list->count) ? 1 : 0;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE sp_it_next(void *This, boolean *val) {
+    WinrtStoragePtrIter *it = (WinrtStoragePtrIter *)This;
+    if (!val) return E_POINTER;
+    if (it->index < it->list->count) it->index++;
+    *val = (it->index < it->list->count) ? 1 : 0;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE sp_it_many(void *This, uint32_t cap, void **out, uint32_t *actual) {
+    WinrtStoragePtrIter *it = (WinrtStoragePtrIter *)This;
+    if (!actual) return E_POINTER;
+    *actual = 0;
+    if (it->index >= it->list->count || cap == 0 || !out) return S_OK;
+    uint32_t n = it->list->count - it->index;
+    if (n > cap) n = cap;
+    for (uint32_t i = 0; i < n; ++i) {
+        IUnknown *elem = it->list->items[it->index + i];
+        if (elem) elem->lpVtbl->AddRef(elem);
+        out[i] = elem;
+    }
+    it->index += n;
+    *actual = n;
+    return S_OK;
+}
+
+static const WinrtIteratorPtrVtbl g_sp_it_vtbl = {
+    sp_it_qi, sp_it_addref, sp_it_release, sp_it_getiids, sp_it_rcn, sp_it_tl,
+    sp_it_cur, sp_it_has, sp_it_next, sp_it_many
+};
 
 static HRESULT STDMETHODCALLTYPE sp_list_qi(void *This, REFIID riid, void **ppv) {
     WinrtStoragePtrList *obj = (WinrtStoragePtrList *)This;
@@ -308,7 +566,12 @@ static HRESULT STDMETHODCALLTYPE sp_list_qi(void *This, REFIID riid, void **ppv)
         winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject) ||
         winrt_sys_guid_eq(riid, &obj->view_iid)) {
         InterlockedIncrement(&obj->ref_count);
-        *ppv = obj;
+        *ppv = &obj->lpVtbl;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &obj->iter_iid)) {
+        InterlockedIncrement(&obj->ref_count);
+        *ppv = &obj->lpVtblIter;
         return S_OK;
     }
     return E_NOINTERFACE;
@@ -330,7 +593,8 @@ static ULONG STDMETHODCALLTYPE sp_list_release(void *This) {
 }
 static HRESULT STDMETHODCALLTYPE sp_list_getiids(void *This, ULONG *c, IID **i) {
     WinrtStoragePtrList *obj = (WinrtStoragePtrList *)This;
-    return winrt_sys_get_iids_copy(&obj->view_iid, 1, c, i);
+    GUID list[2] = { obj->view_iid, obj->iter_iid };
+    return winrt_sys_get_iids_copy(list, 2, c, i);
 }
 static HRESULT STDMETHODCALLTYPE sp_list_rcn(void *This, HSTRING *n) {
     WinrtStoragePtrList *obj = (WinrtStoragePtrList *)This;
@@ -362,13 +626,27 @@ static HRESULT STDMETHODCALLTYPE sp_list_indexof(void *This, void *elem, uint32_
     if (!idx || !found) return E_POINTER;
     *idx = 0;
     *found = 0;
-    for (uint32_t i = 0; i < obj->count; ++i) {
-        if ((void *)obj->items[i] == elem) {
-            *idx = i;
-            *found = 1;
-            break;
+    IUnknown *elem_unk = NULL;
+    if (elem) {
+        IUnknown *e = (IUnknown *)elem;
+        if (FAILED(e->lpVtbl->QueryInterface(e, &WINRT_IID_IUnknown, (void **)&elem_unk))) {
+            elem_unk = NULL;
         }
     }
+    for (uint32_t i = 0; i < obj->count; ++i) {
+        IUnknown *item_unk = NULL;
+        if (obj->items[i] &&
+            SUCCEEDED(obj->items[i]->lpVtbl->QueryInterface(obj->items[i], &WINRT_IID_IUnknown, (void **)&item_unk))) {
+            int match = (item_unk == elem_unk);
+            item_unk->lpVtbl->Release(item_unk);
+            if (match) {
+                *idx = i;
+                *found = 1;
+                break;
+            }
+        }
+    }
+    if (elem_unk) elem_unk->lpVtbl->Release(elem_unk);
     return S_OK;
 }
 static HRESULT STDMETHODCALLTYPE sp_list_getmany(void *This, uint32_t start, uint32_t cap, void **out, uint32_t *actual) {
@@ -386,13 +664,52 @@ static HRESULT STDMETHODCALLTYPE sp_list_getmany(void *This, uint32_t start, uin
     return S_OK;
 }
 
+static HRESULT STDMETHODCALLTYPE sp_list_iter_qi(void *This, REFIID r, void **p) {
+    return sp_list_qi(WINRT_SYS_FROM(WinrtStoragePtrList, lpVtblIter, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE sp_list_iter_addref(void *This) {
+    return sp_list_addref(WINRT_SYS_FROM(WinrtStoragePtrList, lpVtblIter, This));
+}
+static ULONG STDMETHODCALLTYPE sp_list_iter_release(void *This) {
+    return sp_list_release(WINRT_SYS_FROM(WinrtStoragePtrList, lpVtblIter, This));
+}
+static HRESULT STDMETHODCALLTYPE sp_list_iter_getiids(void *This, ULONG *c, IID **i) {
+    return sp_list_getiids(WINRT_SYS_FROM(WinrtStoragePtrList, lpVtblIter, This), c, i);
+}
+static HRESULT STDMETHODCALLTYPE sp_list_iter_rcn(void *This, HSTRING *n) {
+    return sp_list_rcn(WINRT_SYS_FROM(WinrtStoragePtrList, lpVtblIter, This), n);
+}
+static HRESULT STDMETHODCALLTYPE sp_list_iter_tl(void *This, TrustLevel *tl) {
+    return sp_list_tl(WINRT_SYS_FROM(WinrtStoragePtrList, lpVtblIter, This), tl);
+}
+static HRESULT STDMETHODCALLTYPE sp_list_first(void *This, void **first) {
+    WinrtStoragePtrList *obj = WINRT_SYS_FROM(WinrtStoragePtrList, lpVtblIter, This);
+    if (!first) return E_POINTER;
+    *first = NULL;
+    WinrtStoragePtrIter *it = (WinrtStoragePtrIter *)winrt_sys_alloc(sizeof(*it));
+    if (!it) return E_OUTOFMEMORY;
+    it->lpVtbl = &g_sp_it_vtbl;
+    it->ref_count = 1;
+    InterlockedIncrement(&obj->ref_count);
+    it->list = obj;
+    it->index = 0;
+    *first = it;
+    return S_OK;
+}
+
 static const WinrtVectorViewPtrVtbl g_sp_list_vtbl = {
     sp_list_qi, sp_list_addref, sp_list_release, sp_list_getiids, sp_list_rcn, sp_list_tl,
     sp_list_getat, sp_list_size, sp_list_indexof, sp_list_getmany
 };
+static const WinrtIterableVtbl g_sp_list_iter_vtbl = {
+    sp_list_iter_qi, sp_list_iter_addref, sp_list_iter_release,
+    sp_list_iter_getiids, sp_list_iter_rcn, sp_list_iter_tl, sp_list_first
+};
 
 static HRESULT create_storage_ptr_list(
     const GUID *view_iid,
+    const GUID *iter_iid,
+    const GUID *iterator_iid,
     const wchar_t *rcn,
     IUnknown **items,
     uint32_t count,
@@ -400,8 +717,11 @@ static HRESULT create_storage_ptr_list(
     WinrtStoragePtrList *obj = (WinrtStoragePtrList *)winrt_sys_alloc(sizeof(*obj));
     if (!obj) return E_OUTOFMEMORY;
     obj->lpVtbl = &g_sp_list_vtbl;
+    obj->lpVtblIter = &g_sp_list_iter_vtbl;
     obj->ref_count = 1;
     obj->view_iid = *view_iid;
+    obj->iter_iid = *iter_iid;
+    obj->iterator_iid = *iterator_iid;
     winrt_sys_copy_wstr(obj->runtime_class_name, 160, rcn);
     obj->count = count;
     if (count > 0) {
@@ -415,7 +735,7 @@ static HRESULT create_storage_ptr_list(
             if (items[i]) items[i]->lpVtbl->AddRef(items[i]);
         }
     }
-    *out_view = obj;
+    *out_view = &obj->lpVtbl;
     return S_OK;
 }
 
@@ -425,12 +745,100 @@ static HRESULT create_storage_ptr_list(
 
 HRESULT winrt_sys_create_storage_file(const wchar_t *path, void **out_file);
 
-typedef struct WinrtStorageFileObj {
-    const WinrtStorageFileVtbl *lpVtbl;
-    const WinrtStorageItemVtbl *lpVtblItem;
+typedef struct WinrtBasicPropertiesObj {
+    const WinrtBasicPropertiesVtbl *lpVtbl;
     volatile LONG ref_count;
-    wchar_t path[UWP_MAX_PATH_CHARS];
-} WinrtStorageFileObj;
+    uint64_t size;
+    int64_t date_modified;
+    int64_t item_date;
+} WinrtBasicPropertiesObj;
+
+static HRESULT STDMETHODCALLTYPE bp_qi(void *This, REFIID riid, void **ppv) {
+    WinrtBasicPropertiesObj *obj = (WinrtBasicPropertiesObj *)This;
+    if (!ppv) return E_POINTER;
+    *ppv = NULL;
+    if (!riid) return E_INVALIDARG;
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IUnknown) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IInspectable) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IBasicProperties)) {
+        InterlockedIncrement(&obj->ref_count);
+        *ppv = obj;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE bp_addref(void *This) {
+    return (ULONG)InterlockedIncrement(&((WinrtBasicPropertiesObj *)This)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE bp_release(void *This) {
+    WinrtBasicPropertiesObj *obj = (WinrtBasicPropertiesObj *)This;
+    LONG rc = InterlockedDecrement(&obj->ref_count);
+    if (rc == 0) winrt_sys_free(obj);
+    return (ULONG)rc;
+}
+static HRESULT STDMETHODCALLTYPE bp_getiids(void *This, ULONG *c, IID **i) {
+    (void)This;
+    return winrt_sys_get_iids_copy(&WINRT_IID_IBasicProperties, 1, c, i);
+}
+static HRESULT STDMETHODCALLTYPE bp_rcn(void *This, HSTRING *n) {
+    (void)This;
+    return winrt_sys_make_hstring(L"Windows.Storage.FileProperties.BasicProperties", n);
+}
+static HRESULT STDMETHODCALLTYPE bp_tl(void *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE bp_get_size(void *This, uint64_t *val) {
+    if (!val) return E_POINTER;
+    *val = ((WinrtBasicPropertiesObj *)This)->size;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE bp_get_modified(void *This, int64_t *val) {
+    if (!val) return E_POINTER;
+    *val = ((WinrtBasicPropertiesObj *)This)->date_modified;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE bp_get_itemdate(void *This, int64_t *val) {
+    if (!val) return E_POINTER;
+    *val = ((WinrtBasicPropertiesObj *)This)->item_date;
+    return S_OK;
+}
+static const WinrtBasicPropertiesVtbl g_bp_vtbl = {
+    bp_qi, bp_addref, bp_release, bp_getiids, bp_rcn, bp_tl,
+    bp_get_size, bp_get_modified, bp_get_itemdate
+};
+
+static HRESULT create_basic_properties_async(const wchar_t *path, void **op) {
+    if (!op) return E_POINTER;
+    *op = NULL;
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    memset(&fad, 0, sizeof(fad));
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) {
+        return winrt_sys_create_completed_async_op_ptr(
+            &WINRT_IID_IAsyncOperation_BasicProperties,
+            L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.FileProperties.BasicProperties>",
+            NULL, HRESULT_FROM_WIN32(GetLastError()), op);
+    }
+    WinrtBasicPropertiesObj *bp = (WinrtBasicPropertiesObj *)winrt_sys_alloc(sizeof(*bp));
+    if (!bp) return E_OUTOFMEMORY;
+    bp->lpVtbl = &g_bp_vtbl;
+    bp->ref_count = 1;
+    if ((fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+        bp->size = ((uint64_t)fad.nFileSizeHigh << 32) | (uint64_t)fad.nFileSizeLow;
+    }
+    bp->item_date = ((int64_t)fad.ftCreationTime.dwHighDateTime << 32) | (int64_t)fad.ftCreationTime.dwLowDateTime;
+    bp->date_modified = ((int64_t)fad.ftLastWriteTime.dwHighDateTime << 32) | (int64_t)fad.ftLastWriteTime.dwLowDateTime;
+    if (bp->date_modified == 0) bp->date_modified = bp->item_date;
+    HRESULT hr = winrt_sys_create_completed_async_op_ptr(
+        &WINRT_IID_IAsyncOperation_BasicProperties,
+        L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.FileProperties.BasicProperties>",
+        (IUnknown *)bp, S_OK, op);
+    bp_release(bp);
+    return hr;
+}
 
 static void extract_leaf_name(const wchar_t *path, wchar_t *out, size_t cap) {
     if (!path || path[0] == L'\0') {
@@ -446,6 +854,132 @@ static void extract_leaf_name(const wchar_t *path, wchar_t *out, size_t cap) {
     } else {
         winrt_sys_copy_wstr(out, cap, last + 1);
     }
+}
+
+static void extract_parent_dir(const wchar_t *path, wchar_t *out, size_t cap) {
+    if (!out || cap == 0u) return;
+    out[0] = L'\0';
+    if (!path || path[0] == L'\0') return;
+    wchar_t norm[UWP_MAX_PATH_CHARS];
+    winrt_sys_normalize_path(path, norm, UWP_MAX_PATH_CHARS);
+    const wchar_t *last = wcsrchr(norm, L'\\');
+    if (!last || last[1] == L'\0') {
+        return; /* Drive root like C:\ has no parent */
+    }
+    size_t len = (size_t)(last - norm);
+    if (len >= 2u && norm[len - 1u] == L':') {
+        len++; /* Keep trailing backslash on drive root C:\ */
+    }
+    if (len >= cap) len = cap - 1u;
+    memcpy(out, norm, len * sizeof(wchar_t));
+    out[len] = L'\0';
+}
+
+static void join_child_path(const wchar_t *base, const wchar_t *child, wchar_t *out, size_t out_chars) {
+    wchar_t combined[UWP_MAX_PATH_CHARS];
+    size_t blen = wcslen(base);
+    if (blen > 0 && base[blen - 1] == L'\\') {
+        swprintf(combined, UWP_MAX_PATH_CHARS, L"%ls%ls", base, child);
+    } else {
+        swprintf(combined, UWP_MAX_PATH_CHARS, L"%ls\\%ls", base, child);
+    }
+    combined[UWP_MAX_PATH_CHARS - 1u] = L'\0';
+    winrt_sys_normalize_path(combined, out, out_chars);
+}
+
+static HRESULT storage_item_get_parent_async(const wchar_t *path, void **op) {
+    if (!op) return E_POINTER;
+    *op = NULL;
+    wchar_t parent[UWP_MAX_PATH_CHARS];
+    extract_parent_dir(path, parent, UWP_MAX_PATH_CHARS);
+    if (parent[0] == L'\0') {
+        return winrt_sys_create_completed_async_op_ptr(
+            &WINRT_IID_IAsyncOperation_StorageFolder,
+            L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.StorageFolder>",
+            NULL, S_OK, op);
+    }
+    void *folder = NULL;
+    HRESULT hr = winrt_sys_create_storage_folder(parent, &folder);
+    HRESULT out_hr = winrt_sys_create_completed_async_op_ptr(
+        &WINRT_IID_IAsyncOperation_StorageFolder,
+        L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.StorageFolder>",
+        (IUnknown *)folder, hr, op);
+    if (folder) ((IUnknown *)folder)->lpVtbl->Release((IUnknown *)folder);
+    return out_hr;
+}
+
+static HRESULT storage_item_is_equal(const wchar_t *self_path, void *other_item, boolean *val) {
+    if (!val) return E_POINTER;
+    *val = 0;
+    if (!other_item) return S_OK;
+    typedef struct { const WinrtStorageItemVtbl *lpVtbl; } SiProxy;
+    SiProxy *si = NULL;
+    if (FAILED(((IUnknown *)other_item)->lpVtbl->QueryInterface(
+            (IUnknown *)other_item, &WINRT_IID_IStorageItem, (void **)&si)) || !si) {
+        return S_OK;
+    }
+    HSTRING other_hs = NULL;
+    HRESULT hr = si->lpVtbl->get_Path(si, &other_hs);
+    si->lpVtbl->Release(si);
+    if (SUCCEEDED(hr) && other_hs) {
+        wchar_t norm_self[UWP_MAX_PATH_CHARS];
+        wchar_t norm_other[UWP_MAX_PATH_CHARS];
+        winrt_sys_normalize_path(self_path, norm_self, UWP_MAX_PATH_CHARS);
+        winrt_sys_normalize_path(winrt_sys_hstring_buf(other_hs, NULL), norm_other, UWP_MAX_PATH_CHARS);
+        *val = (winrt_sys_wcsicmp(norm_self, norm_other) == 0) ? 1 : 0;
+        WindowsDeleteString(other_hs);
+    }
+    return S_OK;
+}
+
+static HRESULT storage_item_rename_impl(wchar_t *path_buf, HSTRING desiredName, uint32_t option, void **op) {
+    if (!op) return E_POINTER;
+    *op = NULL;
+    const wchar_t *name = winrt_sys_hstring_buf(desiredName, NULL);
+    if (!name || name[0] == L'\0') return E_INVALIDARG;
+    wchar_t parent[UWP_MAX_PATH_CHARS];
+    extract_parent_dir(path_buf, parent, UWP_MAX_PATH_CHARS);
+    if (parent[0] == L'\0') {
+        return winrt_sys_create_completed_async_action(E_ACCESSDENIED, op);
+    }
+    wchar_t dst[UWP_MAX_PATH_CHARS];
+    join_child_path(parent, name, dst, UWP_MAX_PATH_CHARS);
+    if (option == 0u /* GenerateUniqueName */) {
+        for (unsigned n = 2; n < 1000 && GetFileAttributesW(dst) != INVALID_FILE_ATTRIBUTES; ++n) {
+            wchar_t alt[UWP_MAX_PATH_CHARS];
+            swprintf(alt, UWP_MAX_PATH_CHARS, L"%ls (%u)", name, n);
+            alt[UWP_MAX_PATH_CHARS - 1u] = L'\0';
+            join_child_path(parent, alt, dst, UWP_MAX_PATH_CHARS);
+        }
+    }
+    DWORD flags = (option == 1u /* ReplaceExisting */) ? MOVEFILE_REPLACE_EXISTING : 0u;
+    if (!MoveFileExW(path_buf, dst, flags)) {
+        return winrt_sys_create_completed_async_action(HRESULT_FROM_WIN32(GetLastError()), op);
+    }
+    winrt_sys_copy_wstr(path_buf, UWP_MAX_PATH_CHARS, dst);
+    return winrt_sys_create_completed_async_action(S_OK, op);
+}
+
+static BOOL delete_dir_recursive(const wchar_t *dir_path) {
+    wchar_t pattern[UWP_MAX_PATH_CHARS];
+    join_child_path(dir_path, L"*", pattern, UWP_MAX_PATH_CHARS);
+    WIN32_FIND_DATAW fd;
+    memset(&fd, 0, sizeof(fd));
+    HANDLE hf = FindFirstFileW(pattern, &fd);
+    if (hf != INVALID_HANDLE_VALUE) {
+        do {
+            if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+            wchar_t child[UWP_MAX_PATH_CHARS];
+            join_child_path(dir_path, fd.cFileName, child, UWP_MAX_PATH_CHARS);
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                delete_dir_recursive(child);
+            } else {
+                DeleteFileW(child);
+            }
+        } while (FindNextFileW(hf, &fd));
+        FindClose(hf);
+    }
+    return RemoveDirectoryW(dir_path);
 }
 
 static uint32_t map_win32_attrs(DWORD attrs) {
@@ -467,6 +1001,423 @@ static int64_t query_creation_time(const wchar_t *path) {
            (int64_t)fad.ftCreationTime.dwLowDateTime;
 }
 
+/* ============================================================================
+ * Win32 File-Backed IRandomAccessStreamWithContentType
+ * ============================================================================ */
+
+typedef struct WinrtFileStreamObj {
+    const WinrtRandomAccessStreamVtbl  *lpVtblRas;
+    const WinrtInputStreamVtbl         *lpVtblIn;
+    const WinrtOutputStreamVtbl        *lpVtblOut;
+    const WinrtClosableVtbl            *lpVtblClose;
+    const WinrtContentTypeProviderVtbl *lpVtblCt;
+    volatile LONG ref_count;
+    CRITICAL_SECTION lock;
+    HANDLE handle;
+    int can_write;
+    int closed;
+    wchar_t path[UWP_MAX_PATH_CHARS];
+} WinrtFileStreamObj;
+
+static HRESULT create_file_stream_obj(const wchar_t *path, int writable, uint64_t initial_pos, WinrtFileStreamObj **out_stream);
+
+static HRESULT STDMETHODCALLTYPE fs_qi(void *This, REFIID riid, void **ppv) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    if (!ppv) return E_POINTER;
+    *ppv = NULL;
+    if (!riid) return E_INVALIDARG;
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IUnknown) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IInspectable) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IRandomAccessStream) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IRandomAccessStreamWithContentType)) {
+        InterlockedIncrement(&o->ref_count);
+        *ppv = &o->lpVtblRas;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IInputStream)) {
+        InterlockedIncrement(&o->ref_count);
+        *ppv = &o->lpVtblIn;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IOutputStream)) {
+        InterlockedIncrement(&o->ref_count);
+        *ppv = &o->lpVtblOut;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IClosable)) {
+        InterlockedIncrement(&o->ref_count);
+        *ppv = &o->lpVtblClose;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IContentTypeProvider)) {
+        InterlockedIncrement(&o->ref_count);
+        *ppv = &o->lpVtblCt;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE fs_addref(void *This) {
+    return (ULONG)InterlockedIncrement(&((WinrtFileStreamObj *)This)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE fs_release(void *This) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    LONG rc = InterlockedDecrement(&o->ref_count);
+    if (rc == 0) {
+        if (o->handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(o->handle);
+            o->handle = INVALID_HANDLE_VALUE;
+        }
+        DeleteCriticalSection(&o->lock);
+        winrt_sys_free(o);
+    }
+    return (ULONG)rc;
+}
+static HRESULT STDMETHODCALLTYPE fs_getiids(void *This, ULONG *c, IID **i) {
+    (void)This;
+    static const GUID list[] = {
+        { 0xcc254827u, 0x4b3du, 0x438fu, { 0x92u, 0x32u, 0x10u, 0xc7u, 0x6bu, 0xc7u, 0xe0u, 0x38u } },
+        { 0x905a0fe1u, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } },
+        { 0x905a0fe2u, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } },
+        { 0x905a0fe6u, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } },
+        { 0x30d5a829u, 0x7fa4u, 0x4026u, { 0x83u, 0xbbu, 0xd7u, 0x5bu, 0xaeu, 0x4eu, 0xa9u, 0x9eu } },
+        { 0x97d098a5u, 0x3b99u, 0x4de9u, { 0x88u, 0xa5u, 0xe1u, 0x1du, 0x2fu, 0x50u, 0xc7u, 0x95u } }
+    };
+    return winrt_sys_get_iids_copy(list, 6, c, i);
+}
+static HRESULT STDMETHODCALLTYPE fs_rcn(void *This, HSTRING *n) {
+    (void)This;
+    return winrt_sys_make_hstring(L"Windows.Storage.Streams.FileRandomAccessStream", n);
+}
+static HRESULT STDMETHODCALLTYPE fs_tl(void *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE fs_get_size(void *This, uint64_t *val) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    if (!val) return E_POINTER;
+    *val = 0;
+    EnterCriticalSection(&o->lock);
+    if (o->closed || o->handle == INVALID_HANDLE_VALUE) { LeaveCriticalSection(&o->lock); return E_ILLEGAL_METHOD_CALL; }
+    LARGE_INTEGER sz;
+    sz.QuadPart = 0;
+    BOOL ok = GetFileSizeEx(o->handle, &sz);
+    DWORD err = ok ? 0u : GetLastError();
+    LeaveCriticalSection(&o->lock);
+    if (!ok) return HRESULT_FROM_WIN32(err);
+    *val = (uint64_t)sz.QuadPart;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE fs_put_size(void *This, uint64_t val) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    EnterCriticalSection(&o->lock);
+    if (o->closed || o->handle == INVALID_HANDLE_VALUE || !o->can_write) {
+        LeaveCriticalSection(&o->lock);
+        return o->can_write ? E_ILLEGAL_METHOD_CALL : E_ACCESSDENIED;
+    }
+    LARGE_INTEGER cur, target;
+    cur.QuadPart = 0;
+    target.QuadPart = 0;
+    SetFilePointerEx(o->handle, target, &cur, FILE_CURRENT);
+    target.QuadPart = (LONGLONG)val;
+    BOOL ok = SetFilePointerEx(o->handle, target, NULL, FILE_BEGIN) && SetEndOfFile(o->handle);
+    DWORD err = ok ? 0u : GetLastError();
+    SetFilePointerEx(o->handle, cur, NULL, FILE_BEGIN);
+    LeaveCriticalSection(&o->lock);
+    return ok ? S_OK : HRESULT_FROM_WIN32(err);
+}
+static HRESULT STDMETHODCALLTYPE fs_get_in_at(void *This, uint64_t pos, void **stream) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    if (!stream) return E_POINTER;
+    *stream = NULL;
+    WinrtFileStreamObj *clone = NULL;
+    HRESULT hr = create_file_stream_obj(o->path, 0, pos, &clone);
+    if (FAILED(hr)) return hr;
+    *stream = &clone->lpVtblIn;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE fs_get_out_at(void *This, uint64_t pos, void **stream) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    if (!stream) return E_POINTER;
+    *stream = NULL;
+    if (!o->can_write) return E_ACCESSDENIED;
+    WinrtFileStreamObj *clone = NULL;
+    HRESULT hr = create_file_stream_obj(o->path, 1, pos, &clone);
+    if (FAILED(hr)) return hr;
+    *stream = &clone->lpVtblOut;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE fs_get_pos(void *This, uint64_t *val) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    if (!val) return E_POINTER;
+    *val = 0;
+    EnterCriticalSection(&o->lock);
+    if (o->closed || o->handle == INVALID_HANDLE_VALUE) { LeaveCriticalSection(&o->lock); return E_ILLEGAL_METHOD_CALL; }
+    LARGE_INTEGER zero, cur;
+    zero.QuadPart = 0;
+    cur.QuadPart = 0;
+    BOOL ok = SetFilePointerEx(o->handle, zero, &cur, FILE_CURRENT);
+    DWORD err = ok ? 0u : GetLastError();
+    LeaveCriticalSection(&o->lock);
+    if (!ok) return HRESULT_FROM_WIN32(err);
+    *val = (uint64_t)cur.QuadPart;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE fs_seek(void *This, uint64_t pos) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    EnterCriticalSection(&o->lock);
+    if (o->closed || o->handle == INVALID_HANDLE_VALUE) { LeaveCriticalSection(&o->lock); return E_ILLEGAL_METHOD_CALL; }
+    LARGE_INTEGER target;
+    target.QuadPart = (LONGLONG)pos;
+    BOOL ok = SetFilePointerEx(o->handle, target, NULL, FILE_BEGIN);
+    DWORD err = ok ? 0u : GetLastError();
+    LeaveCriticalSection(&o->lock);
+    return ok ? S_OK : HRESULT_FROM_WIN32(err);
+}
+static HRESULT STDMETHODCALLTYPE fs_clone(void *This, void **stream) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    if (!stream) return E_POINTER;
+    *stream = NULL;
+    WinrtFileStreamObj *clone = NULL;
+    HRESULT hr = create_file_stream_obj(o->path, o->can_write, 0u, &clone);
+    if (FAILED(hr)) return hr;
+    *stream = &clone->lpVtblRas;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE fs_can_read(void *This, boolean *val) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    if (!val) return E_POINTER;
+    *val = o->closed ? 0 : 1;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE fs_can_write(void *This, boolean *val) {
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)This;
+    if (!val) return E_POINTER;
+    *val = (!o->closed && o->can_write) ? 1 : 0;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE fs_in_qi(void *This, REFIID r, void **p) {
+    return fs_qi(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblIn, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE fs_in_ar(void *This) {
+    return fs_addref(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblIn, This));
+}
+static ULONG STDMETHODCALLTYPE fs_in_rel(void *This) {
+    return fs_release(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblIn, This));
+}
+static HRESULT STDMETHODCALLTYPE fs_in_read(void *This, void *buffer, uint32_t count, uint32_t options, void **op) {
+    WinrtFileStreamObj *o = WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblIn, This);
+    (void)options;
+    if (!op) return E_POINTER;
+    *op = NULL;
+    if (!buffer) return E_INVALIDARG;
+
+    typedef struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *, REFIID, void **);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *, ULONG *, IID **);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *, HSTRING *);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *, TrustLevel *);
+        HRESULT (STDMETHODCALLTYPE *get_Capacity)(void *, uint32_t *);
+        HRESULT (STDMETHODCALLTYPE *get_Length)(void *, uint32_t *);
+        HRESULT (STDMETHODCALLTYPE *put_Length)(void *, uint32_t);
+    } BufVtbl;
+    typedef struct { const BufVtbl *lpVtbl; } BufIf;
+    typedef struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *, REFIID, void **);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *);
+        HRESULT (STDMETHODCALLTYPE *Buffer)(void *, uint8_t **);
+    } BaVtbl;
+    typedef struct { const BaVtbl *lpVtbl; } BaIf;
+
+    BufIf *bp = (BufIf *)buffer;
+    uint32_t cap = 0;
+    HRESULT hr = bp->lpVtbl->get_Capacity(bp, &cap);
+    if (FAILED(hr)) return hr;
+    uint32_t to_read = (count < cap) ? count : cap;
+    BaIf *ba = NULL;
+    hr = bp->lpVtbl->QueryInterface(bp, &WINRT_IID_IBufferByteAccess, (void **)&ba);
+    if (FAILED(hr) || !ba) return hr ? hr : E_NOINTERFACE;
+    uint8_t *dst = NULL;
+    hr = ba->lpVtbl->Buffer(ba, &dst);
+    ba->lpVtbl->Release(ba);
+    if (FAILED(hr) || !dst) return FAILED(hr) ? hr : E_POINTER;
+
+    DWORD total_read = 0;
+    EnterCriticalSection(&o->lock);
+    if (o->closed || o->handle == INVALID_HANDLE_VALUE) {
+        LeaveCriticalSection(&o->lock);
+        return winrt_sys_create_completed_async_op_with_progress_ptr(
+            &WINRT_IID_IAsyncOpWithProgress_IBuffer_UInt32,
+            L"Windows.Foundation.IAsyncOperationWithProgress`2<Windows.Storage.Streams.IBuffer, UInt32>",
+            NULL, E_ILLEGAL_METHOD_CALL, op);
+    }
+    while (total_read < to_read) {
+        DWORD chunk = 0;
+        if (!ReadFile(o->handle, dst + total_read, to_read - total_read, &chunk, NULL) || chunk == 0) {
+            break;
+        }
+        total_read += chunk;
+    }
+    LeaveCriticalSection(&o->lock);
+    bp->lpVtbl->put_Length(bp, (uint32_t)total_read);
+    return winrt_sys_create_completed_async_op_with_progress_ptr(
+        &WINRT_IID_IAsyncOpWithProgress_IBuffer_UInt32,
+        L"Windows.Foundation.IAsyncOperationWithProgress`2<Windows.Storage.Streams.IBuffer, UInt32>",
+        (IUnknown *)buffer, S_OK, op);
+}
+
+static HRESULT STDMETHODCALLTYPE fs_out_qi(void *This, REFIID r, void **p) {
+    return fs_qi(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblOut, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE fs_out_ar(void *This) {
+    return fs_addref(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblOut, This));
+}
+static ULONG STDMETHODCALLTYPE fs_out_rel(void *This) {
+    return fs_release(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblOut, This));
+}
+static HRESULT STDMETHODCALLTYPE fs_out_write(void *This, void *buffer, void **op) {
+    WinrtFileStreamObj *o = WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblOut, This);
+    if (!op) return E_POINTER;
+    *op = NULL;
+    if (!buffer) return E_INVALIDARG;
+    uint8_t *src = NULL;
+    uint32_t len = 0;
+    HRESULT hr = winrt_sys_read_buffer(buffer, &src, &len);
+    if (FAILED(hr)) return hr;
+
+    EnterCriticalSection(&o->lock);
+    if (o->closed || o->handle == INVALID_HANDLE_VALUE || !o->can_write) {
+        HRESULT err_hr = o->can_write ? E_ILLEGAL_METHOD_CALL : E_ACCESSDENIED;
+        LeaveCriticalSection(&o->lock);
+        return winrt_sys_create_completed_async_op_with_progress_u32(
+            &WINRT_IID_IAsyncOpWithProgress_UInt32_UInt32,
+            L"Windows.Foundation.IAsyncOperationWithProgress`2<UInt32, UInt32>",
+            0u, err_hr, op);
+    }
+    DWORD written = 0;
+    BOOL ok = (len == 0u) ? TRUE : WriteFile(o->handle, src, len, &written, NULL);
+    DWORD err = ok ? 0u : GetLastError();
+    LeaveCriticalSection(&o->lock);
+    return winrt_sys_create_completed_async_op_with_progress_u32(
+        &WINRT_IID_IAsyncOpWithProgress_UInt32_UInt32,
+        L"Windows.Foundation.IAsyncOperationWithProgress`2<UInt32, UInt32>",
+        (uint32_t)written, ok ? S_OK : HRESULT_FROM_WIN32(err), op);
+}
+static HRESULT STDMETHODCALLTYPE fs_out_flush(void *This, void **op) {
+    WinrtFileStreamObj *o = WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblOut, This);
+    if (!op) return E_POINTER;
+    *op = NULL;
+    EnterCriticalSection(&o->lock);
+    BOOL ok = (!o->closed && o->handle != INVALID_HANDLE_VALUE) ? FlushFileBuffers(o->handle) : FALSE;
+    LeaveCriticalSection(&o->lock);
+    return winrt_sys_create_completed_async_op_bool(ok ? 1 : 0, S_OK, op);
+}
+
+static HRESULT STDMETHODCALLTYPE fs_cl_qi(void *This, REFIID r, void **p) {
+    return fs_qi(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblClose, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE fs_cl_ar(void *This) {
+    return fs_addref(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblClose, This));
+}
+static ULONG STDMETHODCALLTYPE fs_cl_rel(void *This) {
+    return fs_release(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblClose, This));
+}
+static HRESULT STDMETHODCALLTYPE fs_cl_close(void *This) {
+    WinrtFileStreamObj *o = WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblClose, This);
+    EnterCriticalSection(&o->lock);
+    if (!o->closed) {
+        o->closed = 1;
+        if (o->handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(o->handle);
+            o->handle = INVALID_HANDLE_VALUE;
+        }
+    }
+    LeaveCriticalSection(&o->lock);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE fs_ct_qi(void *This, REFIID r, void **p) {
+    return fs_qi(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblCt, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE fs_ct_ar(void *This) {
+    return fs_addref(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblCt, This));
+}
+static ULONG STDMETHODCALLTYPE fs_ct_rel(void *This) {
+    return fs_release(WINRT_SYS_FROM(WinrtFileStreamObj, lpVtblCt, This));
+}
+static HRESULT STDMETHODCALLTYPE fs_ct_get(void *This, HSTRING *val) {
+    (void)This;
+    return winrt_sys_make_hstring(L"application/octet-stream", val);
+}
+
+static const WinrtRandomAccessStreamVtbl g_fs_ras_vtbl = {
+    fs_qi, fs_addref, fs_release, fs_getiids, fs_rcn, fs_tl,
+    fs_get_size, fs_put_size, fs_get_in_at, fs_get_out_at,
+    fs_get_pos, fs_seek, fs_clone, fs_can_read, fs_can_write
+};
+static const WinrtInputStreamVtbl g_fs_in_vtbl = {
+    fs_in_qi, fs_in_ar, fs_in_rel, fs_getiids, fs_rcn, fs_tl, fs_in_read
+};
+static const WinrtOutputStreamVtbl g_fs_out_vtbl = {
+    fs_out_qi, fs_out_ar, fs_out_rel, fs_getiids, fs_rcn, fs_tl, fs_out_write, fs_out_flush
+};
+static const WinrtClosableVtbl g_fs_close_vtbl = {
+    fs_cl_qi, fs_cl_ar, fs_cl_rel, fs_getiids, fs_rcn, fs_tl, fs_cl_close
+};
+static const WinrtContentTypeProviderVtbl g_fs_ct_vtbl = {
+    fs_ct_qi, fs_ct_ar, fs_ct_rel, fs_getiids, fs_rcn, fs_tl, fs_ct_get
+};
+
+static HRESULT create_file_stream_obj(const wchar_t *path, int writable, uint64_t initial_pos, WinrtFileStreamObj **out_stream) {
+    if (!out_stream) return E_POINTER;
+    *out_stream = NULL;
+    DWORD access = writable ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ;
+    HANDLE fh = CreateFileW(path, access, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                            NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (fh == INVALID_HANDLE_VALUE) {
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    if (initial_pos > 0u) {
+        LARGE_INTEGER li;
+        li.QuadPart = (LONGLONG)initial_pos;
+        SetFilePointerEx(fh, li, NULL, FILE_BEGIN);
+    }
+    WinrtFileStreamObj *o = (WinrtFileStreamObj *)winrt_sys_alloc(sizeof(*o));
+    if (!o) {
+        CloseHandle(fh);
+        return E_OUTOFMEMORY;
+    }
+    o->lpVtblRas = &g_fs_ras_vtbl;
+    o->lpVtblIn = &g_fs_in_vtbl;
+    o->lpVtblOut = &g_fs_out_vtbl;
+    o->lpVtblClose = &g_fs_close_vtbl;
+    o->lpVtblCt = &g_fs_ct_vtbl;
+    o->ref_count = 1;
+    o->handle = fh;
+    o->can_write = writable ? 1 : 0;
+    winrt_sys_copy_wstr(o->path, UWP_MAX_PATH_CHARS, path);
+    InitializeCriticalSection(&o->lock);
+    *out_stream = o;
+    return S_OK;
+}
+
+typedef struct WinrtStorageFileObj {
+    const WinrtStorageFileVtbl           *lpVtbl;
+    const WinrtStorageFile2Vtbl          *lpVtbl2;
+    const WinrtStorageItemVtbl           *lpVtblItem;
+    const WinrtStorageItem2Vtbl          *lpVtblItem2;
+    const WinrtRandomAccessStreamRefVtbl *lpVtblRasRef;
+    const WinrtInputStreamRefVtbl        *lpVtblInRef;
+    volatile LONG ref_count;
+    wchar_t path[UWP_MAX_PATH_CHARS];
+} WinrtStorageFileObj;
+
 static HRESULT STDMETHODCALLTYPE sf_file_qi(void *This, REFIID riid, void **ppv) {
     WinrtStorageFileObj *obj = (WinrtStorageFileObj *)This;
     if (!ppv) return E_POINTER;
@@ -480,9 +1431,29 @@ static HRESULT STDMETHODCALLTYPE sf_file_qi(void *This, REFIID riid, void **ppv)
         *ppv = &obj->lpVtbl;
         return S_OK;
     }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IStorageFile2)) {
+        InterlockedIncrement(&obj->ref_count);
+        *ppv = &obj->lpVtbl2;
+        return S_OK;
+    }
     if (winrt_sys_guid_eq(riid, &WINRT_IID_IStorageItem)) {
         InterlockedIncrement(&obj->ref_count);
         *ppv = &obj->lpVtblItem;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IStorageItem2)) {
+        InterlockedIncrement(&obj->ref_count);
+        *ppv = &obj->lpVtblItem2;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IRandomAccessStreamReference)) {
+        InterlockedIncrement(&obj->ref_count);
+        *ppv = &obj->lpVtblRasRef;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IInputStreamReference)) {
+        InterlockedIncrement(&obj->ref_count);
+        *ppv = &obj->lpVtblInRef;
         return S_OK;
     }
     return E_NOINTERFACE;
@@ -500,9 +1471,13 @@ static HRESULT STDMETHODCALLTYPE sf_file_getiids(void *This, ULONG *c, IID **i) 
     (void)This;
     static const GUID list[] = {
         { 0xfa3f6186u, 0x4214u, 0x428cu, { 0xa6u, 0x4cu, 0x14u, 0xc9u, 0xacu, 0x73u, 0x15u, 0xeau } },
-        { 0x4207a996u, 0xca2fu, 0x42f7u, { 0xbdu, 0xe8u, 0x8bu, 0x10u, 0x45u, 0x7au, 0x7fu, 0x30u } }
+        { 0x954e4bcfu, 0x0a77u, 0x42fbu, { 0xb7u, 0x77u, 0xc2u, 0xedu, 0x58u, 0xa5u, 0x2eu, 0x44u } },
+        { 0x4207a996u, 0xca2fu, 0x42f7u, { 0xbdu, 0xe8u, 0x8bu, 0x10u, 0x45u, 0x7au, 0x7fu, 0x30u } },
+        { 0x53f926d2u, 0x083cu, 0x4283u, { 0xb4u, 0x5bu, 0x81u, 0xc0u, 0x07u, 0x23u, 0x7eu, 0x44u } },
+        { 0x33ee3134u, 0x1dd6u, 0x4e3au, { 0x80u, 0x67u, 0xd1u, 0xc1u, 0x62u, 0xe8u, 0x64u, 0x2bu } },
+        { 0x43929d18u, 0x5ec9u, 0x4b5au, { 0x91u, 0x9cu, 0x42u, 0x05u, 0xb0u, 0xc8u, 0x04u, 0xb6u } }
     };
-    return winrt_sys_get_iids_copy(list, 2, c, i);
+    return winrt_sys_get_iids_copy(list, 6, c, i);
 }
 static HRESULT STDMETHODCALLTYPE sf_file_rcn(void *This, HSTRING *n) {
     (void)This;
@@ -527,10 +1502,18 @@ static HRESULT STDMETHODCALLTYPE sf_file_get_contenttype(void *This, HSTRING *va
     (void)This;
     return winrt_sys_make_hstring(L"application/octet-stream", val);
 }
-static HRESULT STDMETHODCALLTYPE sf_file_unimpl_1(void *This, uint32_t a, void **op) {
-    (void)a;
-    if (op) *op = NULL;
-    return winrt_sys_unimplemented("IStorageFile::OpenAsync", This);
+static HRESULT STDMETHODCALLTYPE sf_file_open_async(void *This, uint32_t accessMode, void **op) {
+    WinrtStorageFileObj *obj = (WinrtStorageFileObj *)This;
+    if (!op) return E_POINTER;
+    *op = NULL;
+    WinrtFileStreamObj *st = NULL;
+    HRESULT hr = create_file_stream_obj(obj->path, accessMode == 1u ? 1 : 0, 0u, &st);
+    HRESULT out_hr = winrt_sys_create_completed_async_op_ptr(
+        &WINRT_IID_IAsyncOperation_IRandomAccessStream,
+        L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.Streams.IRandomAccessStream>",
+        st ? (IUnknown *)&st->lpVtblRas : NULL, hr, op);
+    if (st) fs_release(&st->lpVtblRas);
+    return out_hr;
 }
 static HRESULT STDMETHODCALLTYPE sf_file_unimpl_0(void *This, void **op) {
     if (op) *op = NULL;
@@ -552,6 +1535,25 @@ static HRESULT STDMETHODCALLTYPE sf_file_unimpl_copy3(void *This, void *a, HSTRI
     return winrt_sys_unimplemented("IStorageFile::CopyMove", This);
 }
 
+static HRESULT STDMETHODCALLTYPE sf_file2_qi(void *This, REFIID r, void **p) {
+    return sf_file_qi(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtbl2, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE sf_file2_ar(void *This) {
+    return sf_file_addref(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtbl2, This));
+}
+static ULONG STDMETHODCALLTYPE sf_file2_rel(void *This) {
+    return sf_file_release(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtbl2, This));
+}
+static HRESULT STDMETHODCALLTYPE sf_file2_open_opts(void *This, uint32_t accessMode, uint32_t options, void **op) {
+    (void)options;
+    return sf_file_open_async(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtbl2, This), accessMode, op);
+}
+static HRESULT STDMETHODCALLTYPE sf_file2_open_tx(void *This, uint32_t options, void **op) {
+    (void)options;
+    if (op) *op = NULL;
+    return winrt_sys_unimplemented("IStorageFile2::OpenTransactedWriteWithOptionsAsync", This);
+}
+
 static HRESULT STDMETHODCALLTYPE sf_file_item_qi(void *This, REFIID riid, void **ppv) {
     return sf_file_qi(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem, This), riid, ppv);
 }
@@ -570,15 +1572,12 @@ static HRESULT STDMETHODCALLTYPE sf_file_item_rcn(void *This, HSTRING *n) {
 static HRESULT STDMETHODCALLTYPE sf_file_item_tl(void *This, TrustLevel *tl) {
     return sf_file_tl(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem, This), tl);
 }
-static HRESULT STDMETHODCALLTYPE sf_file_item_rename1(void *This, HSTRING n, void **op) {
-    (void)n;
-    if (op) *op = NULL;
-    return winrt_sys_unimplemented("StorageFile::RenameAsync", This);
-}
 static HRESULT STDMETHODCALLTYPE sf_file_item_rename2(void *This, HSTRING n, uint32_t o, void **op) {
-    (void)n; (void)o;
-    if (op) *op = NULL;
-    return winrt_sys_unimplemented("StorageFile::RenameAsync", This);
+    WinrtStorageFileObj *obj = WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem, This);
+    return storage_item_rename_impl(obj->path, n, o, op);
+}
+static HRESULT STDMETHODCALLTYPE sf_file_item_rename1(void *This, HSTRING n, void **op) {
+    return sf_file_item_rename2(This, n, 2u /* FailIfExists */, op);
 }
 static HRESULT STDMETHODCALLTYPE sf_file_item_del1(void *This, void **op) {
     WinrtStorageFileObj *obj = WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem, This);
@@ -591,8 +1590,8 @@ static HRESULT STDMETHODCALLTYPE sf_file_item_del2(void *This, uint32_t opt, voi
     return sf_file_item_del1(This, op);
 }
 static HRESULT STDMETHODCALLTYPE sf_file_item_props(void *This, void **op) {
-    if (op) *op = NULL;
-    return winrt_sys_unimplemented("StorageFile::GetBasicPropertiesAsync", This);
+    WinrtStorageFileObj *obj = WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem, This);
+    return create_basic_properties_async(obj->path, op);
 }
 static HRESULT STDMETHODCALLTYPE sf_file_item_name(void *This, HSTRING *val) {
     WinrtStorageFileObj *obj = WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem, This);
@@ -623,14 +1622,81 @@ static HRESULT STDMETHODCALLTYPE sf_file_item_isoftype(void *This, uint32_t type
     return S_OK;
 }
 
+static HRESULT STDMETHODCALLTYPE sf_file_item2_qi(void *This, REFIID r, void **p) {
+    return sf_file_qi(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem2, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE sf_file_item2_ar(void *This) {
+    return sf_file_addref(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem2, This));
+}
+static ULONG STDMETHODCALLTYPE sf_file_item2_rel(void *This) {
+    return sf_file_release(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem2, This));
+}
+static HRESULT STDMETHODCALLTYPE sf_file_item2_parent(void *This, void **op) {
+    WinrtStorageFileObj *obj = WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem2, This);
+    return storage_item_get_parent_async(obj->path, op);
+}
+static HRESULT STDMETHODCALLTYPE sf_file_item2_equal(void *This, void *item, boolean *val) {
+    WinrtStorageFileObj *obj = WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblItem2, This);
+    return storage_item_is_equal(obj->path, item, val);
+}
+
+static HRESULT STDMETHODCALLTYPE sf_file_rasref_qi(void *This, REFIID r, void **p) {
+    return sf_file_qi(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblRasRef, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE sf_file_rasref_ar(void *This) {
+    return sf_file_addref(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblRasRef, This));
+}
+static ULONG STDMETHODCALLTYPE sf_file_rasref_rel(void *This) {
+    return sf_file_release(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblRasRef, This));
+}
+static HRESULT STDMETHODCALLTYPE sf_file_rasref_open(void *This, void **op) {
+    WinrtStorageFileObj *obj = WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblRasRef, This);
+    if (!op) return E_POINTER;
+    *op = NULL;
+    WinrtFileStreamObj *st = NULL;
+    HRESULT hr = create_file_stream_obj(obj->path, 0, 0u, &st);
+    HRESULT out_hr = winrt_sys_create_completed_async_op_ptr(
+        &WINRT_IID_IAsyncOperation_IRandomAccessStreamWithContentType,
+        L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.Streams.IRandomAccessStreamWithContentType>",
+        st ? (IUnknown *)&st->lpVtblRas : NULL, hr, op);
+    if (st) fs_release(&st->lpVtblRas);
+    return out_hr;
+}
+
+static HRESULT STDMETHODCALLTYPE sf_file_inref_qi(void *This, REFIID r, void **p) {
+    return sf_file_qi(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblInRef, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE sf_file_inref_ar(void *This) {
+    return sf_file_addref(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblInRef, This));
+}
+static ULONG STDMETHODCALLTYPE sf_file_inref_rel(void *This) {
+    return sf_file_release(WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblInRef, This));
+}
+static HRESULT STDMETHODCALLTYPE sf_file_inref_open(void *This, void **op) {
+    WinrtStorageFileObj *obj = WINRT_SYS_FROM(WinrtStorageFileObj, lpVtblInRef, This);
+    if (!op) return E_POINTER;
+    *op = NULL;
+    WinrtFileStreamObj *st = NULL;
+    HRESULT hr = create_file_stream_obj(obj->path, 0, 0u, &st);
+    HRESULT out_hr = winrt_sys_create_completed_async_op_ptr(
+        &WINRT_IID_IAsyncOperation_IInputStream,
+        L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.Streams.IInputStream>",
+        st ? (IUnknown *)&st->lpVtblIn : NULL, hr, op);
+    if (st) fs_release(&st->lpVtblRas);
+    return out_hr;
+}
+
 static const WinrtStorageFileVtbl g_storage_file_vtbl = {
     sf_file_qi, sf_file_addref, sf_file_release, sf_file_getiids, sf_file_rcn, sf_file_tl,
     sf_file_get_filetype, sf_file_get_contenttype,
-    sf_file_unimpl_1, sf_file_unimpl_0,
+    sf_file_open_async, sf_file_unimpl_0,
     sf_file_unimpl_copy1, sf_file_unimpl_copy2, sf_file_unimpl_copy3, sf_file_unimpl_copy1,
     sf_file_unimpl_copy1, sf_file_unimpl_copy2, sf_file_unimpl_copy3, sf_file_unimpl_copy1
 };
-
+static const WinrtStorageFile2Vtbl g_storage_file2_vtbl = {
+    sf_file2_qi, sf_file2_ar, sf_file2_rel, sf_file_getiids, sf_file_rcn, sf_file_tl,
+    sf_file2_open_opts, sf_file2_open_tx
+};
 static const WinrtStorageItemVtbl g_storage_file_item_vtbl = {
     sf_file_item_qi, sf_file_item_addref, sf_file_item_release,
     sf_file_item_getiids, sf_file_item_rcn, sf_file_item_tl,
@@ -640,6 +1706,19 @@ static const WinrtStorageItemVtbl g_storage_file_item_vtbl = {
     sf_file_item_name, sf_file_item_path, sf_file_item_attrs,
     sf_file_item_date, sf_file_item_isoftype
 };
+static const WinrtStorageItem2Vtbl g_storage_file_item2_vtbl = {
+    sf_file_item2_qi, sf_file_item2_ar, sf_file_item2_rel,
+    sf_file_getiids, sf_file_rcn, sf_file_tl,
+    sf_file_item2_parent, sf_file_item2_equal
+};
+static const WinrtRandomAccessStreamRefVtbl g_storage_file_rasref_vtbl = {
+    sf_file_rasref_qi, sf_file_rasref_ar, sf_file_rasref_rel,
+    sf_file_getiids, sf_file_rcn, sf_file_tl, sf_file_rasref_open
+};
+static const WinrtInputStreamRefVtbl g_storage_file_inref_vtbl = {
+    sf_file_inref_qi, sf_file_inref_ar, sf_file_inref_rel,
+    sf_file_getiids, sf_file_rcn, sf_file_tl, sf_file_inref_open
+};
 
 HRESULT winrt_sys_create_storage_file(const wchar_t *path, void **out_file) {
     if (!out_file) return E_POINTER;
@@ -647,31 +1726,171 @@ HRESULT winrt_sys_create_storage_file(const wchar_t *path, void **out_file) {
     WinrtStorageFileObj *obj = (WinrtStorageFileObj *)winrt_sys_alloc(sizeof(*obj));
     if (!obj) return E_OUTOFMEMORY;
     obj->lpVtbl = &g_storage_file_vtbl;
+    obj->lpVtbl2 = &g_storage_file2_vtbl;
     obj->lpVtblItem = &g_storage_file_item_vtbl;
+    obj->lpVtblItem2 = &g_storage_file_item2_vtbl;
+    obj->lpVtblRasRef = &g_storage_file_rasref_vtbl;
+    obj->lpVtblInRef = &g_storage_file_inref_vtbl;
     obj->ref_count = 1;
     winrt_sys_normalize_path(path, obj->path, UWP_MAX_PATH_CHARS);
     *out_file = &obj->lpVtbl;
     return S_OK;
 }
 
+/* StorageFile Activation Factory (IStorageFileStatics) */
+typedef struct WinrtStorageFileFactory {
+    const WinrtActivationFactoryVtbl    *lpVtblAct;
+    const WinrtStorageFileStaticsVtbl   *lpVtblStatics;
+} WinrtStorageFileFactory;
+
+static WinrtStorageFileFactory g_sfile_factory;
+
+static HRESULT STDMETHODCALLTYPE sfile_fac_qi(void *This, REFIID riid, void **ppv) {
+    (void)This;
+    if (!ppv) return E_POINTER;
+    *ppv = NULL;
+    if (!riid) return E_INVALIDARG;
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IUnknown) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IInspectable) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IActivationFactory)) {
+        *ppv = &g_sfile_factory.lpVtblAct;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IStorageFileStatics)) {
+        *ppv = &g_sfile_factory.lpVtblStatics;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE sfile_fac_addref(void *This) { (void)This; return 1; }
+static ULONG STDMETHODCALLTYPE sfile_fac_release(void *This) { (void)This; return 1; }
+static HRESULT STDMETHODCALLTYPE sfile_fac_getiids(void *This, ULONG *c, IID **i) {
+    (void)This;
+    static const GUID list[] = {
+        { 0x00000035u, 0x0000u, 0x0000u, { 0xC0u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x46u } },
+        { 0x5984c710u, 0xdaf2u, 0x43c8u, { 0x8bu, 0xb4u, 0xa4u, 0xd3u, 0xeau, 0xcfu, 0xd0u, 0x3fu } }
+    };
+    return winrt_sys_get_iids_copy(list, 2, c, i);
+}
+static HRESULT STDMETHODCALLTYPE sfile_fac_rcn(void *This, HSTRING *n) {
+    (void)This;
+    if (n) *n = NULL;
+    return E_ILLEGAL_METHOD_CALL;
+}
+static HRESULT STDMETHODCALLTYPE sfile_fac_tl(void *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE sfile_fac_act(void *This, IInspectable **inst) {
+    if (inst) *inst = NULL;
+    return winrt_sys_unimplemented("StorageFile::ActivateInstance", This);
+}
+static HRESULT sfile_from_path_common(const wchar_t *raw, void **op) {
+    if (!op) return E_POINTER;
+    *op = NULL;
+    if (!raw || raw[0] == L'\0') return E_INVALIDARG;
+    wchar_t norm[UWP_MAX_PATH_CHARS];
+    winrt_sys_normalize_path(raw, norm, UWP_MAX_PATH_CHARS);
+    DWORD attrs = GetFileAttributesW(norm);
+    if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        return winrt_sys_create_completed_async_op_ptr(
+            &WINRT_IID_IAsyncOperation_StorageFile,
+            L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.StorageFile>",
+            NULL, HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), op);
+    }
+    void *file_obj = NULL;
+    HRESULT hr = winrt_sys_create_storage_file(norm, &file_obj);
+    HRESULT out_hr = winrt_sys_create_completed_async_op_ptr(
+        &WINRT_IID_IAsyncOperation_StorageFile,
+        L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.StorageFile>",
+        (IUnknown *)file_obj, hr, op);
+    if (file_obj) ((IUnknown *)file_obj)->lpVtbl->Release((IUnknown *)file_obj);
+    return out_hr;
+}
+static HRESULT STDMETHODCALLTYPE sfile_fac_get_from_path(void *This, HSTRING pathH, void **op) {
+    (void)This;
+    return sfile_from_path_common(winrt_sys_hstring_buf(pathH, NULL), op);
+}
+static HRESULT STDMETHODCALLTYPE sfile_fac_get_from_uri(void *This, void *uri_obj, void **op) {
+    (void)This;
+    if (!op) return E_POINTER;
+    *op = NULL;
+    if (!uri_obj) return E_INVALIDARG;
+    typedef struct { const WinrtUriProxyVtbl *lpVtbl; } UriIf;
+    UriIf *u = NULL;
+    if (FAILED(((IUnknown *)uri_obj)->lpVtbl->QueryInterface(
+            (IUnknown *)uri_obj, &WINRT_IID_IUriRuntimeClass, (void **)&u)) || !u) {
+        return E_INVALIDARG;
+    }
+    HSTRING raw_hs = NULL;
+    HRESULT hr = u->lpVtbl->get_RawUri(u, &raw_hs);
+    u->lpVtbl->Release(u);
+    if (FAILED(hr) || !raw_hs) return FAILED(hr) ? hr : E_INVALIDARG;
+
+    const wchar_t *raw = winrt_sys_hstring_buf(raw_hs, NULL);
+    wchar_t resolved[UWP_MAX_PATH_CHARS];
+    resolved[0] = L'\0';
+    if (wcsncmp(raw, L"ms-appx:///", 11) == 0) {
+        wchar_t base[UWP_MAX_PATH_CHARS];
+        winrt_sys_get_install_dir(base, UWP_MAX_PATH_CHARS);
+        join_child_path(base, raw + 11, resolved, UWP_MAX_PATH_CHARS);
+    } else if (wcsncmp(raw, L"ms-appdata:///local/", 20) == 0) {
+        wchar_t base[UWP_MAX_PATH_CHARS];
+        winrt_sys_get_state_dir(WINRT_SYS_STATE_LOCAL, base, UWP_MAX_PATH_CHARS);
+        join_child_path(base, raw + 20, resolved, UWP_MAX_PATH_CHARS);
+    } else if (wcsncmp(raw, L"ms-appdata:///roaming/", 22) == 0) {
+        wchar_t base[UWP_MAX_PATH_CHARS];
+        winrt_sys_get_state_dir(WINRT_SYS_STATE_ROAMING, base, UWP_MAX_PATH_CHARS);
+        join_child_path(base, raw + 22, resolved, UWP_MAX_PATH_CHARS);
+    } else if (wcsncmp(raw, L"ms-appdata:///temp/", 19) == 0) {
+        wchar_t base[UWP_MAX_PATH_CHARS];
+        winrt_sys_get_state_dir(WINRT_SYS_STATE_TEMP, base, UWP_MAX_PATH_CHARS);
+        join_child_path(base, raw + 19, resolved, UWP_MAX_PATH_CHARS);
+    } else if (wcsncmp(raw, L"file:///", 8) == 0) {
+        winrt_sys_normalize_path(raw + 8, resolved, UWP_MAX_PATH_CHARS);
+    } else {
+        winrt_sys_normalize_path(raw, resolved, UWP_MAX_PATH_CHARS);
+    }
+    WindowsDeleteString(raw_hs);
+    return sfile_from_path_common(resolved, op);
+}
+static HRESULT STDMETHODCALLTYPE sfile_fac_unimpl_streamed(void *This, HSTRING a, void *b, void *c, void **op) {
+    (void)a; (void)b; (void)c;
+    if (op) *op = NULL;
+    return winrt_sys_unimplemented("IStorageFileStatics::CreateStreamedFile", This);
+}
+static HRESULT STDMETHODCALLTYPE sfile_fac_unimpl_rep(void *This, void *a, void *b, void *c, void **op) {
+    (void)a; (void)b; (void)c;
+    if (op) *op = NULL;
+    return winrt_sys_unimplemented("IStorageFileStatics::ReplaceWithStreamedFile", This);
+}
+
+static const WinrtActivationFactoryVtbl g_sfile_act_vtbl = {
+    sfile_fac_qi, sfile_fac_addref, sfile_fac_release, sfile_fac_getiids, sfile_fac_rcn, sfile_fac_tl, sfile_fac_act
+};
+static const WinrtStorageFileStaticsVtbl g_sfile_stat_vtbl = {
+    sfile_fac_qi, sfile_fac_addref, sfile_fac_release, sfile_fac_getiids, sfile_fac_rcn, sfile_fac_tl,
+    sfile_fac_get_from_path, sfile_fac_get_from_uri,
+    sfile_fac_unimpl_streamed, sfile_fac_unimpl_rep,
+    sfile_fac_unimpl_streamed, sfile_fac_unimpl_rep
+};
+static WinrtStorageFileFactory g_sfile_factory = { &g_sfile_act_vtbl, &g_sfile_stat_vtbl };
+
+HRESULT winrt_sys_get_storage_file_factory(REFIID iid, void **out_factory) {
+    return sfile_fac_qi(&g_sfile_factory.lpVtblAct, iid, out_factory);
+}
+
 typedef struct WinrtStorageFolderObj {
-    const WinrtStorageFolderVtbl *lpVtbl;
-    const WinrtStorageItemVtbl   *lpVtblItem;
+    const WinrtStorageFolderVtbl  *lpVtbl;
+    const WinrtStorageFolder2Vtbl *lpVtbl2;
+    const WinrtStorageItemVtbl    *lpVtblItem;
+    const WinrtStorageItem2Vtbl   *lpVtblItem2;
     volatile LONG ref_count;
     wchar_t path[UWP_MAX_PATH_CHARS];
 } WinrtStorageFolderObj;
-
-static void join_child_path(const wchar_t *base, const wchar_t *child, wchar_t *out, size_t out_chars) {
-    wchar_t combined[UWP_MAX_PATH_CHARS];
-    size_t blen = wcslen(base);
-    if (blen > 0 && base[blen - 1] == L'\\') {
-        swprintf(combined, UWP_MAX_PATH_CHARS, L"%ls%ls", base, child);
-    } else {
-        swprintf(combined, UWP_MAX_PATH_CHARS, L"%ls\\%ls", base, child);
-    }
-    combined[UWP_MAX_PATH_CHARS - 1u] = L'\0';
-    winrt_sys_normalize_path(combined, out, out_chars);
-}
 
 static HRESULT STDMETHODCALLTYPE sf_qi(void *This, REFIID riid, void **ppv) {
     WinrtStorageFolderObj *obj = (WinrtStorageFolderObj *)This;
@@ -686,9 +1905,19 @@ static HRESULT STDMETHODCALLTYPE sf_qi(void *This, REFIID riid, void **ppv) {
         *ppv = &obj->lpVtbl;
         return S_OK;
     }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IStorageFolder2)) {
+        InterlockedIncrement(&obj->ref_count);
+        *ppv = &obj->lpVtbl2;
+        return S_OK;
+    }
     if (winrt_sys_guid_eq(riid, &WINRT_IID_IStorageItem)) {
         InterlockedIncrement(&obj->ref_count);
         *ppv = &obj->lpVtblItem;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IStorageItem2)) {
+        InterlockedIncrement(&obj->ref_count);
+        *ppv = &obj->lpVtblItem2;
         return S_OK;
     }
     return E_NOINTERFACE;
@@ -706,9 +1935,11 @@ static HRESULT STDMETHODCALLTYPE sf_getiids(void *This, ULONG *c, IID **i) {
     (void)This;
     static const GUID list[] = {
         { 0x72d1cb78u, 0xb3efu, 0x4f75u, { 0xa8u, 0x0bu, 0x6fu, 0xd9u, 0xdau, 0xe2u, 0x94u, 0x4bu } },
-        { 0x4207a996u, 0xca2fu, 0x42f7u, { 0xbdu, 0xe8u, 0x8bu, 0x10u, 0x45u, 0x7au, 0x7fu, 0x30u } }
+        { 0xe827e8b9u, 0x08d9u, 0x4a8eu, { 0xa0u, 0xacu, 0xfeu, 0x5eu, 0xd3u, 0xcbu, 0xbbu, 0xd3u } },
+        { 0x4207a996u, 0xca2fu, 0x42f7u, { 0xbdu, 0xe8u, 0x8bu, 0x10u, 0x45u, 0x7au, 0x7fu, 0x30u } },
+        { 0x53f926d2u, 0x083cu, 0x4283u, { 0xb4u, 0x5bu, 0x81u, 0xc0u, 0x07u, 0x23u, 0x7eu, 0x44u } }
     };
-    return winrt_sys_get_iids_copy(list, 2, c, i);
+    return winrt_sys_get_iids_copy(list, 4, c, i);
 }
 static HRESULT STDMETHODCALLTYPE sf_rcn(void *This, HSTRING *n) {
     (void)This;
@@ -872,8 +2103,7 @@ static HRESULT STDMETHODCALLTYPE sf_get_folder(void *This, HSTRING nameH, void *
     return out_hr;
 }
 
-static HRESULT STDMETHODCALLTYPE sf_get_item(void *This, HSTRING nameH, void **op) {
-    WinrtStorageFolderObj *obj = (WinrtStorageFolderObj *)This;
+static HRESULT sf_get_or_try_item(WinrtStorageFolderObj *obj, HSTRING nameH, int allow_missing, void **op) {
     if (!op) return E_POINTER;
     *op = NULL;
     const wchar_t *name = winrt_sys_hstring_buf(nameH, NULL);
@@ -885,7 +2115,7 @@ static HRESULT STDMETHODCALLTYPE sf_get_item(void *This, HSTRING nameH, void **o
         return winrt_sys_create_completed_async_op_ptr(
             &WINRT_IID_IAsyncOperation_IStorageItem,
             L"Windows.Foundation.IAsyncOperation`1<Windows.Storage.IStorageItem>",
-            NULL, HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), op);
+            NULL, allow_missing ? S_OK : HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), op);
     }
 
     void *raw_obj = NULL;
@@ -906,11 +2136,30 @@ static HRESULT STDMETHODCALLTYPE sf_get_item(void *This, HSTRING nameH, void **o
     return out_hr;
 }
 
+static HRESULT STDMETHODCALLTYPE sf_get_item(void *This, HSTRING nameH, void **op) {
+    return sf_get_or_try_item((WinrtStorageFolderObj *)This, nameH, 0, op);
+}
+
+static HRESULT STDMETHODCALLTYPE sf2_qi(void *This, REFIID r, void **p) {
+    return sf_qi(WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtbl2, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE sf2_ar(void *This) {
+    return sf_addref(WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtbl2, This));
+}
+static ULONG STDMETHODCALLTYPE sf2_rel(void *This) {
+    return sf_release(WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtbl2, This));
+}
+static HRESULT STDMETHODCALLTYPE sf2_try_get_item(void *This, HSTRING nameH, void **op) {
+    return sf_get_or_try_item(WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtbl2, This), nameH, 1, op);
+}
+
 static HRESULT sf_enumerate_children(
     WinrtStorageFolderObj *obj,
     int want_files,
     int want_folders,
     const GUID *vec_iid,
+    const GUID *iter_iid,
+    const GUID *iterator_iid,
     const GUID *op_iid,
     const wchar_t *vec_rcn,
     const wchar_t *op_rcn,
@@ -973,7 +2222,7 @@ static HRESULT sf_enumerate_children(
     }
 
     void *view = NULL;
-    HRESULT hr = create_storage_ptr_list(vec_iid, vec_rcn, list, count, &view);
+    HRESULT hr = create_storage_ptr_list(vec_iid, iter_iid, iterator_iid, vec_rcn, list, count, &view);
     for (uint32_t i = 0; i < count; ++i) {
         if (list[i]) list[i]->lpVtbl->Release(list[i]);
     }
@@ -994,21 +2243,24 @@ static const GUID WINRT_IID_IAsyncOp_Vec_IStorageItem =
 
 static HRESULT STDMETHODCALLTYPE sf_get_files(void *This, void **op) {
     return sf_enumerate_children((WinrtStorageFolderObj *)This, 1, 0,
-        &WINRT_IID_IVectorView_StorageFile, &WINRT_IID_IAsyncOp_Vec_StorageFile,
+        &WINRT_IID_IVectorView_StorageFile, &WINRT_IID_IIterable_StorageFile, &WINRT_IID_IIterator_StorageFile,
+        &WINRT_IID_IAsyncOp_Vec_StorageFile,
         L"Windows.Foundation.Collections.IVectorView`1<Windows.Storage.StorageFile>",
         L"Windows.Foundation.IAsyncOperation`1<Windows.Foundation.Collections.IVectorView`1<Windows.Storage.StorageFile>>",
         op);
 }
 static HRESULT STDMETHODCALLTYPE sf_get_folders(void *This, void **op) {
     return sf_enumerate_children((WinrtStorageFolderObj *)This, 0, 1,
-        &WINRT_IID_IVectorView_StorageFolder, &WINRT_IID_IAsyncOp_Vec_StorageFolder,
+        &WINRT_IID_IVectorView_StorageFolder, &WINRT_IID_IIterable_StorageFolder, &WINRT_IID_IIterator_StorageFolder,
+        &WINRT_IID_IAsyncOp_Vec_StorageFolder,
         L"Windows.Foundation.Collections.IVectorView`1<Windows.Storage.StorageFolder>",
         L"Windows.Foundation.IAsyncOperation`1<Windows.Foundation.Collections.IVectorView`1<Windows.Storage.StorageFolder>>",
         op);
 }
 static HRESULT STDMETHODCALLTYPE sf_get_items(void *This, void **op) {
     return sf_enumerate_children((WinrtStorageFolderObj *)This, 1, 1,
-        &WINRT_IID_IVectorView_IStorageItem, &WINRT_IID_IAsyncOp_Vec_IStorageItem,
+        &WINRT_IID_IVectorView_IStorageItem, &WINRT_IID_IIterable_IStorageItem, &WINRT_IID_IIterator_IStorageItem,
+        &WINRT_IID_IAsyncOp_Vec_IStorageItem,
         L"Windows.Foundation.Collections.IVectorView`1<Windows.Storage.IStorageItem>",
         L"Windows.Foundation.IAsyncOperation`1<Windows.Foundation.Collections.IVectorView`1<Windows.Storage.IStorageItem>>",
         op);
@@ -1032,20 +2284,17 @@ static HRESULT STDMETHODCALLTYPE sf_item_rcn(void *This, HSTRING *n) {
 static HRESULT STDMETHODCALLTYPE sf_item_tl(void *This, TrustLevel *tl) {
     return sf_tl(WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem, This), tl);
 }
-static HRESULT STDMETHODCALLTYPE sf_item_rename1(void *This, HSTRING n, void **op) {
-    (void)n;
-    if (op) *op = NULL;
-    return winrt_sys_unimplemented("StorageFolder::RenameAsync", This);
-}
 static HRESULT STDMETHODCALLTYPE sf_item_rename2(void *This, HSTRING n, uint32_t o, void **op) {
-    (void)n; (void)o;
-    if (op) *op = NULL;
-    return winrt_sys_unimplemented("StorageFolder::RenameAsync", This);
+    WinrtStorageFolderObj *obj = WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem, This);
+    return storage_item_rename_impl(obj->path, n, o, op);
+}
+static HRESULT STDMETHODCALLTYPE sf_item_rename1(void *This, HSTRING n, void **op) {
+    return sf_item_rename2(This, n, 2u /* FailIfExists */, op);
 }
 static HRESULT STDMETHODCALLTYPE sf_item_del1(void *This, void **op) {
     WinrtStorageFolderObj *obj = WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem, This);
     if (!op) return E_POINTER;
-    HRESULT hr = RemoveDirectoryW(obj->path) ? S_OK : HRESULT_FROM_WIN32(GetLastError());
+    HRESULT hr = delete_dir_recursive(obj->path) ? S_OK : HRESULT_FROM_WIN32(GetLastError());
     return winrt_sys_create_completed_async_action(hr, op);
 }
 static HRESULT STDMETHODCALLTYPE sf_item_del2(void *This, uint32_t opt, void **op) {
@@ -1053,8 +2302,8 @@ static HRESULT STDMETHODCALLTYPE sf_item_del2(void *This, uint32_t opt, void **o
     return sf_item_del1(This, op);
 }
 static HRESULT STDMETHODCALLTYPE sf_item_props(void *This, void **op) {
-    if (op) *op = NULL;
-    return winrt_sys_unimplemented("StorageFolder::GetBasicPropertiesAsync", This);
+    WinrtStorageFolderObj *obj = WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem, This);
+    return create_basic_properties_async(obj->path, op);
 }
 static HRESULT STDMETHODCALLTYPE sf_item_name(void *This, HSTRING *val) {
     WinrtStorageFolderObj *obj = WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem, This);
@@ -1086,6 +2335,24 @@ static HRESULT STDMETHODCALLTYPE sf_item_isoftype(void *This, uint32_t type, boo
     return S_OK;
 }
 
+static HRESULT STDMETHODCALLTYPE sf_item2_qi(void *This, REFIID r, void **p) {
+    return sf_qi(WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem2, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE sf_item2_ar(void *This) {
+    return sf_addref(WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem2, This));
+}
+static ULONG STDMETHODCALLTYPE sf_item2_rel(void *This) {
+    return sf_release(WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem2, This));
+}
+static HRESULT STDMETHODCALLTYPE sf_item2_parent(void *This, void **op) {
+    WinrtStorageFolderObj *obj = WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem2, This);
+    return storage_item_get_parent_async(obj->path, op);
+}
+static HRESULT STDMETHODCALLTYPE sf_item2_equal(void *This, void *item, boolean *val) {
+    WinrtStorageFolderObj *obj = WINRT_SYS_FROM(WinrtStorageFolderObj, lpVtblItem2, This);
+    return storage_item_is_equal(obj->path, item, val);
+}
+
 static const WinrtStorageFolderVtbl g_storage_folder_vtbl = {
     sf_qi, sf_addref, sf_release, sf_getiids, sf_rcn, sf_tl,
     sf_create_file_def, sf_create_file,
@@ -1093,7 +2360,9 @@ static const WinrtStorageFolderVtbl g_storage_folder_vtbl = {
     sf_get_file, sf_get_folder, sf_get_item,
     sf_get_files, sf_get_folders, sf_get_items
 };
-
+static const WinrtStorageFolder2Vtbl g_storage_folder2_vtbl = {
+    sf2_qi, sf2_ar, sf2_rel, sf_getiids, sf_rcn, sf_tl, sf2_try_get_item
+};
 static const WinrtStorageItemVtbl g_storage_folder_item_vtbl = {
     sf_item_qi, sf_item_addref, sf_item_release,
     sf_item_getiids, sf_item_rcn, sf_item_tl,
@@ -1103,6 +2372,11 @@ static const WinrtStorageItemVtbl g_storage_folder_item_vtbl = {
     sf_item_name, sf_item_path, sf_item_attrs,
     sf_item_date, sf_item_isoftype
 };
+static const WinrtStorageItem2Vtbl g_storage_folder_item2_vtbl = {
+    sf_item2_qi, sf_item2_ar, sf_item2_rel,
+    sf_getiids, sf_rcn, sf_tl,
+    sf_item2_parent, sf_item2_equal
+};
 
 HRESULT winrt_sys_create_storage_folder(const wchar_t *path, void **out_folder) {
     if (!out_folder) return E_POINTER;
@@ -1110,7 +2384,9 @@ HRESULT winrt_sys_create_storage_folder(const wchar_t *path, void **out_folder) 
     WinrtStorageFolderObj *obj = (WinrtStorageFolderObj *)winrt_sys_alloc(sizeof(*obj));
     if (!obj) return E_OUTOFMEMORY;
     obj->lpVtbl = &g_storage_folder_vtbl;
+    obj->lpVtbl2 = &g_storage_folder2_vtbl;
     obj->lpVtblItem = &g_storage_folder_item_vtbl;
+    obj->lpVtblItem2 = &g_storage_folder_item2_vtbl;
     obj->ref_count = 1;
     winrt_sys_normalize_path(path, obj->path, UWP_MAX_PATH_CHARS);
     *out_folder = &obj->lpVtbl;
@@ -1324,6 +2600,21 @@ static void serialize_container_tree(WinrtAppDataContainerObj *c, char **buf, si
             append_utf8_bytes(buf, len, cap, "=", 1);
 
             switch (pt) {
+            case WinrtPropertyType_UInt8: {
+                uint8_t v = 0; pv->lpVtbl->GetUInt8(pv, &v);
+                snprintf(val_buf, sizeof(val_buf), "u8:%u", (unsigned)v);
+                break;
+            }
+            case WinrtPropertyType_Int16: {
+                int16_t v = 0; pv->lpVtbl->GetInt16(pv, &v);
+                snprintf(val_buf, sizeof(val_buf), "i16:%d", (int)v);
+                break;
+            }
+            case WinrtPropertyType_UInt16: {
+                uint16_t v = 0; pv->lpVtbl->GetUInt16(pv, &v);
+                snprintf(val_buf, sizeof(val_buf), "u16:%u", (unsigned)v);
+                break;
+            }
             case WinrtPropertyType_Int32: {
                 int32_t v = 0; pv->lpVtbl->GetInt32(pv, &v);
                 snprintf(val_buf, sizeof(val_buf), "i32:%d", v);
@@ -1354,9 +2645,36 @@ static void serialize_container_tree(WinrtAppDataContainerObj *c, char **buf, si
                 snprintf(val_buf, sizeof(val_buf), "f64:%.17g", v);
                 break;
             }
+            case WinrtPropertyType_Char16: {
+                wchar_t v = 0; pv->lpVtbl->GetChar16(pv, &v);
+                snprintf(val_buf, sizeof(val_buf), "ch16:%u", (unsigned)(uint16_t)v);
+                break;
+            }
             case WinrtPropertyType_Boolean: {
                 boolean v = 0; pv->lpVtbl->GetBoolean(pv, &v);
                 snprintf(val_buf, sizeof(val_buf), "bool:%u", v ? 1u : 0u);
+                break;
+            }
+            case WinrtPropertyType_DateTime: {
+                int64_t v = 0; pv->lpVtbl->GetDateTime(pv, &v);
+                snprintf(val_buf, sizeof(val_buf), "dt:%lld", (long long)v);
+                break;
+            }
+            case WinrtPropertyType_TimeSpan: {
+                int64_t v = 0; pv->lpVtbl->GetTimeSpan(pv, &v);
+                snprintf(val_buf, sizeof(val_buf), "ts:%lld", (long long)v);
+                break;
+            }
+            case WinrtPropertyType_Guid: {
+                GUID g; memset(&g, 0, sizeof(g));
+                pv->lpVtbl->GetGuid(pv, &g);
+                snprintf(val_buf, sizeof(val_buf),
+                         "guid:%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                         (unsigned)g.Data1, (unsigned)g.Data2, (unsigned)g.Data3,
+                         (unsigned)g.Data4[0], (unsigned)g.Data4[1],
+                         (unsigned)g.Data4[2], (unsigned)g.Data4[3],
+                         (unsigned)g.Data4[4], (unsigned)g.Data4[5],
+                         (unsigned)g.Data4[6], (unsigned)g.Data4[7]);
                 break;
             }
             case WinrtPropertyType_String: {
@@ -1557,7 +2875,13 @@ static void settings_load_root(WinrtAppDataContainerObj *root) {
                         memcpy(vstr, vp, vlen);
                         vstr[vlen] = '\0';
                         void *pv = NULL;
-                        if (strncmp(vstr, "i32:", 4) == 0) {
+                        if (strncmp(vstr, "u8:", 3) == 0) {
+                            winrt_sys_create_property_value_uint8((uint8_t)strtoul(vstr + 3, NULL, 10), &pv);
+                        } else if (strncmp(vstr, "i16:", 4) == 0) {
+                            winrt_sys_create_property_value_int16((int16_t)strtol(vstr + 4, NULL, 10), &pv);
+                        } else if (strncmp(vstr, "u16:", 4) == 0) {
+                            winrt_sys_create_property_value_uint16((uint16_t)strtoul(vstr + 4, NULL, 10), &pv);
+                        } else if (strncmp(vstr, "i32:", 4) == 0) {
                             winrt_sys_create_property_value_int32((int32_t)strtol(vstr + 4, NULL, 10), &pv);
                         } else if (strncmp(vstr, "u32:", 4) == 0) {
                             winrt_sys_create_property_value_uint32((uint32_t)strtoul(vstr + 4, NULL, 10), &pv);
@@ -1569,8 +2893,26 @@ static void settings_load_root(WinrtAppDataContainerObj *root) {
                             winrt_sys_create_property_value_single(strtof(vstr + 4, NULL), &pv);
                         } else if (strncmp(vstr, "f64:", 4) == 0) {
                             winrt_sys_create_property_value_double(strtod(vstr + 4, NULL), &pv);
+                        } else if (strncmp(vstr, "ch16:", 5) == 0) {
+                            winrt_sys_create_property_value_char16((wchar_t)strtoul(vstr + 5, NULL, 10), &pv);
                         } else if (strncmp(vstr, "bool:", 5) == 0) {
                             winrt_sys_create_property_value_boolean(atoi(vstr + 5) != 0 ? 1 : 0, &pv);
+                        } else if (strncmp(vstr, "dt:", 3) == 0) {
+                            winrt_sys_create_property_value_datetime((int64_t)strtoll(vstr + 3, NULL, 10), &pv);
+                        } else if (strncmp(vstr, "ts:", 3) == 0) {
+                            winrt_sys_create_property_value_timespan((int64_t)strtoll(vstr + 3, NULL, 10), &pv);
+                        } else if (strncmp(vstr, "guid:", 5) == 0) {
+                            unsigned d1 = 0, d2 = 0, d3 = 0, b[8] = {0};
+                            if (sscanf(vstr + 5, "%8x-%4x-%4x-%2x%2x-%2x%2x%2x%2x%2x%2x",
+                                       &d1, &d2, &d3, &b[0], &b[1], &b[2], &b[3],
+                                       &b[4], &b[5], &b[6], &b[7]) == 11) {
+                                GUID g;
+                                g.Data1 = (uint32_t)d1;
+                                g.Data2 = (uint16_t)d2;
+                                g.Data3 = (uint16_t)d3;
+                                for (int bi = 0; bi < 8; ++bi) g.Data4[bi] = (uint8_t)b[bi];
+                                winrt_sys_create_property_value_guid(&g, &pv);
+                            }
                         } else if (strncmp(vstr, "str:", 4) == 0) {
                             wchar_t *ws = utf8_unescaped_to_wstr(vstr + 4, vlen - 4u);
                             if (ws) {
@@ -1597,6 +2939,7 @@ static void settings_load_root(WinrtAppDataContainerObj *root) {
 typedef struct WinrtKvpObj {
     const WinrtKvpHstringPtrVtbl *lpVtbl;
     volatile LONG ref_count;
+    GUID kvp_iid;
     HSTRING key;
     IUnknown *value;
 } WinrtKvpObj;
@@ -1609,7 +2952,7 @@ static HRESULT STDMETHODCALLTYPE kvp_qi(void *This, REFIID riid, void **ppv) {
     if (winrt_sys_guid_eq(riid, &WINRT_IID_IUnknown) ||
         winrt_sys_guid_eq(riid, &WINRT_IID_IInspectable) ||
         winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject) ||
-        winrt_sys_guid_eq(riid, &WINRT_IID_IKeyValuePair_HSTRING_IInspectable)) {
+        winrt_sys_guid_eq(riid, &obj->kvp_iid)) {
         InterlockedIncrement(&obj->ref_count);
         *ppv = obj;
         return S_OK;
@@ -1630,8 +2973,8 @@ static ULONG STDMETHODCALLTYPE kvp_release(void *This) {
     return (ULONG)rc;
 }
 static HRESULT STDMETHODCALLTYPE kvp_getiids(void *This, ULONG *c, IID **i) {
-    (void)This;
-    return winrt_sys_get_iids_copy(&WINRT_IID_IKeyValuePair_HSTRING_IInspectable, 1, c, i);
+    WinrtKvpObj *obj = (WinrtKvpObj *)This;
+    return winrt_sys_get_iids_copy(&obj->kvp_iid, 1, c, i);
 }
 static HRESULT STDMETHODCALLTYPE kvp_rcn(void *This, HSTRING *n) {
     (void)This;
@@ -1658,11 +3001,11 @@ static const WinrtKvpHstringPtrVtbl g_kvp_vtbl = {
 };
 
 static IUnknown *create_kvp_obj(const wchar_t *key, IUnknown *val, const GUID *kvp_iid) {
-    (void)kvp_iid;
     WinrtKvpObj *o = (WinrtKvpObj *)winrt_sys_alloc(sizeof(*o));
     if (!o) return NULL;
     o->lpVtbl = &g_kvp_vtbl;
     o->ref_count = 1;
+    o->kvp_iid = kvp_iid ? *kvp_iid : WINRT_IID_IKeyValuePair_HSTRING_IInspectable;
     winrt_sys_make_hstring(key, &o->key);
     o->value = val;
     if (val) val->lpVtbl->AddRef(val);

@@ -209,7 +209,7 @@ typedef struct hdmi_info_statics_s {
     volatile int32_t                  ref_count;
 } hdmi_info_statics_t;
 
-/* IVectorView<HdmiDisplayMode*>: {AA06F11C-45F4-520C-9305-DB0F65A5F770} (generic runtime QI) */
+/* IVectorView<HdmiDisplayMode*>: SCARLETT_IID_IVectorView_HdmiDisplayMode */
 static uwp_ui_lock_t       g_hdmi_lock = UWP_UI_LOCK_INIT;
 static hdmi_info_obj_t    *g_hdmi_singleton = NULL;
 static uwp_ui_event_list_t g_hdmi_modes_changed = UWP_UI_EVENT_LIST_INIT;
@@ -382,7 +382,8 @@ static HRESULT STDMETHODCALLTYPE hmv_QueryInterface(UwpIVectorViewHdmiDisplayMod
     *ppv = NULL;
     if (IsEqualGUID(riid, &SCARLETT_IID_IUnknown) ||
         IsEqualGUID(riid, &SCARLETT_IID_IInspectable) ||
-        IsEqualGUID(riid, &SCARLETT_IID_IAgileObject)) {
+        IsEqualGUID(riid, &SCARLETT_IID_IAgileObject) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IVectorView_HdmiDisplayMode)) {
         *ppv = &vec->iface;
         uwp_ui_atomic_inc(&vec->ref_count);
         return S_OK;
@@ -405,7 +406,9 @@ static ULONG STDMETHODCALLTYPE hmv_Release(UwpIVectorViewHdmiDisplayMode *This) 
     return ref;
 }
 static HRESULT STDMETHODCALLTYPE hmv_GetIids(UwpIVectorViewHdmiDisplayMode *This, ULONG *c, IID **iids) {
-    (void)This; return uwp_ui_get_iids(NULL, 0, c, iids);
+    (void)This;
+    const GUID list[] = { SCARLETT_IID_IVectorView_HdmiDisplayMode };
+    return uwp_ui_get_iids(list, 1, c, iids);
 }
 static HRESULT STDMETHODCALLTYPE hmv_GetRuntimeClassName(UwpIVectorViewHdmiDisplayMode *This, HSTRING *name) {
     (void)This; return uwp_ui_get_runtime_class_name(L"Windows.Foundation.Collections.IVectorView`1<Windows.Graphics.Display.Core.HdmiDisplayMode>", name);
@@ -488,9 +491,13 @@ static ULONG STDMETHODCALLTYPE hdi_Release(UwpIHdmiDisplayInformation *This) {
     ULONG ref = uwp_ui_atomic_dec(&obj->ref_count);
     if (ref == 0) {
         uwp_ui_lock_acquire(&g_hdmi_lock);
-        if (g_hdmi_singleton == obj) g_hdmi_singleton = NULL;
+        if (uwp_ui_atomic_load(&obj->ref_count) == 0) {
+            if (g_hdmi_singleton == obj) g_hdmi_singleton = NULL;
+            uwp_ui_lock_release(&g_hdmi_lock);
+            uwp_ui_free(obj);
+            return 0;
+        }
         uwp_ui_lock_release(&g_hdmi_lock);
-        uwp_ui_free(obj);
     }
     return ref;
 }

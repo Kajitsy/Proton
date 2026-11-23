@@ -179,7 +179,7 @@ static void parse_version_str(const wchar_t *ver, WinrtPackageVersion *out) {
 static void resolve_package_identity(uwp_package_identity_t *out) {
     memset(out, 0, sizeof(*out));
     const uwp_package_identity_t *core = uwp_core_get_package_identity();
-    if (core != NULL && core->valid != 0) {
+    if (core != NULL && (core->valid != 0 || core->install_path[0] != L'\0')) {
         *out = *core;
     }
 

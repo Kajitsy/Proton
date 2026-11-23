@@ -8,6 +8,7 @@
 
 #include <assert.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -813,6 +814,1095 @@ static void test_analytics_and_gamebar(void) {
     gb->lpVtbl->Release(gb);
 }
 
+/* ============================================================================
+ * Extended Tests: StorageFile, Streams, IStorageFolder2/IStorageItem2, ThreadPool
+ * ============================================================================ */
+
+typedef struct StorageFolderFullIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *CreateFileDef)(void *This, HSTRING n, void **op);
+        HRESULT (STDMETHODCALLTYPE *CreateFile)(void *This, HSTRING n, uint32_t opt, void **op);
+        HRESULT (STDMETHODCALLTYPE *CreateFolderDef)(void *This, HSTRING n, void **op);
+        HRESULT (STDMETHODCALLTYPE *CreateFolder)(void *This, HSTRING n, uint32_t opt, void **op);
+        HRESULT (STDMETHODCALLTYPE *GetFile)(void *This, HSTRING n, void **op);
+        HRESULT (STDMETHODCALLTYPE *GetFolder)(void *This, HSTRING n, void **op);
+        HRESULT (STDMETHODCALLTYPE *GetItem)(void *This, HSTRING n, void **op);
+        HRESULT (STDMETHODCALLTYPE *GetFiles)(void *This, void **op);
+        HRESULT (STDMETHODCALLTYPE *GetFolders)(void *This, void **op);
+        HRESULT (STDMETHODCALLTYPE *GetItems)(void *This, void **op);
+    } *lpVtbl;
+} StorageFolderFullIf;
+
+typedef struct StorageFolder2If {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *TryGetItemAsync)(void *This, HSTRING n, void **op);
+    } *lpVtbl;
+} StorageFolder2If;
+
+typedef struct StorageItem2If {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *GetParentAsync)(void *This, void **op);
+        HRESULT (STDMETHODCALLTYPE *IsEqual)(void *This, void *item, boolean *val);
+    } *lpVtbl;
+} StorageItem2If;
+
+typedef struct StorageFileStaticsIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *GetFileFromPathAsync)(void *This, HSTRING path, void **op);
+        HRESULT (STDMETHODCALLTYPE *GetFileFromApplicationUriAsync)(void *This, void *uri, void **op);
+    } *lpVtbl;
+} StorageFileStaticsIf;
+
+typedef struct StorageFileIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *get_FileType)(void *This, HSTRING *v);
+        HRESULT (STDMETHODCALLTYPE *get_ContentType)(void *This, HSTRING *v);
+        HRESULT (STDMETHODCALLTYPE *OpenAsync)(void *This, uint32_t accessMode, void **op);
+    } *lpVtbl;
+} StorageFileIf;
+
+typedef struct RasRefIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *OpenReadAsync)(void *This, void **op);
+    } *lpVtbl;
+} RasRefIf;
+
+typedef struct RasIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *get_Size)(void *This, uint64_t *v);
+        HRESULT (STDMETHODCALLTYPE *put_Size)(void *This, uint64_t v);
+        HRESULT (STDMETHODCALLTYPE *GetInputStreamAt)(void *This, uint64_t pos, void **s);
+        HRESULT (STDMETHODCALLTYPE *GetOutputStreamAt)(void *This, uint64_t pos, void **s);
+        HRESULT (STDMETHODCALLTYPE *get_Position)(void *This, uint64_t *v);
+        HRESULT (STDMETHODCALLTYPE *Seek)(void *This, uint64_t pos);
+        HRESULT (STDMETHODCALLTYPE *CloneStream)(void *This, void **s);
+        HRESULT (STDMETHODCALLTYPE *get_CanRead)(void *This, boolean *v);
+        HRESULT (STDMETHODCALLTYPE *get_CanWrite)(void *This, boolean *v);
+    } *lpVtbl;
+} RasIf;
+
+typedef struct InputStreamIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *ReadAsync)(void *This, void *buf, uint32_t cnt, uint32_t opt, void **op);
+    } *lpVtbl;
+} InputStreamIf;
+
+typedef struct OutputStreamIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *WriteAsync)(void *This, void *buf, void **op);
+        HRESULT (STDMETHODCALLTYPE *FlushAsync)(void *This, void **op);
+    } *lpVtbl;
+} OutputStreamIf;
+
+typedef struct ClosableIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *Close)(void *This);
+    } *lpVtbl;
+} ClosableIf;
+
+typedef struct BasicPropsIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *get_Size)(void *This, uint64_t *v);
+        HRESULT (STDMETHODCALLTYPE *get_DateModified)(void *This, int64_t *v);
+        HRESULT (STDMETHODCALLTYPE *get_ItemDate)(void *This, int64_t *v);
+    } *lpVtbl;
+} BasicPropsIf;
+
+typedef struct IterableIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *First)(void *This, void **iter);
+    } *lpVtbl;
+} IterableIf;
+
+typedef struct IteratorIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *get_Current)(void *This, void **cur);
+        HRESULT (STDMETHODCALLTYPE *get_HasCurrent)(void *This, boolean *has);
+        HRESULT (STDMETHODCALLTYPE *MoveNext)(void *This, boolean *moved);
+        HRESULT (STDMETHODCALLTYPE *GetMany)(void *This, uint32_t cap, void **items, uint32_t *actual);
+    } *lpVtbl;
+} IteratorIf;
+
+typedef struct KvpIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *get_Key)(void *This, HSTRING *k);
+        HRESULT (STDMETHODCALLTYPE *get_Value)(void *This, void **v);
+    } *lpVtbl;
+} KvpIf;
+
+typedef struct ThreadPoolStaticsIf {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+        HRESULT (STDMETHODCALLTYPE *RunAsync)(void *This, void *handler, void **operation);
+        HRESULT (STDMETHODCALLTYPE *RunWithPriorityAsync)(void *This, void *handler, int32_t priority, void **operation);
+        HRESULT (STDMETHODCALLTYPE *RunWithPriorityAndOptionsAsync)(void *This, void *handler, int32_t priority, uint32_t options, void **operation);
+    } *lpVtbl;
+} ThreadPoolStaticsIf;
+
+static void test_storage_file_streams_and_extended_apis(void) {
+    AppDataStaticsIf *ad_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Storage.ApplicationData", &WINRT_IID_IApplicationDataStatics, (void **)&ad_stat)));
+    AppDataIf *ad = NULL;
+    assert(SUCCEEDED(ad_stat->lpVtbl->get_Current(ad_stat, (void **)&ad)));
+    StorageFolderFullIf *local_folder = NULL;
+    assert(SUCCEEDED(ad->lpVtbl->get_LocalFolder(ad, (void **)&local_folder)));
+
+    /* IStorageFolder2::TryGetItemAsync on nonexistent file returns NULL */
+    StorageFolder2If *lf2 = NULL;
+    assert(SUCCEEDED(local_folder->lpVtbl->QueryInterface(local_folder, &WINRT_IID_IStorageFolder2, (void **)&lf2)));
+    HSTRING h_miss = NULL;
+    assert(SUCCEEDED(WindowsCreateString(L"no_such_item.txt", 16, &h_miss)));
+    AsyncOpIf *op = NULL;
+    assert(SUCCEEDED(lf2->lpVtbl->TryGetItemAsync(lf2, h_miss, (void **)&op)));
+    void *miss_item = (void *)(uintptr_t)0x1;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, &miss_item)));
+    assert(miss_item == NULL);
+    op->lpVtbl->Release(op);
+    WindowsDeleteString(h_miss);
+
+    /* Create SubDir and data.bin */
+    HSTRING h_sub = NULL, h_file = NULL;
+    assert(SUCCEEDED(WindowsCreateString(L"StreamSub", 9, &h_sub)));
+    assert(SUCCEEDED(WindowsCreateString(L"data.bin", 8, &h_file)));
+    assert(SUCCEEDED(local_folder->lpVtbl->CreateFolder(local_folder, h_sub, 1 /* ReplaceExisting */, (void **)&op)));
+    StorageFolderFullIf *sub_folder = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, (void **)&sub_folder)));
+    op->lpVtbl->Release(op);
+
+    assert(SUCCEEDED(sub_folder->lpVtbl->CreateFile(sub_folder, h_file, 1 /* ReplaceExisting */, (void **)&op)));
+    StorageFileIf *sfile = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, (void **)&sfile)));
+    op->lpVtbl->Release(op);
+
+    /* TryGetItemAsync on existing data.bin */
+    StorageFolder2If *sub2 = NULL;
+    assert(SUCCEEDED(sub_folder->lpVtbl->QueryInterface(sub_folder, &WINRT_IID_IStorageFolder2, (void **)&sub2)));
+    assert(SUCCEEDED(sub2->lpVtbl->TryGetItemAsync(sub2, h_file, (void **)&op)));
+    StorageItemIf *found_item = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, (void **)&found_item)));
+    op->lpVtbl->Release(op);
+    assert(found_item != NULL);
+
+    /* IStorageItem2::IsEqual & GetParentAsync */
+    StorageItem2If *item2 = NULL;
+    assert(SUCCEEDED(found_item->lpVtbl->QueryInterface(found_item, &WINRT_IID_IStorageItem2, (void **)&item2)));
+    boolean eq = 0;
+    assert(SUCCEEDED(item2->lpVtbl->IsEqual(item2, sfile, &eq)));
+    assert(eq == 1);
+    assert(SUCCEEDED(item2->lpVtbl->IsEqual(item2, sub_folder, &eq)));
+    assert(eq == 0);
+    assert(SUCCEEDED(item2->lpVtbl->GetParentAsync(item2, (void **)&op)));
+    StorageFolderFullIf *parent_folder = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, (void **)&parent_folder)));
+    op->lpVtbl->Release(op);
+    assert(parent_folder != NULL);
+    StorageItem2If *sub_i2 = NULL;
+    assert(SUCCEEDED(sub_folder->lpVtbl->QueryInterface(sub_folder, &WINRT_IID_IStorageItem2, (void **)&sub_i2)));
+    assert(SUCCEEDED(sub_i2->lpVtbl->IsEqual(sub_i2, parent_folder, &eq)));
+    assert(eq == 1);
+    sub_i2->lpVtbl->Release(sub_i2);
+    parent_folder->lpVtbl->Release(parent_folder);
+
+    /* Windows.Storage.StorageFile::GetFileFromPathAsync */
+    StorageItemIf *file_item = NULL;
+    assert(SUCCEEDED(sfile->lpVtbl->QueryInterface(sfile, &WINRT_IID_IStorageItem, (void **)&file_item)));
+    HSTRING h_fpath = NULL;
+    assert(SUCCEEDED(file_item->lpVtbl->get_Path(file_item, &h_fpath)));
+    StorageFileStaticsIf *sf_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Storage.StorageFile", &WINRT_IID_IStorageFileStatics, (void **)&sf_stat)));
+    assert(SUCCEEDED(sf_stat->lpVtbl->GetFileFromPathAsync(sf_stat, h_fpath, (void **)&op)));
+    StorageFileIf *sfile_by_path = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, (void **)&sfile_by_path)));
+    op->lpVtbl->Release(op);
+    assert(SUCCEEDED(item2->lpVtbl->IsEqual(item2, sfile_by_path, &eq)));
+    assert(eq == 1);
+    sfile_by_path->lpVtbl->Release(sfile_by_path);
+    sf_stat->lpVtbl->Release(sf_stat);
+    WindowsDeleteString(h_fpath);
+
+    /* OpenAsync(ReadWrite=1) -> WriteAsync, FlushAsync, Seek, ReadAsync, Close */
+    assert(SUCCEEDED(sfile->lpVtbl->OpenAsync(sfile, 1 /* ReadWrite */, (void **)&op)));
+    RasIf *ras = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, (void **)&ras)));
+    op->lpVtbl->Release(op);
+
+    void *wbuf = NULL;
+    const uint8_t payload[] = "hello stream";
+    assert(SUCCEEDED(winrt_sys_create_buffer(payload, 12u, &wbuf)));
+    OutputStreamIf *os = NULL;
+    assert(SUCCEEDED(ras->lpVtbl->QueryInterface(ras, &WINRT_IID_IOutputStream, (void **)&os)));
+    assert(SUCCEEDED(os->lpVtbl->WriteAsync(os, wbuf, (void **)&op)));
+    struct { const WinrtAsyncOpWithProgressU32Vtbl *lpVtbl; } *wop = (void *)op;
+    uint32_t written = 0;
+    assert(SUCCEEDED(wop->lpVtbl->GetResults(wop, &written)));
+    assert(written == 12u);
+    wop->lpVtbl->Release(wop);
+    ((IUnknown *)wbuf)->lpVtbl->Release((IUnknown *)wbuf);
+
+    void *fop = NULL;
+    assert(SUCCEEDED(os->lpVtbl->FlushAsync(os, &fop)));
+    struct { const WinrtAsyncOperationBoolVtbl *lpVtbl; } *fbop = fop;
+    boolean flushed = 0;
+    assert(SUCCEEDED(fbop->lpVtbl->GetResults(fbop, &flushed)));
+    assert(flushed == 1);
+    fbop->lpVtbl->Release(fbop);
+    os->lpVtbl->Release(os);
+
+    uint64_t sz = 0, pos = 99;
+    assert(SUCCEEDED(ras->lpVtbl->get_Size(ras, &sz)));
+    assert(sz == 12u);
+    assert(SUCCEEDED(ras->lpVtbl->Seek(ras, 0u)));
+    assert(SUCCEEDED(ras->lpVtbl->get_Position(ras, &pos)));
+    assert(pos == 0u);
+
+    uint8_t zeros[32] = {0};
+    void *rbuf = NULL;
+    assert(SUCCEEDED(winrt_sys_create_buffer(zeros, 32u, &rbuf)));
+    InputStreamIf *is = NULL;
+    assert(SUCCEEDED(ras->lpVtbl->QueryInterface(ras, &WINRT_IID_IInputStream, (void **)&is)));
+    assert(SUCCEEDED(is->lpVtbl->ReadAsync(is, rbuf, 32u, 0u, (void **)&op)));
+    void *res_buf = NULL;
+    struct { const WinrtAsyncOpWithProgressPtrVtbl *lpVtbl; } *rop = (void *)op;
+    assert(SUCCEEDED(rop->lpVtbl->GetResults(rop, &res_buf)));
+    rop->lpVtbl->Release(rop);
+    uint8_t *rptr = NULL;
+    uint32_t rlen = 0;
+    assert(SUCCEEDED(winrt_sys_read_buffer(res_buf, &rptr, &rlen)));
+    assert(rlen == 12u && memcmp(rptr, "hello stream", 12u) == 0);
+    ((IUnknown *)res_buf)->lpVtbl->Release((IUnknown *)res_buf);
+    ((IUnknown *)rbuf)->lpVtbl->Release((IUnknown *)rbuf);
+    is->lpVtbl->Release(is);
+
+    ClosableIf *clos = NULL;
+    assert(SUCCEEDED(ras->lpVtbl->QueryInterface(ras, &WINRT_IID_IClosable, (void **)&clos)));
+    assert(SUCCEEDED(clos->lpVtbl->Close(clos)));
+    clos->lpVtbl->Release(clos);
+    ras->lpVtbl->Release(ras);
+
+    /* IRandomAccessStreamReference::OpenReadAsync */
+    RasRefIf *rref = NULL;
+    assert(SUCCEEDED(sfile->lpVtbl->QueryInterface(sfile, &WINRT_IID_IRandomAccessStreamReference, (void **)&rref)));
+    assert(SUCCEEDED(rref->lpVtbl->OpenReadAsync(rref, (void **)&op)));
+    RasIf *ras2 = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, (void **)&ras2)));
+    op->lpVtbl->Release(op);
+    assert(SUCCEEDED(ras2->lpVtbl->get_Size(ras2, &sz)));
+    assert(sz == 12u);
+    ras2->lpVtbl->Release(ras2);
+    rref->lpVtbl->Release(rref);
+
+    /* GetBasicPropertiesAsync */
+    assert(SUCCEEDED(file_item->lpVtbl->Props(file_item, (void **)&op)));
+    BasicPropsIf *bp = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, (void **)&bp)));
+    op->lpVtbl->Release(op);
+    uint64_t bsz = 0;
+    int64_t bdm = 0;
+    assert(SUCCEEDED(bp->lpVtbl->get_Size(bp, &bsz)));
+    assert(SUCCEEDED(bp->lpVtbl->get_DateModified(bp, &bdm)));
+    assert(bsz == 12u && bdm != 0);
+    bp->lpVtbl->Release(bp);
+
+    /* GetFilesAsync + IIterable<StorageFile*>::First */
+    assert(SUCCEEDED(sub_folder->lpVtbl->GetFiles(sub_folder, (void **)&op)));
+    void *fvec = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, &fvec)));
+    op->lpVtbl->Release(op);
+    IterableIf *fit = NULL;
+    assert(SUCCEEDED(((IUnknown *)fvec)->lpVtbl->QueryInterface((IUnknown *)fvec, &WINRT_IID_IIterable_StorageFile, (void **)&fit)));
+    IteratorIf *fiter = NULL;
+    assert(SUCCEEDED(fit->lpVtbl->First(fit, (void **)&fiter)));
+    boolean has = 0;
+    assert(SUCCEEDED(fiter->lpVtbl->get_HasCurrent(fiter, &has)));
+    assert(has == 1);
+    void *listed_raw = NULL;
+    assert(SUCCEEDED(fiter->lpVtbl->get_Current(fiter, &listed_raw)));
+    StorageItemIf *listed = NULL;
+    assert(SUCCEEDED(((IUnknown *)listed_raw)->lpVtbl->QueryInterface((IUnknown *)listed_raw, &WINRT_IID_IStorageItem, (void **)&listed)));
+    HSTRING lname = NULL;
+    assert(SUCCEEDED(listed->lpVtbl->get_Name(listed, &lname)));
+    assert(wcscmp(WindowsGetStringRawBuffer(lname, NULL), L"data.bin") == 0);
+    WindowsDeleteString(lname);
+    listed->lpVtbl->Release(listed);
+    ((IUnknown *)listed_raw)->lpVtbl->Release((IUnknown *)listed_raw);
+    fiter->lpVtbl->Release(fiter);
+    fit->lpVtbl->Release(fit);
+    ((IUnknown *)fvec)->lpVtbl->Release((IUnknown *)fvec);
+
+    /* RenameAsync + recursive DeleteAsync */
+    HSTRING h_newname = NULL;
+    assert(SUCCEEDED(WindowsCreateString(L"renamed.bin", 11, &h_newname)));
+    void *ren_act = NULL;
+    assert(SUCCEEDED(file_item->lpVtbl->Rename2(file_item, h_newname, 1 /* ReplaceExisting */, &ren_act)));
+    ((IUnknown *)ren_act)->lpVtbl->Release((IUnknown *)ren_act);
+
+    assert(SUCCEEDED(sub2->lpVtbl->TryGetItemAsync(sub2, h_file, (void **)&op)));
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, &miss_item)));
+    op->lpVtbl->Release(op);
+    assert(miss_item == NULL);
+
+    assert(SUCCEEDED(sub2->lpVtbl->TryGetItemAsync(sub2, h_newname, (void **)&op)));
+    void *ren_item = NULL;
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, &ren_item)));
+    op->lpVtbl->Release(op);
+    assert(ren_item != NULL);
+    ((IUnknown *)ren_item)->lpVtbl->Release((IUnknown *)ren_item);
+    WindowsDeleteString(h_newname);
+
+    StorageItemIf *sub_item = NULL;
+    assert(SUCCEEDED(sub_folder->lpVtbl->QueryInterface(sub_folder, &WINRT_IID_IStorageItem, (void **)&sub_item)));
+    void *del_act = NULL;
+    assert(SUCCEEDED(sub_item->lpVtbl->Del1(sub_item, &del_act)));
+    ((IUnknown *)del_act)->lpVtbl->Release((IUnknown *)del_act);
+    sub_item->lpVtbl->Release(sub_item);
+
+    assert(SUCCEEDED(lf2->lpVtbl->TryGetItemAsync(lf2, h_sub, (void **)&op)));
+    assert(SUCCEEDED(op->lpVtbl->GetResults(op, &miss_item)));
+    op->lpVtbl->Release(op);
+    assert(miss_item == NULL);
+
+    item2->lpVtbl->Release(item2);
+    file_item->lpVtbl->Release(file_item);
+    found_item->lpVtbl->Release(found_item);
+    sfile->lpVtbl->Release(sfile);
+    sub2->lpVtbl->Release(sub2);
+    sub_folder->lpVtbl->Release(sub_folder);
+    WindowsDeleteString(h_file);
+    WindowsDeleteString(h_sub);
+    lf2->lpVtbl->Release(lf2);
+    local_folder->lpVtbl->Release(local_folder);
+    ad->lpVtbl->Release(ad);
+    ad_stat->lpVtbl->Release(ad_stat);
+}
+
+typedef struct TestWorkHandlerVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *Invoke)(void *This, void *operation);
+} TestWorkHandlerVtbl;
+
+typedef struct TestWorkHandler {
+    const TestWorkHandlerVtbl *lpVtbl;
+    volatile LONG ref_count;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    int invoked;
+    HRESULT result_to_return;
+} TestWorkHandler;
+
+static HRESULT STDMETHODCALLTYPE twh_qi(void *This, REFIID riid, void **ppv) {
+    if (!ppv) return E_POINTER;
+    *ppv = NULL;
+    if (!riid) return E_INVALIDARG;
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IUnknown) || winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject)) {
+        InterlockedIncrement(&((TestWorkHandler *)This)->ref_count);
+        *ppv = This;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE twh_addref(void *This) {
+    return (ULONG)InterlockedIncrement(&((TestWorkHandler *)This)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE twh_release(void *This) {
+    return (ULONG)InterlockedDecrement(&((TestWorkHandler *)This)->ref_count);
+}
+static HRESULT STDMETHODCALLTYPE twh_invoke(void *This, void *operation) {
+    (void)operation;
+    TestWorkHandler *w = (TestWorkHandler *)This;
+    pthread_mutex_lock(&w->mu);
+    w->invoked++;
+    pthread_cond_broadcast(&w->cv);
+    pthread_mutex_unlock(&w->mu);
+    return w->result_to_return;
+}
+
+typedef struct TestActDoneHandler {
+    const WinrtAsyncActionCompletedHandlerVtbl *lpVtbl;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    int called;
+    AsyncStatus status;
+} TestActDoneHandler;
+
+static HRESULT STDMETHODCALLTYPE tadh_qi(void *This, REFIID riid, void **ppv) {
+    (void)riid; *ppv = This; return S_OK;
+}
+static ULONG STDMETHODCALLTYPE tadh_addref(void *This) { (void)This; return 1; }
+static ULONG STDMETHODCALLTYPE tadh_release(void *This) { (void)This; return 1; }
+static HRESULT STDMETHODCALLTYPE tadh_invoke(void *This, void *action, AsyncStatus status) {
+    (void)action;
+    TestActDoneHandler *h = (TestActDoneHandler *)This;
+    pthread_mutex_lock(&h->mu);
+    h->called++;
+    h->status = status;
+    pthread_cond_broadcast(&h->cv);
+    pthread_mutex_unlock(&h->mu);
+    return S_OK;
+}
+
+static void test_extended_settings_and_threadpool(void) {
+    /* 1. ApplicationDataContainer::get_Containers KVP QI + extended PropertyValue types */
+    AppDataStaticsIf *ad_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Storage.ApplicationData", &WINRT_IID_IApplicationDataStatics, (void **)&ad_stat)));
+    AppDataIf *ad = NULL;
+    assert(SUCCEEDED(ad_stat->lpVtbl->get_Current(ad_stat, (void **)&ad)));
+    AppDataContainerIf *ls = NULL;
+    assert(SUCCEEDED(ad->lpVtbl->get_LocalSettings(ad, (void **)&ls)));
+
+    HSTRING h_cname = NULL;
+    assert(SUCCEEDED(WindowsCreateString(L"TypedProps", 10, &h_cname)));
+    AppDataContainerIf *subc = NULL;
+    assert(SUCCEEDED(ls->lpVtbl->CreateContainer(ls, h_cname, 0 /* Always */, (void **)&subc)));
+    void *subvals_raw = NULL;
+    assert(SUCCEEDED(subc->lpVtbl->get_Values(subc, &subvals_raw)));
+    MapIf *subvals = NULL;
+    assert(SUCCEEDED(((IUnknown *)subvals_raw)->lpVtbl->QueryInterface((IUnknown *)subvals_raw, &WINRT_IID_IMap_HSTRING_IInspectable, (void **)&subvals)));
+
+    void *pv_u8 = NULL, *pv_i16 = NULL, *pv_guid = NULL, *pv_dt = NULL;
+    GUID g_sample = { 0x12345678u, 0x9abcu, 0xdef0u, { 1, 2, 3, 4, 5, 6, 7, 8 } };
+    assert(SUCCEEDED(winrt_sys_create_property_value_uint8(42u, &pv_u8)));
+    assert(SUCCEEDED(winrt_sys_create_property_value_int16(-321, &pv_i16)));
+    assert(SUCCEEDED(winrt_sys_create_property_value_guid(&g_sample, &pv_guid)));
+    assert(SUCCEEDED(winrt_sys_create_property_value_datetime(9876543210LL, &pv_dt)));
+    HSTRING k1 = NULL, k2 = NULL, k3 = NULL, k4 = NULL;
+    assert(SUCCEEDED(WindowsCreateString(L"k_u8", 4, &k1)));
+    assert(SUCCEEDED(WindowsCreateString(L"k_i16", 5, &k2)));
+    assert(SUCCEEDED(WindowsCreateString(L"k_guid", 6, &k3)));
+    assert(SUCCEEDED(WindowsCreateString(L"k_dt", 4, &k4)));
+    boolean rep = 0;
+    assert(SUCCEEDED(subvals->lpVtbl->Insert(subvals, k1, pv_u8, &rep)));
+    assert(SUCCEEDED(subvals->lpVtbl->Insert(subvals, k2, pv_i16, &rep)));
+    assert(SUCCEEDED(subvals->lpVtbl->Insert(subvals, k3, pv_guid, &rep)));
+    assert(SUCCEEDED(subvals->lpVtbl->Insert(subvals, k4, pv_dt, &rep)));
+    ((IUnknown *)pv_u8)->lpVtbl->Release((IUnknown *)pv_u8);
+    ((IUnknown *)pv_i16)->lpVtbl->Release((IUnknown *)pv_i16);
+    ((IUnknown *)pv_guid)->lpVtbl->Release((IUnknown *)pv_guid);
+    ((IUnknown *)pv_dt)->lpVtbl->Release((IUnknown *)pv_dt);
+    WindowsDeleteString(k1);
+    WindowsDeleteString(k2);
+    WindowsDeleteString(k3);
+    WindowsDeleteString(k4);
+
+    void *cview = NULL;
+    assert(SUCCEEDED(ls->lpVtbl->get_Containers(ls, &cview)));
+    IterableIf *cit = NULL;
+    assert(SUCCEEDED(((IUnknown *)cview)->lpVtbl->QueryInterface((IUnknown *)cview, &WINRT_IID_IIterable_KVP_HSTRING_AppDataContainer, (void **)&cit)));
+    IteratorIf *citer = NULL;
+    assert(SUCCEEDED(cit->lpVtbl->First(cit, (void **)&citer)));
+    boolean chas = 0;
+    assert(SUCCEEDED(citer->lpVtbl->get_HasCurrent(citer, &chas)));
+    assert(chas == 1);
+    void *kvp_raw = NULL;
+    assert(SUCCEEDED(citer->lpVtbl->get_Current(citer, &kvp_raw)));
+    KvpIf *kvp = NULL;
+    assert(SUCCEEDED(((IUnknown *)kvp_raw)->lpVtbl->QueryInterface((IUnknown *)kvp_raw, &WINRT_IID_IKeyValuePair_HSTRING_AppDataContainer, (void **)&kvp)));
+    kvp->lpVtbl->Release(kvp);
+    ((IUnknown *)kvp_raw)->lpVtbl->Release((IUnknown *)kvp_raw);
+    citer->lpVtbl->Release(citer);
+    cit->lpVtbl->Release(cit);
+    ((IUnknown *)cview)->lpVtbl->Release((IUnknown *)cview);
+
+    subvals->lpVtbl->Release(subvals);
+    ((IUnknown *)subvals_raw)->lpVtbl->Release((IUnknown *)subvals_raw);
+    subc->lpVtbl->Release(subc);
+    WindowsDeleteString(h_cname);
+    ls->lpVtbl->Release(ls);
+    ad->lpVtbl->Release(ad);
+    ad_stat->lpVtbl->Release(ad_stat);
+
+    /* 2. Windows.System.Threading.ThreadPool::RunAsync */
+    static const GUID iid_tp_statics =
+        { 0xb6bf67ddu, 0x84bdu, 0x44f8u, { 0xacu, 0x1cu, 0x93u, 0xebu, 0xcbu, 0x9du, 0xbau, 0x91u } };
+    ThreadPoolStaticsIf *tp = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.System.Threading.ThreadPool", &iid_tp_statics, (void **)&tp)));
+
+    static const TestWorkHandlerVtbl work_vtbl = { twh_qi, twh_addref, twh_release, twh_invoke };
+    TestWorkHandler wh = { &work_vtbl, 1, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, S_OK };
+
+    static const WinrtAsyncActionCompletedHandlerVtbl done_vtbl = {
+        tadh_qi, tadh_addref, tadh_release, tadh_invoke
+    };
+    TestActDoneHandler dh = { &done_vtbl, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, Started };
+
+    struct { const WinrtAsyncActionVtbl *lpVtbl; } *act = NULL;
+    assert(SUCCEEDED(tp->lpVtbl->RunAsync(tp, &wh, (void **)&act)));
+    assert(act != NULL);
+    assert(SUCCEEDED(act->lpVtbl->put_Completed(act, &dh)));
+
+    pthread_mutex_lock(&dh.mu);
+    while (dh.called == 0) pthread_cond_wait(&dh.cv, &dh.mu);
+    pthread_mutex_unlock(&dh.mu);
+
+    assert(wh.invoked == 1);
+    assert(dh.status == Completed);
+    assert(act->lpVtbl->GetResults(act) == S_OK);
+    act->lpVtbl->Release(act);
+    tp->lpVtbl->Release(tp);
+}
+
+typedef struct TestTimerHandlerVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *Invoke)(void *This, void *timer);
+} TestTimerHandlerVtbl;
+
+typedef struct TestTimerHandler {
+    const TestTimerHandlerVtbl *lpVtbl;
+    volatile LONG ref_count;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    int fired;
+} TestTimerHandler;
+
+static HRESULT STDMETHODCALLTYPE tth_qi(void *This, REFIID riid, void **ppv) {
+    (void)riid; *ppv = This; InterlockedIncrement(&((TestTimerHandler *)This)->ref_count); return S_OK;
+}
+static ULONG STDMETHODCALLTYPE tth_ar(void *This) {
+    return (ULONG)InterlockedIncrement(&((TestTimerHandler *)This)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE tth_rel(void *This) {
+    return (ULONG)InterlockedDecrement(&((TestTimerHandler *)This)->ref_count);
+}
+static HRESULT STDMETHODCALLTYPE tth_invoke(void *This, void *timer) {
+    (void)timer;
+    TestTimerHandler *h = (TestTimerHandler *)This;
+    pthread_mutex_lock(&h->mu);
+    h->fired++;
+    pthread_cond_broadcast(&h->cv);
+    pthread_mutex_unlock(&h->mu);
+    return S_OK;
+}
+
+static void test_devices_and_system_status(void) {
+    /* 1. Windows.Devices.Enumeration.Pnp.PnpObject */
+    static const GUID iid_pnp_statics =
+        { 0xb3c32a3du, 0xd168u, 0x4660u, { 0xbbu, 0xf3u, 0xa7u, 0x33u, 0xb1u, 0x4bu, 0x6eu, 0x01u } };
+    static const GUID iid_pnp_coll_vv =
+        { 0xcce5a798u, 0xd269u, 0x5fceu, { 0x99u, 0xceu, 0xefu, 0x0au, 0xe3u, 0xcdu, 0x05u, 0x69u } };
+    static const GUID iid_pnp_coll_it =
+        { 0x30b50092u, 0x36eeu, 0x53ffu, { 0x94u, 0x50u, 0x02u, 0x90u, 0x04u, 0x43u, 0x6cu, 0x60u } };
+    static const GUID iid_pnp_aop =
+        { 0x0659eab6u, 0x97a1u, 0x54fcu, { 0x93u, 0x56u, 0xffu, 0x15u, 0xe3u, 0xb0u, 0xa8u, 0xa8u } };
+
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *CreateFromIdAsync)(void *This, uint32_t t, HSTRING id, void *rp, void **op);
+            HRESULT (STDMETHODCALLTYPE *FindAllAsync)(void *This, uint32_t t, void *rp, void **op);
+            HRESULT (STDMETHODCALLTYPE *FindAllAsyncAqs)(void *This, uint32_t t, void *rp, HSTRING aqs, void **op);
+            HRESULT (STDMETHODCALLTYPE *CreateWatcher)(void *This, uint32_t t, void *rp, void **w);
+        } *lpVtbl;
+    } *pnp_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Devices.Enumeration.Pnp.PnpObject", &iid_pnp_statics, (void **)&pnp_stat)));
+
+    AsyncOpIf *pnp_op = NULL;
+    assert(SUCCEEDED(pnp_stat->lpVtbl->FindAllAsync(pnp_stat, 3 /* DeviceContainer */, NULL, (void **)&pnp_op)));
+    AsyncOpIf *pnp_op_qi = NULL;
+    assert(SUCCEEDED(pnp_op->lpVtbl->QueryInterface(pnp_op, &iid_pnp_aop, (void **)&pnp_op_qi)));
+    pnp_op_qi->lpVtbl->Release(pnp_op_qi);
+
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *GetAt)(void *This, uint32_t i, void **v);
+            HRESULT (STDMETHODCALLTYPE *get_Size)(void *This, uint32_t *sz);
+        } *lpVtbl;
+    } *pnp_coll = NULL;
+    assert(SUCCEEDED(pnp_op->lpVtbl->GetResults(pnp_op, (void **)&pnp_coll)));
+    pnp_op->lpVtbl->Release(pnp_op);
+    assert(pnp_coll != NULL);
+    void *pnp_vv_qi = NULL;
+    assert(SUCCEEDED(pnp_coll->lpVtbl->QueryInterface(pnp_coll, &iid_pnp_coll_vv, &pnp_vv_qi)));
+    ((IUnknown *)pnp_vv_qi)->lpVtbl->Release((IUnknown *)pnp_vv_qi);
+    uint32_t pnp_sz = 99u;
+    assert(SUCCEEDED(pnp_coll->lpVtbl->get_Size(pnp_coll, &pnp_sz)));
+    assert(pnp_sz == 0u);
+    IterableIf *pnp_it = NULL;
+    assert(SUCCEEDED(pnp_coll->lpVtbl->QueryInterface(pnp_coll, &iid_pnp_coll_it, (void **)&pnp_it)));
+    IteratorIf *pnp_iter = NULL;
+    assert(SUCCEEDED(pnp_it->lpVtbl->First(pnp_it, (void **)&pnp_iter)));
+    boolean pnp_has = 1;
+    assert(SUCCEEDED(pnp_iter->lpVtbl->get_HasCurrent(pnp_iter, &pnp_has)));
+    assert(pnp_has == 0);
+    pnp_iter->lpVtbl->Release(pnp_iter);
+    pnp_it->lpVtbl->Release(pnp_it);
+    pnp_coll->lpVtbl->Release(pnp_coll);
+    pnp_stat->lpVtbl->Release(pnp_stat);
+
+    /* 2. HidDevice */
+    static const GUID iid_hid_stat =
+        { 0x9e5981e4u, 0x9856u, 0x418cu, { 0x9fu, 0x73u, 0x77u, 0xdeu, 0x0cu, 0xd8u, 0x57u, 0x54u } };
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *GetDeviceSelector)(void *This, uint16_t up, uint16_t ui, HSTRING *s);
+            HRESULT (STDMETHODCALLTYPE *GetDeviceSelectorVP)(void *This, uint16_t up, uint16_t ui, uint16_t v, uint16_t p, HSTRING *s);
+            HRESULT (STDMETHODCALLTYPE *FromIdAsync)(void *This, HSTRING id, uint32_t mode, void **op);
+        } *lpVtbl;
+    } *hid_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Devices.HumanInterfaceDevice.HidDevice", &iid_hid_stat, (void **)&hid_stat)));
+    HSTRING hsel = NULL;
+    assert(SUCCEEDED(hid_stat->lpVtbl->GetDeviceSelector(hid_stat, 1u, 4u, &hsel)));
+    assert(wcsstr(WindowsGetStringRawBuffer(hsel, NULL), L"4D1E55B2") != NULL);
+    AsyncOpIf *hid_op = NULL;
+    assert(SUCCEEDED(hid_stat->lpVtbl->FromIdAsync(hid_stat, hsel, 0u, (void **)&hid_op)));
+    void *hid_res = (void *)(uintptr_t)0x1;
+    assert(SUCCEEDED(hid_op->lpVtbl->GetResults(hid_op, &hid_res)));
+    assert(hid_res == NULL);
+    hid_op->lpVtbl->Release(hid_op);
+    WindowsDeleteString(hsel);
+    hid_stat->lpVtbl->Release(hid_stat);
+
+    /* 3. TouchCapabilities / MouseCapabilities / KeyboardCapabilities */
+    static const GUID iid_touch =
+        { 0x20dd55f9u, 0x13f1u, 0x46c8u, { 0x92u, 0x85u, 0x2cu, 0x05u, 0xfau, 0x3eu, 0xdau, 0x6fu } };
+    static const GUID iid_mouse =
+        { 0xbca5e023u, 0x7dd9u, 0x4b6bu, { 0x9au, 0x92u, 0x55u, 0xd4u, 0x3cu, 0xb3u, 0x8fu, 0x73u } };
+    static const GUID iid_kbd =
+        { 0x3a3f9b56u, 0x6798u, 0x4bbcu, { 0x83u, 0x3eu, 0x0fu, 0x34u, 0xb1u, 0x7cu, 0x65u, 0xffu } };
+    struct { const WinrtActivationFactoryVtbl *lpVtbl; } *fac = NULL;
+    IInspectable *inst = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Devices.Input.TouchCapabilities", &WINRT_IID_IActivationFactory, (void **)&fac)));
+    assert(SUCCEEDED(fac->lpVtbl->ActivateInstance(fac, &inst)));
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *get_TouchPresent)(void *This, int32_t *v);
+            HRESULT (STDMETHODCALLTYPE *get_Contacts)(void *This, uint32_t *v);
+        } *lpVtbl;
+    } *touch = NULL;
+    assert(SUCCEEDED(inst->lpVtbl->QueryInterface(inst, &iid_touch, (void **)&touch)));
+    int32_t present = -1; uint32_t contacts = 99u;
+    assert(SUCCEEDED(touch->lpVtbl->get_TouchPresent(touch, &present)));
+    assert(SUCCEEDED(touch->lpVtbl->get_Contacts(touch, &contacts)));
+    assert(present == 0 && contacts == 0u);
+    touch->lpVtbl->Release(touch);
+    inst->lpVtbl->Release(inst);
+    fac->lpVtbl->Release(fac);
+
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Devices.Input.MouseCapabilities", &WINRT_IID_IActivationFactory, (void **)&fac)));
+    assert(SUCCEEDED(fac->lpVtbl->ActivateInstance(fac, &inst)));
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *get_MousePresent)(void *This, int32_t *v);
+        } *lpVtbl;
+    } *mouse = NULL;
+    assert(SUCCEEDED(inst->lpVtbl->QueryInterface(inst, &iid_mouse, (void **)&mouse)));
+    assert(SUCCEEDED(mouse->lpVtbl->get_MousePresent(mouse, &present)));
+    assert(present == 1);
+    mouse->lpVtbl->Release(mouse);
+    inst->lpVtbl->Release(inst);
+    fac->lpVtbl->Release(fac);
+
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Devices.Input.KeyboardCapabilities", &WINRT_IID_IActivationFactory, (void **)&fac)));
+    assert(SUCCEEDED(fac->lpVtbl->ActivateInstance(fac, &inst)));
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *get_KeyboardPresent)(void *This, int32_t *v);
+        } *lpVtbl;
+    } *kbd = NULL;
+    assert(SUCCEEDED(inst->lpVtbl->QueryInterface(inst, &iid_kbd, (void **)&kbd)));
+    assert(SUCCEEDED(kbd->lpVtbl->get_KeyboardPresent(kbd, &present)));
+    assert(present == 1);
+    kbd->lpVtbl->Release(kbd);
+    inst->lpVtbl->Release(inst);
+    fac->lpVtbl->Release(fac);
+
+    /* 4. HardwareIdentification */
+    static const GUID iid_hwid_stat =
+        { 0x971260e0u, 0xf170u, 0x4a42u, { 0xbdu, 0x55u, 0xa9u, 0x00u, 0xb2u, 0x12u, 0xdau, 0xe2u } };
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *GetPackageSpecificToken)(void *This, void *nonce, void **tok);
+        } *lpVtbl;
+    } *hwid = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.System.Profile.HardwareIdentification", &iid_hwid_stat, (void **)&hwid)));
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *get_Id)(void *This, void **b);
+            HRESULT (STDMETHODCALLTYPE *get_Signature)(void *This, void **b);
+            HRESULT (STDMETHODCALLTYPE *get_Certificate)(void *This, void **b);
+        } *lpVtbl;
+    } *hwt = NULL;
+    assert(SUCCEEDED(hwid->lpVtbl->GetPackageSpecificToken(hwid, NULL, (void **)&hwt)));
+    void *id_buf = NULL;
+    assert(SUCCEEDED(hwt->lpVtbl->get_Id(hwt, &id_buf)));
+    uint8_t *id_ptr = NULL; uint32_t id_len = 0;
+    assert(SUCCEEDED(winrt_sys_read_buffer(id_buf, &id_ptr, &id_len)));
+    assert(id_len == 16u);
+    ((IUnknown *)id_buf)->lpVtbl->Release((IUnknown *)id_buf);
+    hwt->lpVtbl->Release(hwt);
+    hwid->lpVtbl->Release(hwid);
+
+    /* 5. MemoryManager & PowerManager */
+    static const GUID iid_mem_stat =
+        { 0x5c6c279cu, 0xd7cau, 0x4779u, { 0x91u, 0x88u, 0x40u, 0x57u, 0x21u, 0x9cu, 0xe6u, 0x4cu } };
+    static const GUID iid_pwr_stat =
+        { 0x1394825du, 0x62ceu, 0x4364u, { 0x98u, 0xd5u, 0xaau, 0x28u, 0xc7u, 0xfbu, 0xd1u, 0x5bu } };
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *get_AppMemoryUsage)(void *This, uint64_t *v);
+            HRESULT (STDMETHODCALLTYPE *get_AppMemoryUsageLimit)(void *This, uint64_t *v);
+        } *lpVtbl;
+    } *mem_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.System.MemoryManager", &iid_mem_stat, (void **)&mem_stat)));
+    uint64_t usage = 0, limit = 0;
+    assert(SUCCEEDED(mem_stat->lpVtbl->get_AppMemoryUsage(mem_stat, &usage)));
+    assert(SUCCEEDED(mem_stat->lpVtbl->get_AppMemoryUsageLimit(mem_stat, &limit)));
+    assert(usage > 0 && limit > usage);
+    mem_stat->lpVtbl->Release(mem_stat);
+
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *get_EnergySaverStatus)(void *This, uint32_t *v);
+            HRESULT (STDMETHODCALLTYPE *add_ES)(void *This, void *h, EventRegistrationToken *t);
+            HRESULT (STDMETHODCALLTYPE *rem_ES)(void *This, EventRegistrationToken t);
+            HRESULT (STDMETHODCALLTYPE *get_BatteryStatus)(void *This, uint32_t *v);
+            HRESULT (STDMETHODCALLTYPE *add_BS)(void *This, void *h, EventRegistrationToken *t);
+            HRESULT (STDMETHODCALLTYPE *rem_BS)(void *This, EventRegistrationToken t);
+            HRESULT (STDMETHODCALLTYPE *get_PowerSupplyStatus)(void *This, uint32_t *v);
+        } *lpVtbl;
+    } *pwr_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.System.Power.PowerManager", &iid_pwr_stat, (void **)&pwr_stat)));
+    uint32_t bat = 99u, pwr = 99u;
+    assert(SUCCEEDED(pwr_stat->lpVtbl->get_BatteryStatus(pwr_stat, &bat)));
+    assert(SUCCEEDED(pwr_stat->lpVtbl->get_PowerSupplyStatus(pwr_stat, &pwr)));
+    assert(bat == 0u && pwr == 2u);
+    pwr_stat->lpVtbl->Release(pwr_stat);
+
+    /* 6. ThreadPoolTimer */
+    static const GUID iid_tpt_stat =
+        { 0x1a8a9d02u, 0xe482u, 0x461bu, { 0xb8u, 0xc7u, 0x8eu, 0xfau, 0xd1u, 0xccu, 0xe5u, 0x90u } };
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *CreatePeriodicTimer)(void *This, void *h, int64_t p, void **t);
+            HRESULT (STDMETHODCALLTYPE *CreateTimer)(void *This, void *h, int64_t d, void **t);
+        } *lpVtbl;
+    } *tpt_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.System.Threading.ThreadPoolTimer", &iid_tpt_stat, (void **)&tpt_stat)));
+    static const TestTimerHandlerVtbl th_vtbl = { tth_qi, tth_ar, tth_rel, tth_invoke };
+    TestTimerHandler th = { &th_vtbl, 1, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0 };
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *get_Period)(void *This, int64_t *v);
+            HRESULT (STDMETHODCALLTYPE *get_Delay)(void *This, int64_t *v);
+            HRESULT (STDMETHODCALLTYPE *Cancel)(void *This);
+        } *lpVtbl;
+    } *tmr = NULL;
+    assert(SUCCEEDED(tpt_stat->lpVtbl->CreateTimer(tpt_stat, &th, 10000LL /* 1 ms */, (void **)&tmr)));
+    pthread_mutex_lock(&th.mu);
+    while (th.fired == 0) pthread_cond_wait(&th.cv, &th.mu);
+    pthread_mutex_unlock(&th.mu);
+    assert(th.fired == 1);
+    assert(SUCCEEDED(tmr->lpVtbl->Cancel(tmr)));
+    tmr->lpVtbl->Release(tmr);
+    tpt_stat->lpVtbl->Release(tpt_stat);
+
+    /* 7. Windows.Networking.Connectivity.NetworkInformation & Windows.Networking.HostName */
+    static const GUID iid_net_stat =
+        { 0x5074f851u, 0x950du, 0x4165u, { 0x9cu, 0x15u, 0x36u, 0x56u, 0x19u, 0x48u, 0x1eu, 0xeau } };
+    static const GUID iid_hn_vec =
+        { 0xf4706ab1u, 0x55a3u, 0x5270u, { 0xafu, 0xb2u, 0x73u, 0x29u, 0x88u, 0xfeu, 0x82u, 0x27u } };
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *GetConnectionProfiles)(void *This, void **v);
+            HRESULT (STDMETHODCALLTYPE *GetInternetConnectionProfile)(void *This, void **v);
+            HRESULT (STDMETHODCALLTYPE *GetLanIdentifiers)(void *This, void **v);
+            HRESULT (STDMETHODCALLTYPE *GetHostNames)(void *This, void **v);
+        } *lpVtbl;
+    } *net_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Networking.Connectivity.NetworkInformation", &iid_net_stat, (void **)&net_stat)));
+
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *get_ProfileName)(void *This, HSTRING *v);
+            HRESULT (STDMETHODCALLTYPE *GetNetworkConnectivityLevel)(void *This, uint32_t *v);
+        } *lpVtbl;
+    } *cp = NULL;
+    assert(SUCCEEDED(net_stat->lpVtbl->GetInternetConnectionProfile(net_stat, (void **)&cp)));
+    uint32_t lvl = 0;
+    assert(SUCCEEDED(cp->lpVtbl->GetNetworkConnectivityLevel(cp, &lvl)));
+    assert(lvl == 3u);
+    cp->lpVtbl->Release(cp);
+
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *GetAt)(void *This, uint32_t idx, void **v);
+            HRESULT (STDMETHODCALLTYPE *get_Size)(void *This, uint32_t *sz);
+        } *lpVtbl;
+    } *hvec = NULL;
+    assert(SUCCEEDED(net_stat->lpVtbl->GetHostNames(net_stat, (void **)&hvec)));
+    void *hvec_qi = NULL;
+    assert(SUCCEEDED(hvec->lpVtbl->QueryInterface(hvec, &iid_hn_vec, &hvec_qi)));
+    ((IUnknown *)hvec_qi)->lpVtbl->Release((IUnknown *)hvec_qi);
+    uint32_t hsz = 0;
+    assert(SUCCEEDED(hvec->lpVtbl->get_Size(hvec, &hsz)));
+    assert(hsz == 1u);
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *get_IPInformation)(void *This, void **v);
+            HRESULT (STDMETHODCALLTYPE *get_RawName)(void *This, HSTRING *v);
+            HRESULT (STDMETHODCALLTYPE *get_DisplayName)(void *This, HSTRING *v);
+            HRESULT (STDMETHODCALLTYPE *get_CanonicalName)(void *This, HSTRING *v);
+        } *lpVtbl;
+    } *hn = NULL;
+    assert(SUCCEEDED(hvec->lpVtbl->GetAt(hvec, 0u, (void **)&hn)));
+    void *ipinfo = (void *)(uintptr_t)0x1;
+    assert(SUCCEEDED(hn->lpVtbl->get_IPInformation(hn, &ipinfo)));
+    assert(ipinfo == NULL);
+    HSTRING dname = NULL;
+    assert(SUCCEEDED(hn->lpVtbl->get_DisplayName(hn, &dname)));
+    assert(wcscmp(WindowsGetStringRawBuffer(dname, NULL), L"localhost") == 0);
+    WindowsDeleteString(dname);
+    hn->lpVtbl->Release(hn);
+    hvec->lpVtbl->Release(hvec);
+    net_stat->lpVtbl->Release(net_stat);
+
+    /* 8. Windows.Media.Devices.MediaDevice */
+    static const GUID iid_md_stat =
+        { 0xaa2d9a40u, 0x909fu, 0x4bbau, { 0xbfu, 0x8bu, 0x0cu, 0x0du, 0x29u, 0x6fu, 0x14u, 0xf0u } };
+    struct {
+        const struct {
+            HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+            ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+            ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+            HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+            HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+            HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+            HRESULT (STDMETHODCALLTYPE *GetAudioCaptureSelector)(void *This, HSTRING *v);
+            HRESULT (STDMETHODCALLTYPE *GetAudioRenderSelector)(void *This, HSTRING *v);
+            HRESULT (STDMETHODCALLTYPE *GetVideoCaptureSelector)(void *This, HSTRING *v);
+            HRESULT (STDMETHODCALLTYPE *GetDefaultAudioCaptureId)(void *This, uint32_t role, HSTRING *v);
+            HRESULT (STDMETHODCALLTYPE *GetDefaultAudioRenderId)(void *This, uint32_t role, HSTRING *v);
+            HRESULT (STDMETHODCALLTYPE *add_Cap)(void *This, void *h, EventRegistrationToken *tok);
+            HRESULT (STDMETHODCALLTYPE *rem_Cap)(void *This, EventRegistrationToken tok);
+            HRESULT (STDMETHODCALLTYPE *add_Ren)(void *This, void *h, EventRegistrationToken *tok);
+            HRESULT (STDMETHODCALLTYPE *rem_Ren)(void *This, EventRegistrationToken tok);
+        } *lpVtbl;
+    } *md_stat = NULL;
+    assert(SUCCEEDED(uwp_winrt_sys_get_activation_factory(
+        L"Windows.Media.Devices.MediaDevice", &iid_md_stat, (void **)&md_stat)));
+    HSTRING ms1 = NULL, ms2 = NULL, ms3 = NULL, md_ren = NULL, md_cap = NULL;
+    assert(SUCCEEDED(md_stat->lpVtbl->GetAudioCaptureSelector(md_stat, &ms1)));
+    assert(SUCCEEDED(md_stat->lpVtbl->GetAudioRenderSelector(md_stat, &ms2)));
+    assert(SUCCEEDED(md_stat->lpVtbl->GetVideoCaptureSelector(md_stat, &ms3)));
+    assert(wcsstr(WindowsGetStringRawBuffer(ms1, NULL), L"2EEF81BE") != NULL);
+    assert(wcsstr(WindowsGetStringRawBuffer(ms2, NULL), L"E6327CAD") != NULL);
+    assert(wcsstr(WindowsGetStringRawBuffer(ms3, NULL), L"E5323777") != NULL);
+    assert(SUCCEEDED(md_stat->lpVtbl->GetDefaultAudioRenderId(md_stat, 0u, &md_ren)));
+    assert(SUCCEEDED(md_stat->lpVtbl->GetDefaultAudioCaptureId(md_stat, 0u, &md_cap)));
+    assert(wcslen(WindowsGetStringRawBuffer(md_ren, NULL)) > 0u);
+    assert(wcslen(WindowsGetStringRawBuffer(md_cap, NULL)) > 0u);
+    EventRegistrationToken md_tok = { 0 };
+    assert(SUCCEEDED(md_stat->lpVtbl->add_Ren(md_stat, &g_test_gp_added, &md_tok)));
+    assert(md_tok.value != 0);
+    assert(SUCCEEDED(md_stat->lpVtbl->rem_Ren(md_stat, md_tok)));
+    WindowsDeleteString(ms1);
+    WindowsDeleteString(ms2);
+    WindowsDeleteString(ms3);
+    WindowsDeleteString(md_ren);
+    WindowsDeleteString(md_cap);
+    md_stat->lpVtbl->Release(md_stat);
+}
+
 int main(void) {
     char tmp_tmpl[] = "/tmp/scarlett_winrt_sys_XXXXXX";
     char *sandbox = mkdtemp(tmp_tmpl);
@@ -824,6 +1914,9 @@ int main(void) {
     test_package();
     test_gamepad_backends();
     test_analytics_and_gamebar();
+    test_storage_file_streams_and_extended_apis();
+    test_extended_settings_and_threadpool();
+    test_devices_and_system_status();
 
     printf("ALL winrt_sys host unit tests PASSED (sandbox=%s)\n", sandbox);
     return 0;

@@ -48,6 +48,7 @@ class ForwarderSpec:
     dll_filename: str         # e.g. "KERNEL32_APP.dll"
     targets: Tuple[str, ...]  # Wine dll dir/spec names in priority order
     uwp_stubs: Tuple[str, ...] = ()
+    preserve_ordinals: bool = False
 
 
 SYSTEM_FORWARDERS: Tuple[ForwarderSpec, ...] = (
@@ -150,6 +151,7 @@ SYSTEM_FORWARDERS: Tuple[ForwarderSpec, ...] = (
         output_name="MMDEVAPI_APP",
         dll_filename="MMDEVAPI_APP.dll",
         targets=("mmdevapi",),
+        preserve_ordinals=True,
     ),
     ForwarderSpec(
         output_name="XINPUT1_4_APP",
@@ -174,7 +176,11 @@ def arch_matches_x86_64(arch_expr: str) -> bool:
     return (not has_x64) if negate else has_x64
 
 
-def parse_wine_spec(spec_path: pathlib.Path, target_dll: str) -> List[SpecExport]:
+def parse_wine_spec(
+    spec_path: pathlib.Path,
+    target_dll: str,
+    preserve_ordinals: bool = False,
+) -> List[SpecExport]:
     exports: List[SpecExport] = []
     with spec_path.open("r", encoding="utf-8", errors="replace") as f:
         for raw_line in f:
@@ -249,7 +255,7 @@ def parse_wine_spec(spec_path: pathlib.Path, target_dll: str) -> List[SpecExport
                         name=sym_name,
                         target_dll=target_dll,
                         target_symbol=sym_name,
-                        ordinal=None,
+                        ordinal=ordinal if preserve_ordinals else None,
                         noname=False,
                         is_data=(cc == "extern"),
                     )
@@ -270,7 +276,7 @@ def collect_forwarder_exports(
         spec_path = wine_dlls_dir / target / f"{target}.spec"
         if not spec_path.is_file():
             raise FileNotFoundError(f"Missing Wine spec file: {spec_path}")
-        for exp in parse_wine_spec(spec_path, target):
+        for exp in parse_wine_spec(spec_path, target, preserve_ordinals=spec.preserve_ordinals):
             if exp.noname:
                 assert exp.ordinal is not None
                 if exp.ordinal not in seen_ordinals:
@@ -282,7 +288,7 @@ def collect_forwarder_exports(
                     named_exports.append(exp)
 
     # Guard against ordinal collisions with auto-assigned named exports (1..N)
-    max_named_ord = len(named_exports) + len(spec.uwp_stubs)
+    max_named_ord = sum(1 for exp in named_exports if exp.ordinal is None) + len(spec.uwp_stubs)
     safe_ordinal_exports = [
         exp for exp in ordinal_exports
         if exp.ordinal is not None and exp.ordinal > max_named_ord
@@ -307,9 +313,11 @@ def render_def(spec: ForwarderSpec, exports: Sequence[SpecExport], stubs: Sequen
         if exp.noname and exp.ordinal is not None:
             lines.append(f'    {exp.name} = "{exp.target_dll}.{exp.target_symbol}" @{exp.ordinal} NONAME')
         elif exp.is_data:
-            lines.append(f"    {exp.name} = {exp.target_dll}.{exp.target_symbol} DATA")
+            ord_suffix = f" @{exp.ordinal}" if exp.ordinal is not None else ""
+            lines.append(f"    {exp.name} = {exp.target_dll}.{exp.target_symbol}{ord_suffix} DATA")
         else:
-            lines.append(f"    {exp.name} = {exp.target_dll}.{exp.target_symbol}")
+            ord_suffix = f" @{exp.ordinal}" if exp.ordinal is not None else ""
+            lines.append(f"    {exp.name} = {exp.target_dll}.{exp.target_symbol}{ord_suffix}")
     for stub_sym in stubs:
         lines.append(f"    {stub_sym} = scarlett_stub_fn_{stub_sym}")
     lines.append("")

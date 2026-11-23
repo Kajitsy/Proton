@@ -33,6 +33,8 @@ typedef struct app_view_statics_s {
 
 static uwp_ui_lock_t                  g_av_lock = UWP_UI_LOCK_INIT;
 static app_view_obj_t                *g_av_singleton = NULL;
+static app_titlebar_obj_t            *g_tb_singleton = NULL;
+static wchar_t                        g_cached_title[512] = L"";
 static boolean                        g_terminate_on_final_close = TRUE;
 static UwpApplicationViewWindowingMode g_launch_windowing_mode = UwpApplicationViewWindowingMode_Auto;
 static UwpSize                        g_launch_view_size = { 1280.0f, 720.0f };
@@ -87,10 +89,17 @@ static ULONG STDMETHODCALLTYPE tb_Release(UwpIApplicationViewTitleBar *This) {
     app_titlebar_obj_t *tb = CONTAINING_RECORD(This, app_titlebar_obj_t, iface);
     ULONG ref = uwp_ui_atomic_dec(&tb->ref_count);
     if (ref == 0) {
-        for (int i = 0; i < 12; ++i) {
-            if (tb->colors[i]) ((IUnknown *)tb->colors[i])->lpVtbl->Release((IUnknown *)tb->colors[i]);
+        uwp_ui_lock_acquire(&g_av_lock);
+        if (uwp_ui_atomic_load(&tb->ref_count) == 0) {
+            if (g_tb_singleton == tb) g_tb_singleton = NULL;
+            uwp_ui_lock_release(&g_av_lock);
+            for (int i = 0; i < 12; ++i) {
+                if (tb->colors[i]) ((IUnknown *)tb->colors[i])->lpVtbl->Release((IUnknown *)tb->colors[i]);
+            }
+            uwp_ui_free(tb);
+            return 0;
         }
-        uwp_ui_free(tb);
+        uwp_ui_lock_release(&g_av_lock);
     }
     return ref;
 }
@@ -184,9 +193,13 @@ static ULONG av_release(app_view_obj_t *obj) {
     ULONG ref = uwp_ui_atomic_dec(&obj->ref_count);
     if (ref == 0) {
         uwp_ui_lock_acquire(&g_av_lock);
-        if (g_av_singleton == obj) g_av_singleton = NULL;
+        if (uwp_ui_atomic_load(&obj->ref_count) == 0) {
+            if (g_av_singleton == obj) g_av_singleton = NULL;
+            uwp_ui_lock_release(&g_av_lock);
+            uwp_ui_free(obj);
+            return 0;
+        }
         uwp_ui_lock_release(&g_av_lock);
-        uwp_ui_free(obj);
     }
     return ref;
 }
@@ -316,9 +329,17 @@ static HRESULT STDMETHODCALLTYPE av1_put_IsScreenCaptureEnabled(UwpIApplicationV
 static HRESULT STDMETHODCALLTYPE av1_put_Title(UwpIApplicationView *This, HSTRING value) {
     uint32_t len = 0;
     const wchar_t *raw = uwp_ui_hstring_raw(value, &len);
+    const wchar_t *safe = raw ? raw : L"";
     (void)This;
     (void)len;
-    uwp_core_set_window_title(raw ? raw : L"");
+    uwp_ui_lock_acquire(&g_av_lock);
+    size_t i = 0;
+    for (; i + 1 < (sizeof(g_cached_title) / sizeof(g_cached_title[0])) && safe[i] != L'\0'; ++i) {
+        g_cached_title[i] = safe[i];
+    }
+    g_cached_title[i] = L'\0';
+    uwp_ui_lock_release(&g_av_lock);
+    uwp_core_set_window_title(safe);
     return S_OK;
 }
 static HRESULT STDMETHODCALLTYPE av1_get_Title(UwpIApplicationView *This, HSTRING *value) {
@@ -327,6 +348,15 @@ static HRESULT STDMETHODCALLTYPE av1_get_Title(UwpIApplicationView *This, HSTRIN
     if (!value) return E_POINTER;
     buf[0] = L'\0';
     uwp_core_get_window_title(buf, (uint32_t)(sizeof(buf) / sizeof(buf[0])));
+    if (buf[0] == L'\0') {
+        uwp_ui_lock_acquire(&g_av_lock);
+        size_t i = 0;
+        for (; i + 1 < (sizeof(buf) / sizeof(buf[0])) && g_cached_title[i] != L'\0'; ++i) {
+            buf[i] = g_cached_title[i];
+        }
+        buf[i] = L'\0';
+        uwp_ui_lock_release(&g_av_lock);
+    }
     return uwp_ui_hstring_create(buf, (uint32_t)wcslen(buf), value);
 }
 static HRESULT STDMETHODCALLTYPE av1_get_Id(UwpIApplicationView *This, INT32 *value) {
@@ -513,10 +543,20 @@ static HRESULT STDMETHODCALLTYPE av3_get_TitleBar(UwpIApplicationView3 *This, Uw
     app_titlebar_obj_t *tb;
     (void)This;
     if (!value) return E_POINTER;
-    tb = (app_titlebar_obj_t *)uwp_ui_alloc(sizeof(app_titlebar_obj_t));
+    uwp_ui_lock_acquire(&g_av_lock);
+    if (!g_tb_singleton) {
+        tb = (app_titlebar_obj_t *)uwp_ui_alloc(sizeof(app_titlebar_obj_t));
+        if (tb) {
+            tb->iface.lpVtbl = &g_tb_vtbl;
+            tb->ref_count = 1;
+            g_tb_singleton = tb;
+        }
+    } else {
+        tb = g_tb_singleton;
+        uwp_ui_atomic_inc(&tb->ref_count);
+    }
+    uwp_ui_lock_release(&g_av_lock);
     if (!tb) return E_OUTOFMEMORY;
-    tb->iface.lpVtbl = &g_tb_vtbl;
-    tb->ref_count = 1;
     *value = &tb->iface;
     return S_OK;
 }
@@ -1027,4 +1067,212 @@ HRESULT uwp_winrt_ui_notify_visible_bounds_changed(void) {
     uwp_ui_event_invoke(&g_visible_bounds_events, &obj->av1_iface, NULL);
     av_release(obj);
     return S_OK;
+}
+
+/* ============================================================================
+ * Windows.UI.ViewManagement.UIViewSettings
+ * ============================================================================ */
+
+typedef struct ui_view_settings_obj_s {
+    UwpIUIViewSettings iface;
+    volatile int32_t   ref_count;
+} ui_view_settings_obj_t;
+
+typedef struct ui_view_settings_statics_s {
+    UwpIUIViewSettingsStatics statics_iface;
+    IActivationFactory        act_iface;
+    volatile int32_t          ref_count;
+} ui_view_settings_statics_t;
+
+static ui_view_settings_obj_t *g_uvs_singleton = NULL;
+
+static HRESULT STDMETHODCALLTYPE uvs_QueryInterface(UwpIUIViewSettings *This, REFIID riid, void **ppv) {
+    ui_view_settings_obj_t *obj = CONTAINING_RECORD(This, ui_view_settings_obj_t, iface);
+    if (!riid || !ppv) return E_INVALIDARG;
+    *ppv = NULL;
+    if (IsEqualGUID(riid, &SCARLETT_IID_IUnknown) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IInspectable) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IAgileObject) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IUIViewSettings)) {
+        *ppv = &obj->iface;
+        uwp_ui_atomic_inc(&obj->ref_count);
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE uvs_AddRef(UwpIUIViewSettings *This) {
+    return uwp_ui_atomic_inc(&CONTAINING_RECORD(This, ui_view_settings_obj_t, iface)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE uvs_Release(UwpIUIViewSettings *This) {
+    ui_view_settings_obj_t *obj = CONTAINING_RECORD(This, ui_view_settings_obj_t, iface);
+    ULONG ref = uwp_ui_atomic_dec(&obj->ref_count);
+    if (ref == 0) {
+        uwp_ui_lock_acquire(&g_av_lock);
+        if (uwp_ui_atomic_load(&obj->ref_count) == 0) {
+            if (g_uvs_singleton == obj) g_uvs_singleton = NULL;
+            uwp_ui_lock_release(&g_av_lock);
+            uwp_ui_free(obj);
+            return 0;
+        }
+        uwp_ui_lock_release(&g_av_lock);
+    }
+    return ref;
+}
+static HRESULT STDMETHODCALLTYPE uvs_GetIids(UwpIUIViewSettings *This, ULONG *c, IID **iids) {
+    (void)This;
+    const GUID list[] = { SCARLETT_IID_IUIViewSettings };
+    return uwp_ui_get_iids(list, 1, c, iids);
+}
+static HRESULT STDMETHODCALLTYPE uvs_GetRuntimeClassName(UwpIUIViewSettings *This, HSTRING *name) {
+    (void)This;
+    return uwp_ui_get_runtime_class_name(L"Windows.UI.ViewManagement.UIViewSettings", name);
+}
+static HRESULT STDMETHODCALLTYPE uvs_GetTrustLevel(UwpIUIViewSettings *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE uvs_get_UserInteractionMode(UwpIUIViewSettings *This, UwpUserInteractionMode *value) {
+    (void)This;
+    if (!value) return E_POINTER;
+    *value = UwpUserInteractionMode_Mouse;
+    return S_OK;
+}
+
+static const UwpIUIViewSettingsVtbl g_uvs_vtbl = {
+    uvs_QueryInterface, uvs_AddRef, uvs_Release,
+    uvs_GetIids, uvs_GetRuntimeClassName, uvs_GetTrustLevel,
+    uvs_get_UserInteractionMode
+};
+
+static ui_view_settings_obj_t *uvs_get_or_create_instance(void) {
+    ui_view_settings_obj_t *obj;
+    uwp_ui_lock_acquire(&g_av_lock);
+    if (!g_uvs_singleton) {
+        obj = (ui_view_settings_obj_t *)uwp_ui_alloc(sizeof(ui_view_settings_obj_t));
+        if (obj) {
+            obj->iface.lpVtbl = &g_uvs_vtbl;
+            obj->ref_count = 1;
+            g_uvs_singleton = obj;
+        }
+    } else {
+        obj = g_uvs_singleton;
+        uwp_ui_atomic_inc(&obj->ref_count);
+    }
+    uwp_ui_lock_release(&g_av_lock);
+    return obj;
+}
+
+static HRESULT uvs_statics_qi(ui_view_settings_statics_t *fac, REFIID riid, void **ppv) {
+    if (!riid || !ppv) return E_INVALIDARG;
+    *ppv = NULL;
+    if (IsEqualGUID(riid, &SCARLETT_IID_IUnknown) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IInspectable) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IAgileObject) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IUIViewSettingsStatics)) {
+        *ppv = &fac->statics_iface;
+    } else if (IsEqualGUID(riid, &SCARLETT_IID_IActivationFactory)) {
+        *ppv = &fac->act_iface;
+    } else {
+        return E_NOINTERFACE;
+    }
+    uwp_ui_atomic_inc(&fac->ref_count);
+    return S_OK;
+}
+static HRESULT uvs_statics_get_iids(ULONG *c, IID **iids) {
+    const GUID list[] = { SCARLETT_IID_IUIViewSettingsStatics, SCARLETT_IID_IActivationFactory };
+    return uwp_ui_get_iids(list, 2, c, iids);
+}
+
+static HRESULT STDMETHODCALLTYPE uvss_QueryInterface(UwpIUIViewSettingsStatics *This, REFIID riid, void **ppv) {
+    return uvs_statics_qi(CONTAINING_RECORD(This, ui_view_settings_statics_t, statics_iface), riid, ppv);
+}
+static ULONG STDMETHODCALLTYPE uvss_AddRef(UwpIUIViewSettingsStatics *This) {
+    return uwp_ui_atomic_inc(&CONTAINING_RECORD(This, ui_view_settings_statics_t, statics_iface)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE uvss_Release(UwpIUIViewSettingsStatics *This) {
+    ui_view_settings_statics_t *fac = CONTAINING_RECORD(This, ui_view_settings_statics_t, statics_iface);
+    ULONG ref = uwp_ui_atomic_dec(&fac->ref_count);
+    if (ref == 0) uwp_ui_free(fac);
+    return ref;
+}
+static HRESULT STDMETHODCALLTYPE uvss_GetIids(UwpIUIViewSettingsStatics *This, ULONG *c, IID **iids) {
+    (void)This;
+    return uvs_statics_get_iids(c, iids);
+}
+static HRESULT STDMETHODCALLTYPE uvss_GetRuntimeClassName(UwpIUIViewSettingsStatics *This, HSTRING *name) {
+    (void)This;
+    return uwp_ui_get_runtime_class_name(L"Windows.UI.ViewManagement.UIViewSettings", name);
+}
+static HRESULT STDMETHODCALLTYPE uvss_GetTrustLevel(UwpIUIViewSettingsStatics *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE uvss_GetForCurrentView(UwpIUIViewSettingsStatics *This, UwpIUIViewSettings **current) {
+    ui_view_settings_obj_t *obj;
+    (void)This;
+    if (!current) return E_POINTER;
+    obj = uvs_get_or_create_instance();
+    if (!obj) return E_OUTOFMEMORY;
+    *current = &obj->iface;
+    return S_OK;
+}
+
+static const UwpIUIViewSettingsStaticsVtbl g_uvss_vtbl = {
+    uvss_QueryInterface, uvss_AddRef, uvss_Release,
+    uvss_GetIids, uvss_GetRuntimeClassName, uvss_GetTrustLevel,
+    uvss_GetForCurrentView
+};
+
+static HRESULT STDMETHODCALLTYPE uvsa_QueryInterface(IActivationFactory *This, REFIID riid, void **ppv) {
+    return uvs_statics_qi(CONTAINING_RECORD(This, ui_view_settings_statics_t, act_iface), riid, ppv);
+}
+static ULONG STDMETHODCALLTYPE uvsa_AddRef(IActivationFactory *This) {
+    return uwp_ui_atomic_inc(&CONTAINING_RECORD(This, ui_view_settings_statics_t, act_iface)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE uvsa_Release(IActivationFactory *This) {
+    ui_view_settings_statics_t *fac = CONTAINING_RECORD(This, ui_view_settings_statics_t, act_iface);
+    ULONG ref = uwp_ui_atomic_dec(&fac->ref_count);
+    if (ref == 0) uwp_ui_free(fac);
+    return ref;
+}
+static HRESULT STDMETHODCALLTYPE uvsa_GetIids(IActivationFactory *This, ULONG *c, IID **iids) {
+    (void)This;
+    return uvs_statics_get_iids(c, iids);
+}
+static HRESULT STDMETHODCALLTYPE uvsa_GetRuntimeClassName(IActivationFactory *This, HSTRING *name) {
+    (void)This;
+    return uwp_ui_get_runtime_class_name(L"Windows.UI.ViewManagement.UIViewSettings", name);
+}
+static HRESULT STDMETHODCALLTYPE uvsa_GetTrustLevel(IActivationFactory *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE uvsa_ActivateInstance(IActivationFactory *This, IInspectable **instance) {
+    (void)This;
+    if (instance) *instance = NULL;
+    return uwp_ui_unimpl("UIViewSettingsFactory", "ActivateInstance");
+}
+
+static const IActivationFactoryVtbl g_uvsa_vtbl = {
+    uvsa_QueryInterface, uvsa_AddRef, uvsa_Release,
+    uvsa_GetIids, uvsa_GetRuntimeClassName, uvsa_GetTrustLevel,
+    uvsa_ActivateInstance
+};
+
+HRESULT uwp_ui_view_settings_get_factory(REFIID iid, void **out_factory) {
+    ui_view_settings_statics_t *fac = (ui_view_settings_statics_t *)uwp_ui_alloc(sizeof(ui_view_settings_statics_t));
+    if (!fac) return E_OUTOFMEMORY;
+    fac->statics_iface.lpVtbl = &g_uvss_vtbl;
+    fac->act_iface.lpVtbl = &g_uvsa_vtbl;
+    fac->ref_count = 1;
+    HRESULT hr = uvs_statics_qi(fac, iid, out_factory);
+    uwp_ui_atomic_dec(&fac->ref_count);
+    if (FAILED(hr)) uwp_ui_free(fac);
+    return hr;
 }

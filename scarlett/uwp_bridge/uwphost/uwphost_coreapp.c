@@ -59,7 +59,9 @@ static ULONG UWP_CALL tb_Release(UwpICoreApplicationViewTitleBar *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL tb_GetIids(UwpICoreApplicationViewTitleBar *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    const GUID list[1] = { UWP_IID_ICoreApplicationViewTitleBar };
+    return uwp_alloc_iids(list, 1u, c, i);
 }
 static HRESULT UWP_CALL tb_GetName(UwpICoreApplicationViewTitleBar *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplicationViewTitleBar", n);
@@ -203,8 +205,18 @@ static ULONG UWP_CALL v1_Release(UwpICoreApplicationView *T) {
     if (r == 0) view_destroy(v);
     return (ULONG)r;
 }
+static HRESULT view_get_iids_impl(ULONG *c, IID **i) {
+    const GUID list[4] = {
+        UWP_IID_ICoreApplicationView,
+        UWP_IID_ICoreApplicationView2,
+        UWP_IID_ICoreApplicationView3,
+        UWP_IID_ICoreApplicationView5
+    };
+    return uwp_alloc_iids(list, 4u, c, i);
+}
+
 static HRESULT UWP_CALL v1_GetIids(UwpICoreApplicationView *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return view_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL v1_GetName(UwpICoreApplicationView *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplicationView", n);
@@ -247,7 +259,7 @@ static ULONG UWP_CALL v2_Release(UwpICoreApplicationView2 *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL v2_GetIids(UwpICoreApplicationView2 *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return view_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL v2_GetName(UwpICoreApplicationView2 *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplicationView", n);
@@ -275,7 +287,7 @@ static ULONG UWP_CALL v3_Release(UwpICoreApplicationView3 *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL v3_GetIids(UwpICoreApplicationView3 *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return view_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL v3_GetName(UwpICoreApplicationView3 *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplicationView", n);
@@ -317,7 +329,7 @@ static ULONG UWP_CALL v5_Release(UwpICoreApplicationView5 *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL v5_GetIids(UwpICoreApplicationView5 *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return view_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL v5_GetName(UwpICoreApplicationView5 *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplicationView", n);
@@ -481,12 +493,25 @@ static HRESULT coreapp_qi_impl(REFIID riid, void **ppv) {
     return E_NOINTERFACE;
 }
 
+static HRESULT coreapp_get_iids_impl(ULONG *c, IID **i) {
+    const GUID list[7] = {
+        UWP_IID_IActivationFactory,
+        UWP_IID_ICoreApplication,
+        UWP_IID_ICoreApplication2,
+        UWP_IID_ICoreApplicationExit,
+        UWP_IID_ICoreImmersiveApplication,
+        UWP_IID_ICoreApplicationUnhandledError,
+        UWP_IID_ICoreApplicationUseCount
+    };
+    return uwp_alloc_iids(list, 7u, c, i);
+}
+
 /* IActivationFactory */
 static HRESULT UWP_CALL caf_QI(UwpIActivationFactory *T, REFIID r, void **p) { (void)T; return coreapp_qi_impl(r, p); }
 static ULONG UWP_CALL caf_AddRef(UwpIActivationFactory *T) { (void)T; return 1u; }
 static ULONG UWP_CALL caf_Release(UwpIActivationFactory *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL caf_GetIids(UwpIActivationFactory *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return coreapp_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL caf_GetName(UwpIActivationFactory *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplication", n);
@@ -504,7 +529,7 @@ static HRESULT UWP_CALL ca_QI(UwpICoreApplication *T, REFIID r, void **p) { (voi
 static ULONG UWP_CALL ca_AddRef(UwpICoreApplication *T) { (void)T; return 1u; }
 static ULONG UWP_CALL ca_Release(UwpICoreApplication *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL ca_GetIids(UwpICoreApplication *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return coreapp_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL ca_GetName(UwpICoreApplication *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplication", n);
@@ -607,7 +632,7 @@ static HRESULT UWP_CALL ca2_QI(UwpICoreApplication2 *T, REFIID r, void **p) { (v
 static ULONG UWP_CALL ca2_AddRef(UwpICoreApplication2 *T) { (void)T; return 1u; }
 static ULONG UWP_CALL ca2_Release(UwpICoreApplication2 *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL ca2_GetIids(UwpICoreApplication2 *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return coreapp_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL ca2_GetName(UwpICoreApplication2 *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplication", n);
@@ -650,7 +675,7 @@ static HRESULT UWP_CALL cae_QI(UwpICoreApplicationExit *T, REFIID r, void **p) {
 static ULONG UWP_CALL cae_AddRef(UwpICoreApplicationExit *T) { (void)T; return 1u; }
 static ULONG UWP_CALL cae_Release(UwpICoreApplicationExit *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL cae_GetIids(UwpICoreApplicationExit *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return coreapp_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL cae_GetName(UwpICoreApplicationExit *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplication", n);
@@ -679,12 +704,251 @@ static HRESULT UWP_CALL cae_remove_Exiting(UwpICoreApplicationExit *T, UwpEventR
     return uwp_event_list_remove(&g_core_app.ev_exiting, tok);
 }
 
+/* Single-element IVectorView<CoreApplicationView*> + IIterable/IIterator */
+typedef struct UwpViewIterIface UwpViewIterIface;
+typedef struct UwpViewIterVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpViewIterIface);
+    HRESULT (UWP_CALL *get_Current)(UwpViewIterIface *This, void **current);
+    HRESULT (UWP_CALL *get_HasCurrent)(UwpViewIterIface *This, uint8_t *has_current);
+    HRESULT (UWP_CALL *MoveNext)(UwpViewIterIface *This, uint8_t *has_current);
+    HRESULT (UWP_CALL *GetMany)(UwpViewIterIface *This, uint32_t cap, void **items, uint32_t *actual);
+} UwpViewIterVtbl;
+struct UwpViewIterIface { const UwpViewIterVtbl *lpVtbl; };
+
+typedef struct UwpViewIterObj {
+    UwpViewIterIface iface;
+    volatile int32_t ref;
+    UwpCoreAppViewObj *view;
+    uint32_t index;
+} UwpViewIterObj;
+
+static HRESULT UWP_CALL vi_QI(UwpViewIterIface *T, REFIID r, void **p) {
+    if (!r || !p) return E_INVALIDARG;
+    *p = NULL;
+    if (uwp_guid_equal(r, &UWP_IID_IUnknown) ||
+        uwp_guid_equal(r, &UWP_IID_IInspectable) ||
+        uwp_guid_equal(r, &UWP_IID_IAgileObject) ||
+        uwp_guid_equal(r, &UWP_IID_IIterator_CoreApplicationView)) {
+        T->lpVtbl->AddRef(T);
+        *p = T;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG UWP_CALL vi_AddRef(UwpViewIterIface *T) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(T, UwpViewIterObj, iface)->ref);
+}
+static ULONG UWP_CALL vi_Release(UwpViewIterIface *T) {
+    UwpViewIterObj *o = UWP_CONTAINING_RECORD(T, UwpViewIterObj, iface);
+    int32_t r = uwp_atomic_dec(&o->ref);
+    if (r == 0) {
+        if (o->view) o->view->view.lpVtbl->Release(&o->view->view);
+        free(o);
+    }
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL vi_GetIids(UwpViewIterIface *T, ULONG *c, IID **i) {
+    (void)T;
+    const GUID list[1] = { UWP_IID_IIterator_CoreApplicationView };
+    return uwp_alloc_iids(list, 1u, c, i);
+}
+static HRESULT UWP_CALL vi_GetName(UwpViewIterIface *T, UWP_HSTRING *n) {
+    (void)T;
+    return uwp_hstring_create_from_wstr(L"Windows.Foundation.Collections.IIterator`1<Windows.ApplicationModel.Core.CoreApplicationView>", n);
+}
+static HRESULT UWP_CALL vi_GetTrust(UwpViewIterIface *T, UwpTrustLevel *t) {
+    (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
+}
+static HRESULT UWP_CALL vi_get_Current(UwpViewIterIface *T, void **cur) {
+    if (!cur) return E_INVALIDARG;
+    UwpViewIterObj *o = UWP_CONTAINING_RECORD(T, UwpViewIterObj, iface);
+    if (o->index > 0 || !o->view) { *cur = NULL; return E_BOUNDS; }
+    o->view->view.lpVtbl->AddRef(&o->view->view);
+    *cur = &o->view->view;
+    return S_OK;
+}
+static HRESULT UWP_CALL vi_get_HasCurrent(UwpViewIterIface *T, uint8_t *has) {
+    if (!has) return E_INVALIDARG;
+    UwpViewIterObj *o = UWP_CONTAINING_RECORD(T, UwpViewIterObj, iface);
+    *has = (o->index == 0 && o->view) ? 1u : 0u;
+    return S_OK;
+}
+static HRESULT UWP_CALL vi_MoveNext(UwpViewIterIface *T, uint8_t *has) {
+    if (!has) return E_INVALIDARG;
+    UwpViewIterObj *o = UWP_CONTAINING_RECORD(T, UwpViewIterObj, iface);
+    if (o->index == 0) o->index = 1;
+    *has = 0u;
+    return S_OK;
+}
+static HRESULT UWP_CALL vi_GetMany(UwpViewIterIface *T, uint32_t cap, void **items, uint32_t *actual) {
+    if (!actual) return E_INVALIDARG;
+    UwpViewIterObj *o = UWP_CONTAINING_RECORD(T, UwpViewIterObj, iface);
+    if (cap > 0 && items && o->index == 0 && o->view) {
+        o->view->view.lpVtbl->AddRef(&o->view->view);
+        items[0] = &o->view->view;
+        o->index = 1;
+        *actual = 1u;
+    } else {
+        *actual = 0u;
+    }
+    return S_OK;
+}
+static const UwpViewIterVtbl g_vi_vtbl = {
+    vi_QI, vi_AddRef, vi_Release, vi_GetIids, vi_GetName, vi_GetTrust,
+    vi_get_Current, vi_get_HasCurrent, vi_MoveNext, vi_GetMany
+};
+
+typedef struct UwpViewVecIface UwpViewVecIface;
+typedef struct UwpViewVecVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpViewVecIface);
+    HRESULT (UWP_CALL *GetAt)(UwpViewVecIface *This, uint32_t index, void **item);
+    HRESULT (UWP_CALL *get_Size)(UwpViewVecIface *This, uint32_t *size);
+    HRESULT (UWP_CALL *IndexOf)(UwpViewVecIface *This, void *value, uint32_t *index, uint8_t *found);
+    HRESULT (UWP_CALL *GetMany)(UwpViewVecIface *This, uint32_t start, uint32_t cap, void **items, uint32_t *actual);
+} UwpViewVecVtbl;
+struct UwpViewVecIface { const UwpViewVecVtbl *lpVtbl; };
+
+typedef struct UwpViewIterableIface UwpViewIterableIface;
+typedef struct UwpViewIterableVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpViewIterableIface);
+    HRESULT (UWP_CALL *First)(UwpViewIterableIface *This, void **iter);
+} UwpViewIterableVtbl;
+struct UwpViewIterableIface { const UwpViewIterableVtbl *lpVtbl; };
+
+typedef struct UwpCoreAppViewsObj {
+    UwpViewVecIface vec;
+    UwpViewIterableIface iterable;
+    volatile int32_t ref;
+    UwpCoreAppViewObj *view;
+} UwpCoreAppViewsObj;
+
+static HRESULT vv_qi_impl(UwpCoreAppViewsObj *o, REFIID r, void **p) {
+    if (!r || !p) return E_INVALIDARG;
+    *p = NULL;
+    if (uwp_guid_equal(r, &UWP_IID_IUnknown) ||
+        uwp_guid_equal(r, &UWP_IID_IInspectable) ||
+        uwp_guid_equal(r, &UWP_IID_IAgileObject) ||
+        uwp_guid_equal(r, &UWP_IID_IVectorView_CoreApplicationView)) {
+        uwp_atomic_inc(&o->ref);
+        *p = &o->vec;
+        return S_OK;
+    }
+    if (uwp_guid_equal(r, &UWP_IID_IIterable_CoreApplicationView)) {
+        uwp_atomic_inc(&o->ref);
+        *p = &o->iterable;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static HRESULT vv_get_iids(ULONG *c, IID **i) {
+    const GUID list[2] = { UWP_IID_IVectorView_CoreApplicationView, UWP_IID_IIterable_CoreApplicationView };
+    return uwp_alloc_iids(list, 2u, c, i);
+}
+static void vv_free(UwpCoreAppViewsObj *o) {
+    if (o->view) o->view->view.lpVtbl->Release(&o->view->view);
+    free(o);
+}
+static HRESULT UWP_CALL vv_QI(UwpViewVecIface *T, REFIID r, void **p) {
+    return vv_qi_impl(UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, vec), r, p);
+}
+static ULONG UWP_CALL vv_AddRef(UwpViewVecIface *T) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, vec)->ref);
+}
+static ULONG UWP_CALL vv_Release(UwpViewVecIface *T) {
+    UwpCoreAppViewsObj *o = UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, vec);
+    int32_t r = uwp_atomic_dec(&o->ref);
+    if (r == 0) vv_free(o);
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL vv_GetIids(UwpViewVecIface *T, ULONG *c, IID **i) { (void)T; return vv_get_iids(c, i); }
+static HRESULT UWP_CALL vv_GetName(UwpViewVecIface *T, UWP_HSTRING *n) {
+    (void)T;
+    return uwp_hstring_create_from_wstr(L"Windows.Foundation.Collections.IVectorView`1<Windows.ApplicationModel.Core.CoreApplicationView>", n);
+}
+static HRESULT UWP_CALL vv_GetTrust(UwpViewVecIface *T, UwpTrustLevel *t) {
+    (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
+}
+static HRESULT UWP_CALL vv_GetAt(UwpViewVecIface *T, uint32_t index, void **item) {
+    if (!item) return E_INVALIDARG;
+    UwpCoreAppViewsObj *o = UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, vec);
+    if (index != 0u || !o->view) { *item = NULL; return E_BOUNDS; }
+    o->view->view.lpVtbl->AddRef(&o->view->view);
+    *item = &o->view->view;
+    return S_OK;
+}
+static HRESULT UWP_CALL vv_get_Size(UwpViewVecIface *T, uint32_t *size) {
+    if (!size) return E_INVALIDARG;
+    UwpCoreAppViewsObj *o = UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, vec);
+    *size = o->view ? 1u : 0u;
+    return S_OK;
+}
+static HRESULT UWP_CALL vv_IndexOf(UwpViewVecIface *T, void *val, uint32_t *index, uint8_t *found) {
+    if (!index || !found) return E_INVALIDARG;
+    UwpCoreAppViewsObj *o = UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, vec);
+    *index = 0u;
+    *found = (o->view && val == (void *)&o->view->view) ? 1u : 0u;
+    return S_OK;
+}
+static HRESULT UWP_CALL vv_GetMany(UwpViewVecIface *T, uint32_t start, uint32_t cap, void **items, uint32_t *actual) {
+    if (!actual) return E_INVALIDARG;
+    UwpCoreAppViewsObj *o = UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, vec);
+    if (start == 0u && cap > 0u && items && o->view) {
+        o->view->view.lpVtbl->AddRef(&o->view->view);
+        items[0] = &o->view->view;
+        *actual = 1u;
+    } else {
+        *actual = 0u;
+    }
+    return S_OK;
+}
+static HRESULT UWP_CALL vit_QI(UwpViewIterableIface *T, REFIID r, void **p) {
+    return vv_qi_impl(UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, iterable), r, p);
+}
+static ULONG UWP_CALL vit_AddRef(UwpViewIterableIface *T) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, iterable)->ref);
+}
+static ULONG UWP_CALL vit_Release(UwpViewIterableIface *T) {
+    UwpCoreAppViewsObj *o = UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, iterable);
+    int32_t r = uwp_atomic_dec(&o->ref);
+    if (r == 0) vv_free(o);
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL vit_GetIids(UwpViewIterableIface *T, ULONG *c, IID **i) { (void)T; return vv_get_iids(c, i); }
+static HRESULT UWP_CALL vit_GetName(UwpViewIterableIface *T, UWP_HSTRING *n) {
+    (void)T;
+    return uwp_hstring_create_from_wstr(L"Windows.Foundation.Collections.IIterable`1<Windows.ApplicationModel.Core.CoreApplicationView>", n);
+}
+static HRESULT UWP_CALL vit_GetTrust(UwpViewIterableIface *T, UwpTrustLevel *t) {
+    (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
+}
+static HRESULT UWP_CALL vit_First(UwpViewIterableIface *T, void **iter) {
+    if (!iter) return E_INVALIDARG;
+    UwpCoreAppViewsObj *o = UWP_CONTAINING_RECORD(T, UwpCoreAppViewsObj, iterable);
+    UwpViewIterObj *it = (UwpViewIterObj *)calloc(1, sizeof(*it));
+    if (!it) { *iter = NULL; return E_OUTOFMEMORY; }
+    it->iface.lpVtbl = &g_vi_vtbl;
+    it->ref = 1;
+    it->view = o->view;
+    if (it->view) it->view->view.lpVtbl->AddRef(&it->view->view);
+    it->index = 0u;
+    *iter = &it->iface;
+    return S_OK;
+}
+static const UwpViewVecVtbl g_vv_vtbl = {
+    vv_QI, vv_AddRef, vv_Release, vv_GetIids, vv_GetName, vv_GetTrust,
+    vv_GetAt, vv_get_Size, vv_IndexOf, vv_GetMany
+};
+static const UwpViewIterableVtbl g_vit_vtbl = {
+    vit_QI, vit_AddRef, vit_Release, vit_GetIids, vit_GetName, vit_GetTrust,
+    vit_First
+};
+
 /* ICoreImmersiveApplication */
 static HRESULT UWP_CALL cai_QI(UwpICoreImmersiveApplication *T, REFIID r, void **p) { (void)T; return coreapp_qi_impl(r, p); }
 static ULONG UWP_CALL cai_AddRef(UwpICoreImmersiveApplication *T) { (void)T; return 1u; }
 static ULONG UWP_CALL cai_Release(UwpICoreImmersiveApplication *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL cai_GetIids(UwpICoreImmersiveApplication *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return coreapp_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL cai_GetName(UwpICoreImmersiveApplication *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplication", n);
@@ -693,9 +957,22 @@ static HRESULT UWP_CALL cai_GetTrust(UwpICoreImmersiveApplication *T, UwpTrustLe
     (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
 }
 static HRESULT UWP_CALL cai_get_Views(UwpICoreImmersiveApplication *T, void **val) {
-    (void)T; if (val) *val = NULL;
-    uwp_bridge_log("coreapp", "ICoreImmersiveApplication::get_Views not implemented");
-    return E_NOTIMPL;
+    (void)T;
+    if (!val) return E_INVALIDARG;
+    UwpCoreAppViewObj *mv = uwp_coreapp_get_or_create_main_view();
+    if (!mv) { *val = NULL; return E_OUTOFMEMORY; }
+    UwpCoreAppViewsObj *vec = (UwpCoreAppViewsObj *)calloc(1, sizeof(*vec));
+    if (!vec) {
+        mv->view.lpVtbl->Release(&mv->view);
+        *val = NULL;
+        return E_OUTOFMEMORY;
+    }
+    vec->vec.lpVtbl = &g_vv_vtbl;
+    vec->iterable.lpVtbl = &g_vit_vtbl;
+    vec->ref = 1;
+    vec->view = mv; /* takes ownership of mv ref */
+    *val = &vec->vec;
+    return S_OK;
 }
 static HRESULT UWP_CALL cai_CreateNewView(UwpICoreImmersiveApplication *T, UWP_HSTRING rt, UWP_HSTRING ep, void **view) {
     (void)T; (void)rt; (void)ep; if (view) *view = NULL;
@@ -715,7 +992,7 @@ static HRESULT UWP_CALL cau_QI(UwpICoreApplicationUnhandledError *T, REFIID r, v
 static ULONG UWP_CALL cau_AddRef(UwpICoreApplicationUnhandledError *T) { (void)T; return 1u; }
 static ULONG UWP_CALL cau_Release(UwpICoreApplicationUnhandledError *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL cau_GetIids(UwpICoreApplicationUnhandledError *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return coreapp_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL cau_GetName(UwpICoreApplicationUnhandledError *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplication", n);
@@ -737,7 +1014,7 @@ static HRESULT UWP_CALL cauc_QI(UwpICoreApplicationUseCount *T, REFIID r, void *
 static ULONG UWP_CALL cauc_AddRef(UwpICoreApplicationUseCount *T) { (void)T; return 1u; }
 static ULONG UWP_CALL cauc_Release(UwpICoreApplicationUseCount *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL cauc_GetIids(UwpICoreApplicationUseCount *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T; return coreapp_get_iids_impl(c, i);
 }
 static HRESULT UWP_CALL cauc_GetName(UwpICoreApplicationUseCount *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.ApplicationModel.Core.CoreApplication", n);
@@ -924,6 +1201,7 @@ HRESULT uwp_coreapp_run_view_source(UwpIFrameworkViewSource *view_source) {
         main_view->view.lpVtbl->Release(&main_view->view);
         return hr;
     }
+    uwp_bridge_log("coreapp", "IFrameworkView::Initialize succeeded");
 
     UwpICoreWindow *cw = uwp_corewindow_iface(main_view->core_window);
     hr = fview->lpVtbl->SetWindow(fview, cw);
@@ -935,6 +1213,7 @@ HRESULT uwp_coreapp_run_view_source(UwpIFrameworkViewSource *view_source) {
         main_view->view.lpVtbl->Release(&main_view->view);
         return hr;
     }
+    uwp_bridge_log("coreapp", "IFrameworkView::SetWindow succeeded");
 
     const uwp_package_identity_t *id = uwp_core_get_package_identity();
     UWP_HSTRING ep_hs = NULL;
@@ -948,10 +1227,20 @@ HRESULT uwp_coreapp_run_view_source(UwpIFrameworkViewSource *view_source) {
         main_view->view.lpVtbl->Release(&main_view->view);
         return hr;
     }
+    uwp_bridge_log("coreapp", "IFrameworkView::Load succeeded");
 
     /* Fire CoreApplicationView::Activated(LaunchActivatedEventArgs) prior to Run() */
+    uwp_bridge_log("coreapp", "Firing CoreApplicationView::Activated(Launch)");
     uwp_coreapp_trigger_view_activated(L"");
 
+    /* Ensure CoreWindow::Activate() has fired CodeActivated (idempotent if OnActivated called it) */
+    cw = uwp_corewindow_iface(main_view->core_window);
+    if (cw) {
+        cw->lpVtbl->Activate(cw);
+        cw->lpVtbl->Release(cw);
+    }
+
+    uwp_bridge_log("coreapp", "Entering IFrameworkView::Run()");
     hr = fview->lpVtbl->Run(fview);
     uwp_bridge_log("coreapp", "IFrameworkView::Run returned hr=0x%08X", (unsigned)hr);
 

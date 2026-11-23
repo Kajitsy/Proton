@@ -520,6 +520,13 @@ BOOL WINAPI GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS lvl,
     uint64_t ft = ((uint64_t)st.st_mtime + 11644473600ULL) * 10000000ULL;
     fad->ftCreationTime.dwLowDateTime = (DWORD)(ft & 0xFFFFFFFFu);
     fad->ftCreationTime.dwHighDateTime = (DWORD)(ft >> 32);
+    fad->ftLastAccessTime = fad->ftCreationTime;
+    fad->ftLastWriteTime = fad->ftCreationTime;
+    if (!S_ISDIR(st.st_mode)) {
+        uint64_t fsz = (uint64_t)st.st_size;
+        fad->nFileSizeLow = (DWORD)(fsz & 0xFFFFFFFFu);
+        fad->nFileSizeHigh = (DWORD)(fsz >> 32);
+    }
     return TRUE;
 }
 
@@ -582,6 +589,61 @@ BOOL WINAPI CloseHandle(HANDLE hObject) {
     if (!h || h->magic != 0x53464831) return FALSE;
     close(h->fd);
     free(h);
+    return TRUE;
+}
+
+BOOL WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove,
+                              LARGE_INTEGER *lpNewFilePointer, DWORD dwMoveMethod) {
+    ShimFileHandle *h = (ShimFileHandle *)hFile;
+    if (!h || h->magic != 0x53464831) return FALSE;
+    int whence = SEEK_SET;
+    if (dwMoveMethod == FILE_CURRENT) whence = SEEK_CUR;
+    else if (dwMoveMethod == FILE_END) whence = SEEK_END;
+    off_t pos = lseek(h->fd, (off_t)liDistanceToMove.QuadPart, whence);
+    if (pos < 0) return FALSE;
+    if (lpNewFilePointer) lpNewFilePointer->QuadPart = (LONGLONG)pos;
+    return TRUE;
+}
+
+BOOL WINAPI GetFileSizeEx(HANDLE hFile, LARGE_INTEGER *lpFileSize) {
+    ShimFileHandle *h = (ShimFileHandle *)hFile;
+    if (!h || h->magic != 0x53464831 || !lpFileSize) return FALSE;
+    struct stat st;
+    if (fstat(h->fd, &st) != 0) return FALSE;
+    lpFileSize->QuadPart = (LONGLONG)st.st_size;
+    return TRUE;
+}
+
+BOOL WINAPI SetEndOfFile(HANDLE hFile) {
+    ShimFileHandle *h = (ShimFileHandle *)hFile;
+    if (!h || h->magic != 0x53464831) return FALSE;
+    off_t cur = lseek(h->fd, 0, SEEK_CUR);
+    if (cur < 0) return FALSE;
+    return ftruncate(h->fd, cur) == 0 ? TRUE : FALSE;
+}
+
+BOOL WINAPI FlushFileBuffers(HANDLE hFile) {
+    ShimFileHandle *h = (ShimFileHandle *)hFile;
+    if (!h || h->magic != 0x53464831) return FALSE;
+    fsync(h->fd);
+    return TRUE;
+}
+
+BOOL WINAPI MoveFileExW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags) {
+    char src[1024], dst[1024];
+    win_to_unix_path(lpExistingFileName, src, sizeof(src));
+    win_to_unix_path(lpNewFileName, dst, sizeof(dst));
+    struct stat st;
+    if (!(dwFlags & MOVEFILE_REPLACE_EXISTING) && stat(dst, &st) == 0) {
+        g_last_error = ERROR_ALREADY_EXISTS;
+        return FALSE;
+    }
+    ensure_parent_dirs(dst);
+    if (rename(src, dst) != 0) {
+        g_last_error = (errno == EEXIST) ? ERROR_ALREADY_EXISTS : ERROR_FILE_NOT_FOUND;
+        return FALSE;
+    }
+    g_last_error = 0;
     return TRUE;
 }
 

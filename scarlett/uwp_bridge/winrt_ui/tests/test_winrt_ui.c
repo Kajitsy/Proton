@@ -255,6 +255,17 @@ static int test_vtable_layouts(void) {
     CHECK(VTABLE_SLOT(UwpIApplicationView3Vtbl, SetPreferredMinSize) == 14);
     CHECK(VTABLE_SLOT(UwpIApplicationView4Vtbl, get_ViewMode) == 6);
 
+    /* UIViewSettings */
+    CHECK(VTABLE_SLOT(UwpIUIViewSettingsStaticsVtbl, GetForCurrentView) == 6);
+    CHECK(VTABLE_SLOT(UwpIUIViewSettingsVtbl, get_UserInteractionMode) == 6);
+
+    /* PointerVisualizationSettings (verified vs UnityPlayer.dll 18010f069: GetForCurrentView +0x30, put_IsContactFeedbackEnabled +0x30, put_IsBarrelButtonFeedbackEnabled +0x40) */
+    CHECK(VTABLE_SLOT(UwpIPointerVisualizationSettingsStaticsVtbl, GetForCurrentView) == 6);
+    CHECK(VTABLE_SLOT(UwpIPointerVisualizationSettingsVtbl, put_IsContactFeedbackEnabled) == 6);
+    CHECK(VTABLE_SLOT(UwpIPointerVisualizationSettingsVtbl, get_IsContactFeedbackEnabled) == 7);
+    CHECK(VTABLE_SLOT(UwpIPointerVisualizationSettingsVtbl, put_IsBarrelButtonFeedbackEnabled) == 8);
+    CHECK(VTABLE_SLOT(UwpIPointerVisualizationSettingsVtbl, get_IsBarrelButtonFeedbackEnabled) == 9);
+
     /* SystemNavigationManager (verified vs UnityPlayer.dll: add_BackRequested +0x30, put_Handled +0x38) */
     CHECK(VTABLE_SLOT(UwpISystemNavigationManagerStaticsVtbl, GetForCurrentView) == 6);
     CHECK(VTABLE_SLOT(UwpISystemNavigationManagerVtbl, add_BackRequested) == 6);
@@ -426,6 +437,20 @@ static int test_display_information(void) {
     CHECK(SUCCEEDED(uwp_winrt_ui_notify_dpi_changed()));
     CHECK(dpi_del.call_count == 1);
 
+    boolean stereo = TRUE;
+    CHECK(SUCCEEDED(di->lpVtbl->get_StereoEnabled(di, &stereo)) && stereo == FALSE);
+    TestEventDelegate stereo_del, cp_del, inv_del;
+    test_delegate_init(&stereo_del, 0);
+    test_delegate_init(&cp_del, 0);
+    test_delegate_init(&inv_del, 0);
+    EventRegistrationToken tok_stereo = { 0 }, tok_cp = { 0 }, tok_inv = { 0 };
+    CHECK(SUCCEEDED(di->lpVtbl->add_StereoEnabledChanged(di, &stereo_del.iface, &tok_stereo)) && tok_stereo.value != 0);
+    CHECK(SUCCEEDED(di->lpVtbl->add_ColorProfileChanged(di, &cp_del.iface, &tok_cp)) && tok_cp.value != 0);
+    CHECK(SUCCEEDED(statics->lpVtbl->add_DisplayContentsInvalidated(statics, &inv_del.iface, &tok_inv)) && tok_inv.value != 0);
+    CHECK(SUCCEEDED(di->lpVtbl->remove_StereoEnabledChanged(di, tok_stereo)));
+    CHECK(SUCCEEDED(di->lpVtbl->remove_ColorProfileChanged(di, tok_cp)));
+    CHECK(SUCCEEDED(statics->lpVtbl->remove_DisplayContentsInvalidated(statics, tok_inv)));
+
     /* Unimplemented methods MUST log via uwp_bridge_log() and return E_NOTIMPL */
     int32_t prev_unimpl = g_unimpl_log_count;
     void *dummy_out = (void *)0x1234;
@@ -557,15 +582,36 @@ static int test_application_view(void) {
     CHECK(SUCCEEDED(av3->lpVtbl->TryResizeView(av3, req_size, &resized)));
     CHECK(resized == TRUE);
 
-    /* TitleBar */
-    UwpIApplicationViewTitleBar *tb = NULL;
+    /* TitleBar singleton persistence */
+    UwpIApplicationViewTitleBar *tb = NULL, *tb2 = NULL;
     CHECK(SUCCEEDED(av3->lpVtbl->get_TitleBar(av3, &tb)));
-    CHECK(tb != NULL);
+    CHECK(SUCCEEDED(av3->lpVtbl->get_TitleBar(av3, &tb2)));
+    CHECK(tb != NULL && tb == tb2);
     void *bg_color = (void *)0x1234;
     CHECK(SUCCEEDED(tb->lpVtbl->get_BackgroundColor(tb, &bg_color)));
     CHECK(bg_color == NULL);
     CHECK(SUCCEEDED(tb->lpVtbl->put_BackgroundColor(tb, NULL)));
+    tb2->lpVtbl->Release(tb2);
     tb->lpVtbl->Release(tb);
+
+    /* Consolidated event */
+    TestEventDelegate cons_del;
+    test_delegate_init(&cons_del, 0);
+    EventRegistrationToken cons_tok = { 0 };
+    CHECK(SUCCEEDED(av->lpVtbl->add_Consolidated(av, &cons_del.iface, &cons_tok)) && cons_tok.value != 0);
+    CHECK(SUCCEEDED(av->lpVtbl->remove_Consolidated(av, cons_tok)));
+
+    /* UIViewSettings */
+    UwpIUIViewSettingsStatics *uvs_statics = NULL;
+    UwpIUIViewSettings *uvs = NULL;
+    UwpUserInteractionMode uim = UwpUserInteractionMode_Touch;
+    CHECK(SUCCEEDED(uwp_winrt_ui_get_activation_factory(
+        L"Windows.UI.ViewManagement.UIViewSettings",
+        &SCARLETT_IID_IUIViewSettingsStatics, (void **)&uvs_statics)));
+    CHECK(SUCCEEDED(uvs_statics->lpVtbl->GetForCurrentView(uvs_statics, &uvs)) && uvs != NULL);
+    CHECK(SUCCEEDED(uvs->lpVtbl->get_UserInteractionMode(uvs, &uim)) && uim == UwpUserInteractionMode_Mouse);
+    uvs->lpVtbl->Release(uvs);
+    uvs_statics->lpVtbl->Release(uvs_statics);
 
     /* ApplicationView4 view mode + E_NOTIMPL on ShowStandardSystemOverlays */
     UwpApplicationViewMode vm = UwpApplicationViewMode_CompactOverlay;
@@ -736,6 +782,9 @@ static int test_cursor_mouse_request_hdmi(void) {
     CHECK(dv == FALSE);
 
     CHECK(SUCCEEDED(hdi->lpVtbl->GetSupportedDisplayModes(hdi, &modes)));
+    UwpIVectorViewHdmiDisplayMode *modes_qi = NULL;
+    CHECK(SUCCEEDED(modes->lpVtbl->QueryInterface(modes, &SCARLETT_IID_IVectorView_HdmiDisplayMode, (void **)&modes_qi)));
+    modes_qi->lpVtbl->Release(modes_qi);
     UINT32 mcount = 0;
     CHECK(SUCCEEDED(modes->lpVtbl->get_Size(modes, &mcount)));
     CHECK(mcount >= 1);
@@ -756,6 +805,53 @@ static int test_cursor_mouse_request_hdmi(void) {
     mode->lpVtbl->Release(mode);
     hdi->lpVtbl->Release(hdi);
     hstatics->lpVtbl->Release(hstatics);
+
+    /* --- PointerVisualizationSettings --- */
+    UwpIPointerVisualizationSettingsStatics *pvs_statics = NULL;
+    UwpIPointerVisualizationSettings *pvs = NULL;
+    UwpIPointerVisualizationSettings *pvs_win81 = NULL;
+    boolean bval = FALSE;
+
+    CHECK(SUCCEEDED(uwp_winrt_ui_get_activation_factory(
+        L"Windows.UI.Input.PointerVisualizationSettings",
+        &SCARLETT_IID_IPointerVisualizationSettingsStatics, (void **)&pvs_statics)));
+    CHECK(pvs_statics != NULL);
+
+    /* GetForCurrentView */
+    CHECK(SUCCEEDED(pvs_statics->lpVtbl->GetForCurrentView(pvs_statics, &pvs)));
+    CHECK(pvs != NULL);
+
+    /* Default values: contact & barrel feedback are TRUE */
+    CHECK(SUCCEEDED(pvs->lpVtbl->get_IsContactFeedbackEnabled(pvs, &bval)) && bval == TRUE);
+    CHECK(SUCCEEDED(pvs->lpVtbl->get_IsBarrelButtonFeedbackEnabled(pvs, &bval)) && bval == TRUE);
+
+    /* Disable contact feedback (UnityPlayer.dll sequence) */
+    CHECK(SUCCEEDED(pvs->lpVtbl->put_IsContactFeedbackEnabled(pvs, FALSE)));
+    CHECK(SUCCEEDED(pvs->lpVtbl->get_IsContactFeedbackEnabled(pvs, &bval)) && bval == FALSE);
+
+    /* Disable barrel button feedback (UnityPlayer.dll sequence) */
+    CHECK(SUCCEEDED(pvs->lpVtbl->put_IsBarrelButtonFeedbackEnabled(pvs, FALSE)));
+    CHECK(SUCCEEDED(pvs->lpVtbl->get_IsBarrelButtonFeedbackEnabled(pvs, &bval)) && bval == FALSE);
+
+    /* Re-enable */
+    CHECK(SUCCEEDED(pvs->lpVtbl->put_IsContactFeedbackEnabled(pvs, TRUE)));
+    CHECK(SUCCEEDED(pvs->lpVtbl->get_IsContactFeedbackEnabled(pvs, &bval)) && bval == TRUE);
+
+    /* QI for Win8.1 legacy IID */
+    CHECK(SUCCEEDED(pvs->lpVtbl->QueryInterface(pvs, &SCARLETT_IID_IPointerVisualizationSettings_Win81, (void **)&pvs_win81)));
+    CHECK(pvs_win81 != NULL);
+    pvs_win81->lpVtbl->Release(pvs_win81);
+
+    /* Runtime class name */
+    HSTRING rcn = NULL;
+    CHECK(SUCCEEDED(pvs->lpVtbl->GetRuntimeClassName(pvs, &rcn)));
+    uint32_t rcn_len = 0;
+    const wchar_t *rcn_buf = uwp_ui_hstring_raw(rcn, &rcn_len);
+    CHECK(rcn_buf && wcscmp(rcn_buf, L"Windows.UI.Input.PointerVisualizationSettings") == 0);
+    uwp_ui_hstring_delete(rcn);
+
+    pvs->lpVtbl->Release(pvs);
+    pvs_statics->lpVtbl->Release(pvs_statics);
 
     return 0;
 }
@@ -813,6 +909,8 @@ static int test_api_information(void) {
     /* Types: honest TRUE for implemented, FALSE for unimplemented */
     CHECK(check_api_type(ai, L"Windows.Graphics.Display.DisplayInformation", TRUE) == 0);
     CHECK(check_api_type(ai, L"Windows.UI.ViewManagement.ApplicationView", TRUE) == 0);
+    CHECK(check_api_type(ai, L"Windows.UI.ViewManagement.UIViewSettings", TRUE) == 0);
+    CHECK(check_api_type(ai, L"Windows.UI.ViewManagement.UserInteractionMode", TRUE) == 0);
     CHECK(check_api_type(ai, L"Windows.UI.Core.SystemNavigationManager", TRUE) == 0);
     CHECK(check_api_type(ai, L"Windows.UI.Core.CoreCursor", TRUE) == 0);
     CHECK(check_api_type(ai, L"Windows.Devices.Input.MouseDevice", TRUE) == 0);
@@ -843,6 +941,15 @@ static int test_api_information(void) {
     CHECK(check_api_member(ai, 5, L"Windows.Graphics.Display.DisplayInformation", L"BogusEvent", 0, FALSE) == 0);
     CHECK(check_api_member(ai, 6, L"Windows.Graphics.Display.DisplayOrientations", L"Landscape", 0, TRUE) == 0);
     CHECK(check_api_member(ai, 6, L"Windows.Graphics.Display.DisplayOrientations", L"BogusOrientation", 0, FALSE) == 0);
+    CHECK(check_api_member(ai, 0, L"Windows.UI.ViewManagement.UIViewSettings", L"GetForCurrentView", 0, TRUE) == 0);
+    CHECK(check_api_member(ai, 3, L"Windows.UI.ViewManagement.UIViewSettings", L"UserInteractionMode", 0, TRUE) == 0);
+    CHECK(check_api_member(ai, 6, L"Windows.UI.ViewManagement.UserInteractionMode", L"Mouse", 0, TRUE) == 0);
+    CHECK(check_api_type(ai, L"Windows.UI.Input.PointerVisualizationSettings", TRUE) == 0);
+    CHECK(check_api_member(ai, 0, L"Windows.UI.Input.PointerVisualizationSettings", L"GetForCurrentView", 0, TRUE) == 0);
+    CHECK(check_api_member(ai, 2, L"Windows.UI.Input.PointerVisualizationSettings", L"IsContactFeedbackEnabled", 0, TRUE) == 0);
+    CHECK(check_api_member(ai, 4, L"Windows.UI.Input.PointerVisualizationSettings", L"IsContactFeedbackEnabled", 0, TRUE) == 0);
+    CHECK(check_api_member(ai, 2, L"Windows.UI.Input.PointerVisualizationSettings", L"IsBarrelButtonFeedbackEnabled", 0, TRUE) == 0);
+    CHECK(check_api_member(ai, 4, L"Windows.UI.Input.PointerVisualizationSettings", L"IsBarrelButtonFeedbackEnabled", 0, TRUE) == 0);
 
     /* Contracts */
     HSTRING hc = NULL;

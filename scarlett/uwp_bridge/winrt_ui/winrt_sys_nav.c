@@ -118,9 +118,13 @@ static ULONG sn_release(sys_nav_obj_t *obj) {
     ULONG ref = uwp_ui_atomic_dec(&obj->ref_count);
     if (ref == 0) {
         uwp_ui_lock_acquire(&g_sn_lock);
-        if (g_sn_singleton == obj) g_sn_singleton = NULL;
+        if (uwp_ui_atomic_load(&obj->ref_count) == 0) {
+            if (g_sn_singleton == obj) g_sn_singleton = NULL;
+            uwp_ui_lock_release(&g_sn_lock);
+            uwp_ui_free(obj);
+            return 0;
+        }
         uwp_ui_lock_release(&g_sn_lock);
-        uwp_ui_free(obj);
     }
     return ref;
 }

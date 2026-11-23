@@ -37,6 +37,9 @@ HRESULT uwp_winrt_sys_get_activation_factory(
     if (wcscmp(class_name, L"Windows.Storage.StorageFolder") == 0) {
         return winrt_sys_get_storage_folder_factory(iid, out_factory);
     }
+    if (wcscmp(class_name, L"Windows.Storage.StorageFile") == 0) {
+        return winrt_sys_get_storage_file_factory(iid, out_factory);
+    }
     if (wcscmp(class_name, L"Windows.ApplicationModel.Package") == 0) {
         return winrt_sys_get_package_factory(iid, out_factory);
     }
@@ -69,6 +72,42 @@ HRESULT uwp_winrt_sys_get_activation_factory(
     }
     if (wcscmp(class_name, L"Windows.System.Threading.ThreadPool") == 0) {
         return winrt_sys_get_thread_pool_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.System.Threading.ThreadPoolTimer") == 0) {
+        return winrt_sys_get_thread_pool_timer_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Devices.Enumeration.Pnp.PnpObject") == 0) {
+        return winrt_sys_get_pnp_object_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Devices.HumanInterfaceDevice.HidDevice") == 0) {
+        return winrt_sys_get_hid_device_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Devices.Input.TouchCapabilities") == 0) {
+        return winrt_sys_get_touch_capabilities_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Devices.Input.MouseCapabilities") == 0) {
+        return winrt_sys_get_mouse_capabilities_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Devices.Input.KeyboardCapabilities") == 0) {
+        return winrt_sys_get_keyboard_capabilities_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.System.Profile.HardwareIdentification") == 0) {
+        return winrt_sys_get_hardware_identification_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.System.MemoryManager") == 0) {
+        return winrt_sys_get_memory_manager_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.System.Power.PowerManager") == 0) {
+        return winrt_sys_get_power_manager_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Networking.Connectivity.NetworkInformation") == 0) {
+        return winrt_sys_get_network_information_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Networking.HostName") == 0) {
+        return winrt_sys_get_host_name_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.Media.Devices.MediaDevice") == 0) {
+        return winrt_sys_get_media_device_factory(iid, out_factory);
     }
 
     return CLASS_E_CLASSNOTAVAILABLE;
@@ -185,6 +224,22 @@ HRESULT winrt_sys_unimplemented(const char *iface_method, void *self) {
 /* ============================================================================
  * Path Normalization & Directory Creation (Win32 Only)
  * ============================================================================ */
+
+int winrt_sys_wcsicmp(const wchar_t *a, const wchar_t *b) {
+    if (!a && !b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    while (*a && *b) {
+        wchar_t ca = (*a >= L'A' && *a <= L'Z') ? (wchar_t)(*a + (L'a' - L'A')) : *a;
+        wchar_t cb = (*b >= L'A' && *b <= L'Z') ? (wchar_t)(*b + (L'a' - L'A')) : *b;
+        if (ca != cb) return (int)ca - (int)cb;
+        ++a;
+        ++b;
+    }
+    wchar_t ca = (*a >= L'A' && *a <= L'Z') ? (wchar_t)(*a + (L'a' - L'A')) : *a;
+    wchar_t cb = (*b >= L'A' && *b <= L'Z') ? (wchar_t)(*b + (L'a' - L'A')) : *b;
+    return (int)ca - (int)cb;
+}
 
 void winrt_sys_copy_wstr(wchar_t *dst, size_t dst_chars, const wchar_t *src) {
     if (dst == NULL || dst_chars == 0u) return;
@@ -322,6 +377,17 @@ void winrt_sys_get_install_dir(wchar_t *out_path, size_t out_chars) {
         if (last_slash != NULL) {
             *last_slash = L'\0';
             winrt_sys_normalize_path(exe_path, out_path, out_chars);
+            /* If hosted under ...\entrypoint\App.exe and ..\AppxManifest.xml exists, use parent dir */
+            wchar_t *ep_leaf = wcsrchr(out_path, L'\\');
+            if (ep_leaf != NULL && winrt_sys_wcsicmp(ep_leaf + 1, L"entrypoint") == 0) {
+                wchar_t probe[UWP_MAX_PATH_CHARS];
+                *ep_leaf = L'\0';
+                swprintf(probe, UWP_MAX_PATH_CHARS, L"%ls\\AppxManifest.xml", out_path);
+                probe[UWP_MAX_PATH_CHARS - 1u] = L'\0';
+                if (GetFileAttributesW(probe) == INVALID_FILE_ATTRIBUTES) {
+                    *ep_leaf = L'\\';
+                }
+            }
             return;
         }
     }
@@ -525,7 +591,9 @@ static HRESULT STDMETHODCALLTYPE async_action_put_completed(void *This, void *ha
 
     if (h != NULL) {
         typedef struct { const WinrtAsyncActionCompletedHandlerVtbl *lpVtbl; } HandlerIf;
+        async_action_addref(This);
         ((HandlerIf *)h)->lpVtbl->Invoke(h, &obj->lpVtbl, st);
+        async_action_release(This);
     }
     return S_OK;
 }
@@ -728,7 +796,9 @@ static HRESULT STDMETHODCALLTYPE async_op_put_completed(void *This, void *handle
 
     if (h) {
         typedef struct { const WinrtAsyncCompletedHandlerPtrVtbl *lpVtbl; } HandlerIf;
+        async_op_addref(This);
         ((HandlerIf *)h)->lpVtbl->Invoke(h, &obj->lpVtbl, st);
+        async_op_release(This);
     }
     return S_OK;
 }
@@ -865,6 +935,332 @@ HRESULT winrt_sys_create_completed_async_op_ptr(
     }
     InitializeCriticalSection(&obj->lock);
     *out_op = &obj->lpVtbl;
+    return S_OK;
+}
+
+/* Generic completed IAsyncOperationWithProgress / IAsyncOperation<boolean> */
+typedef struct WinrtAsyncOpScalarObj {
+    const WinrtAsyncOpWithProgressPtrVtbl *lpVtblProgPtr;
+    const WinrtAsyncOpWithProgressU32Vtbl *lpVtblProgU32;
+    const WinrtAsyncOperationBoolVtbl     *lpVtblBool;
+    const WinrtAsyncInfoVtbl              *lpVtblInfo;
+    volatile LONG ref_count;
+    int kind; /* 0 = prog_ptr, 1 = prog_u32, 2 = bool */
+    GUID op_iid;
+    wchar_t runtime_class_name[160];
+    uint32_t id;
+    HRESULT err_hr;
+    AsyncStatus status;
+    IUnknown *result_obj;
+    uint32_t result_u32;
+    boolean result_bool;
+    IUnknown *progress_handler;
+    IUnknown *completed_handler;
+    CRITICAL_SECTION lock;
+} WinrtAsyncOpScalarObj;
+
+static void *async_sc_primary_ptr(WinrtAsyncOpScalarObj *o) {
+    if (o->kind == 0) return &o->lpVtblProgPtr;
+    if (o->kind == 1) return &o->lpVtblProgU32;
+    return &o->lpVtblBool;
+}
+
+static HRESULT STDMETHODCALLTYPE async_sc_qi(void *This, REFIID riid, void **ppv) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)This;
+    if (!ppv) return E_POINTER;
+    *ppv = NULL;
+    if (!riid) return E_INVALIDARG;
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IUnknown) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IInspectable) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject) ||
+        winrt_sys_guid_eq(riid, &o->op_iid)) {
+        InterlockedIncrement(&o->ref_count);
+        *ppv = async_sc_primary_ptr(o);
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IAsyncInfo)) {
+        InterlockedIncrement(&o->ref_count);
+        *ppv = &o->lpVtblInfo;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE async_sc_addref(void *This) {
+    return (ULONG)InterlockedIncrement(&((WinrtAsyncOpScalarObj *)This)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE async_sc_release(void *This) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)This;
+    LONG rc = InterlockedDecrement(&o->ref_count);
+    if (rc == 0) {
+        if (o->result_obj) o->result_obj->lpVtbl->Release(o->result_obj);
+        if (o->progress_handler) o->progress_handler->lpVtbl->Release(o->progress_handler);
+        if (o->completed_handler) o->completed_handler->lpVtbl->Release(o->completed_handler);
+        DeleteCriticalSection(&o->lock);
+        winrt_sys_free(o);
+    }
+    return (ULONG)rc;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_getiids(void *This, ULONG *c, IID **i) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)This;
+    GUID list[2] = { o->op_iid, WINRT_IID_IAsyncInfo };
+    return winrt_sys_get_iids_copy(list, 2, c, i);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_rcn(void *This, HSTRING *n) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)This;
+    return winrt_sys_make_hstring(o->runtime_class_name, n);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_tl(void *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_put_prog(void *This, void *handler) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)This;
+    IUnknown *h = (IUnknown *)handler;
+    EnterCriticalSection(&o->lock);
+    if (o->progress_handler) o->progress_handler->lpVtbl->Release(o->progress_handler);
+    o->progress_handler = h;
+    if (h) h->lpVtbl->AddRef(h);
+    LeaveCriticalSection(&o->lock);
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_get_prog(void *This, void **handler) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)This;
+    if (!handler) return E_POINTER;
+    EnterCriticalSection(&o->lock);
+    *handler = o->progress_handler;
+    if (o->progress_handler) o->progress_handler->lpVtbl->AddRef(o->progress_handler);
+    LeaveCriticalSection(&o->lock);
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_put_completed(void *This, void *handler) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)This;
+    IUnknown *h = (IUnknown *)handler;
+    EnterCriticalSection(&o->lock);
+    if (o->completed_handler) o->completed_handler->lpVtbl->Release(o->completed_handler);
+    o->completed_handler = h;
+    if (h) h->lpVtbl->AddRef(h);
+    AsyncStatus st = o->status;
+    LeaveCriticalSection(&o->lock);
+    if (h) {
+        typedef struct { const WinrtAsyncCompletedHandlerPtrVtbl *lpVtbl; } HIf;
+        async_sc_addref(o);
+        ((HIf *)h)->lpVtbl->Invoke(h, async_sc_primary_ptr(o), st);
+        async_sc_release(o);
+    }
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_get_completed(void *This, void **handler) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)This;
+    if (!handler) return E_POINTER;
+    EnterCriticalSection(&o->lock);
+    *handler = o->completed_handler;
+    if (o->completed_handler) o->completed_handler->lpVtbl->AddRef(o->completed_handler);
+    LeaveCriticalSection(&o->lock);
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_get_res_ptr(void *This, void **results) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)This;
+    if (!results) return E_POINTER;
+    *results = NULL;
+    if (FAILED(o->err_hr)) return o->err_hr;
+    if (o->result_obj) {
+        o->result_obj->lpVtbl->AddRef(o->result_obj);
+        *results = o->result_obj;
+    }
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE async_sc_u32_qi(void *This, REFIID r, void **p) {
+    return async_sc_qi(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE async_sc_u32_ar(void *This) {
+    return async_sc_addref(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This));
+}
+static ULONG STDMETHODCALLTYPE async_sc_u32_rel(void *This) {
+    return async_sc_release(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This));
+}
+static HRESULT STDMETHODCALLTYPE async_sc_u32_getiids(void *This, ULONG *c, IID **i) {
+    return async_sc_getiids(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This), c, i);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_u32_rcn(void *This, HSTRING *n) {
+    return async_sc_rcn(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This), n);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_u32_tl(void *This, TrustLevel *tl) {
+    return async_sc_tl(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This), tl);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_u32_put_prog(void *This, void *h) {
+    return async_sc_put_prog(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This), h);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_u32_get_prog(void *This, void **h) {
+    return async_sc_get_prog(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This), h);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_u32_put_comp(void *This, void *h) {
+    return async_sc_put_completed(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This), h);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_u32_get_comp(void *This, void **h) {
+    return async_sc_get_completed(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This), h);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_u32_get_res(void *This, uint32_t *res) {
+    WinrtAsyncOpScalarObj *o = WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblProgU32, This);
+    if (!res) return E_POINTER;
+    *res = 0;
+    if (FAILED(o->err_hr)) return o->err_hr;
+    *res = o->result_u32;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE async_sc_bool_qi(void *This, REFIID r, void **p) {
+    return async_sc_qi(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblBool, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE async_sc_bool_ar(void *This) {
+    return async_sc_addref(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblBool, This));
+}
+static ULONG STDMETHODCALLTYPE async_sc_bool_rel(void *This) {
+    return async_sc_release(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblBool, This));
+}
+static HRESULT STDMETHODCALLTYPE async_sc_bool_getiids(void *This, ULONG *c, IID **i) {
+    return async_sc_getiids(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblBool, This), c, i);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_bool_rcn(void *This, HSTRING *n) {
+    return async_sc_rcn(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblBool, This), n);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_bool_tl(void *This, TrustLevel *tl) {
+    return async_sc_tl(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblBool, This), tl);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_bool_put_comp(void *This, void *h) {
+    return async_sc_put_completed(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblBool, This), h);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_bool_get_comp(void *This, void **h) {
+    return async_sc_get_completed(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblBool, This), h);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_bool_get_res(void *This, boolean *res) {
+    WinrtAsyncOpScalarObj *o = WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblBool, This);
+    if (!res) return E_POINTER;
+    *res = 0;
+    if (FAILED(o->err_hr)) return o->err_hr;
+    *res = o->result_bool;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE async_sc_info_qi(void *This, REFIID r, void **p) {
+    return async_sc_qi(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE async_sc_info_ar(void *This) {
+    return async_sc_addref(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This));
+}
+static ULONG STDMETHODCALLTYPE async_sc_info_rel(void *This) {
+    return async_sc_release(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This));
+}
+static HRESULT STDMETHODCALLTYPE async_sc_info_getiids(void *This, ULONG *c, IID **i) {
+    return async_sc_getiids(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This), c, i);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_info_rcn(void *This, HSTRING *n) {
+    return async_sc_rcn(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This), n);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_info_tl(void *This, TrustLevel *tl) {
+    return async_sc_tl(WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This), tl);
+}
+static HRESULT STDMETHODCALLTYPE async_sc_info_id(void *This, uint32_t *id) {
+    if (!id) return E_POINTER;
+    *id = WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This)->id;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_info_status(void *This, AsyncStatus *st) {
+    if (!st) return E_POINTER;
+    *st = WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This)->status;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_info_err(void *This, HRESULT *err) {
+    if (!err) return E_POINTER;
+    *err = WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This)->err_hr;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_info_cancel(void *This) {
+    (void)This;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE async_sc_info_close(void *This) {
+    WinrtAsyncOpScalarObj *o = WINRT_SYS_FROM(WinrtAsyncOpScalarObj, lpVtblInfo, This);
+    EnterCriticalSection(&o->lock);
+    if (o->progress_handler) { o->progress_handler->lpVtbl->Release(o->progress_handler); o->progress_handler = NULL; }
+    if (o->completed_handler) { o->completed_handler->lpVtbl->Release(o->completed_handler); o->completed_handler = NULL; }
+    if (o->result_obj) { o->result_obj->lpVtbl->Release(o->result_obj); o->result_obj = NULL; }
+    LeaveCriticalSection(&o->lock);
+    return S_OK;
+}
+
+static const WinrtAsyncOpWithProgressPtrVtbl g_async_prog_ptr_vtbl = {
+    async_sc_qi, async_sc_addref, async_sc_release, async_sc_getiids, async_sc_rcn, async_sc_tl,
+    async_sc_put_prog, async_sc_get_prog, async_sc_put_completed, async_sc_get_completed, async_sc_get_res_ptr
+};
+static const WinrtAsyncOpWithProgressU32Vtbl g_async_prog_u32_vtbl = {
+    async_sc_u32_qi, async_sc_u32_ar, async_sc_u32_rel, async_sc_u32_getiids, async_sc_u32_rcn, async_sc_u32_tl,
+    async_sc_u32_put_prog, async_sc_u32_get_prog, async_sc_u32_put_comp, async_sc_u32_get_comp, async_sc_u32_get_res
+};
+static const WinrtAsyncOperationBoolVtbl g_async_bool_vtbl = {
+    async_sc_bool_qi, async_sc_bool_ar, async_sc_bool_rel, async_sc_bool_getiids, async_sc_bool_rcn, async_sc_bool_tl,
+    async_sc_bool_put_comp, async_sc_bool_get_comp, async_sc_bool_get_res
+};
+static const WinrtAsyncInfoVtbl g_async_sc_info_vtbl = {
+    async_sc_info_qi, async_sc_info_ar, async_sc_info_rel, async_sc_info_getiids, async_sc_info_rcn, async_sc_info_tl,
+    async_sc_info_id, async_sc_info_status, async_sc_info_err, async_sc_info_cancel, async_sc_info_close
+};
+
+static WinrtAsyncOpScalarObj *alloc_async_scalar(int kind, const GUID *op_iid, const wchar_t *rcn, HRESULT err_hr) {
+    WinrtAsyncOpScalarObj *o = (WinrtAsyncOpScalarObj *)winrt_sys_alloc(sizeof(*o));
+    if (!o) return NULL;
+    o->lpVtblProgPtr = &g_async_prog_ptr_vtbl;
+    o->lpVtblProgU32 = &g_async_prog_u32_vtbl;
+    o->lpVtblBool = &g_async_bool_vtbl;
+    o->lpVtblInfo = &g_async_sc_info_vtbl;
+    o->ref_count = 1;
+    o->kind = kind;
+    o->op_iid = *op_iid;
+    winrt_sys_copy_wstr(o->runtime_class_name, 160, rcn ? rcn : L"Windows.Foundation.IAsyncOperation");
+    o->id = (uint32_t)InterlockedIncrement(&g_next_async_id);
+    o->err_hr = err_hr;
+    o->status = SUCCEEDED(err_hr) ? Completed : Error;
+    InitializeCriticalSection(&o->lock);
+    return o;
+}
+
+HRESULT winrt_sys_create_completed_async_op_bool(boolean result_val, HRESULT err_hr, void **out_op) {
+    if (!out_op) return E_POINTER;
+    *out_op = NULL;
+    WinrtAsyncOpScalarObj *o = alloc_async_scalar(
+        2, &WINRT_IID_IAsyncOperation_Boolean, L"Windows.Foundation.IAsyncOperation`1<Boolean>", err_hr);
+    if (!o) return E_OUTOFMEMORY;
+    o->result_bool = result_val ? 1 : 0;
+    *out_op = &o->lpVtblBool;
+    return S_OK;
+}
+
+HRESULT winrt_sys_create_completed_async_op_with_progress_ptr(
+    const GUID *op_iid, const wchar_t *runtime_class_name, IUnknown *result_obj, HRESULT err_hr, void **out_op) {
+    if (!out_op) return E_POINTER;
+    *out_op = NULL;
+    if (!op_iid) return E_INVALIDARG;
+    WinrtAsyncOpScalarObj *o = alloc_async_scalar(0, op_iid, runtime_class_name, err_hr);
+    if (!o) return E_OUTOFMEMORY;
+    if (result_obj) {
+        result_obj->lpVtbl->AddRef(result_obj);
+        o->result_obj = result_obj;
+    }
+    *out_op = &o->lpVtblProgPtr;
+    return S_OK;
+}
+
+HRESULT winrt_sys_create_completed_async_op_with_progress_u32(
+    const GUID *op_iid, const wchar_t *runtime_class_name, uint32_t result_val, HRESULT err_hr, void **out_op) {
+    if (!out_op) return E_POINTER;
+    *out_op = NULL;
+    if (!op_iid) return E_INVALIDARG;
+    WinrtAsyncOpScalarObj *o = alloc_async_scalar(1, op_iid, runtime_class_name, err_hr);
+    if (!o) return E_OUTOFMEMORY;
+    o->result_u32 = result_val;
+    *out_op = &o->lpVtblProgU32;
     return S_OK;
 }
 
@@ -1201,6 +1597,66 @@ HRESULT winrt_sys_create_property_value_guid(const GUID *val, void **out_pv) {
     return S_OK;
 }
 
+HRESULT winrt_sys_create_property_value_uint8(uint8_t val, void **out_pv) {
+    if (!out_pv) return E_POINTER;
+    *out_pv = NULL;
+    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_UInt8);
+    if (!o) return E_OUTOFMEMORY;
+    o->v.u8 = val;
+    *out_pv = o;
+    return S_OK;
+}
+
+HRESULT winrt_sys_create_property_value_int16(int16_t val, void **out_pv) {
+    if (!out_pv) return E_POINTER;
+    *out_pv = NULL;
+    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_Int16);
+    if (!o) return E_OUTOFMEMORY;
+    o->v.i16 = val;
+    *out_pv = o;
+    return S_OK;
+}
+
+HRESULT winrt_sys_create_property_value_uint16(uint16_t val, void **out_pv) {
+    if (!out_pv) return E_POINTER;
+    *out_pv = NULL;
+    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_UInt16);
+    if (!o) return E_OUTOFMEMORY;
+    o->v.u16 = val;
+    *out_pv = o;
+    return S_OK;
+}
+
+HRESULT winrt_sys_create_property_value_char16(wchar_t val, void **out_pv) {
+    if (!out_pv) return E_POINTER;
+    *out_pv = NULL;
+    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_Char16);
+    if (!o) return E_OUTOFMEMORY;
+    o->v.ch = val;
+    *out_pv = o;
+    return S_OK;
+}
+
+HRESULT winrt_sys_create_property_value_datetime(int64_t val, void **out_pv) {
+    if (!out_pv) return E_POINTER;
+    *out_pv = NULL;
+    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_DateTime);
+    if (!o) return E_OUTOFMEMORY;
+    o->v.i64 = val;
+    *out_pv = o;
+    return S_OK;
+}
+
+HRESULT winrt_sys_create_property_value_timespan(int64_t val, void **out_pv) {
+    if (!out_pv) return E_POINTER;
+    *out_pv = NULL;
+    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_TimeSpan);
+    if (!o) return E_OUTOFMEMORY;
+    o->v.i64 = val;
+    *out_pv = o;
+    return S_OK;
+}
+
 /* IPropertyValueStatics factory */
 typedef struct WinrtPropertyValueStaticsVtbl {
     HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
@@ -1284,30 +1740,15 @@ static HRESULT STDMETHODCALLTYPE pv_st_empty(void *This, void **pv) {
 }
 static HRESULT STDMETHODCALLTYPE pv_st_u8(void *This, uint8_t v, void **pv) {
     (void)This;
-    if (!pv) return E_POINTER;
-    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_UInt8);
-    if (!o) return E_OUTOFMEMORY;
-    o->v.u8 = v;
-    *pv = o;
-    return S_OK;
+    return winrt_sys_create_property_value_uint8(v, pv);
 }
 static HRESULT STDMETHODCALLTYPE pv_st_i16(void *This, int16_t v, void **pv) {
     (void)This;
-    if (!pv) return E_POINTER;
-    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_Int16);
-    if (!o) return E_OUTOFMEMORY;
-    o->v.i16 = v;
-    *pv = o;
-    return S_OK;
+    return winrt_sys_create_property_value_int16(v, pv);
 }
 static HRESULT STDMETHODCALLTYPE pv_st_u16(void *This, uint16_t v, void **pv) {
     (void)This;
-    if (!pv) return E_POINTER;
-    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_UInt16);
-    if (!o) return E_OUTOFMEMORY;
-    o->v.u16 = v;
-    *pv = o;
-    return S_OK;
+    return winrt_sys_create_property_value_uint16(v, pv);
 }
 static HRESULT STDMETHODCALLTYPE pv_st_i32(void *This, int32_t v, void **pv) {
     (void)This;
@@ -1335,12 +1776,7 @@ static HRESULT STDMETHODCALLTYPE pv_st_f64(void *This, double v, void **pv) {
 }
 static HRESULT STDMETHODCALLTYPE pv_st_c16(void *This, wchar_t v, void **pv) {
     (void)This;
-    if (!pv) return E_POINTER;
-    WinrtPropertyValueObj *o = pv_alloc(WinrtPropertyType_Char16);
-    if (!o) return E_OUTOFMEMORY;
-    o->v.ch = v;
-    *pv = o;
-    return S_OK;
+    return winrt_sys_create_property_value_char16(v, pv);
 }
 static HRESULT STDMETHODCALLTYPE pv_st_bool(void *This, boolean v, void **pv) {
     (void)This;

@@ -43,6 +43,14 @@ static inline ULONG uwp_ui_atomic_dec(volatile int32_t *val) {
 #endif
 }
 
+static inline int32_t uwp_ui_atomic_load(volatile int32_t *val) {
+#ifdef _WIN32
+    return (int32_t)InterlockedCompareExchange((volatile LONG *)val, 0, 0);
+#else
+    return __atomic_load_n(val, __ATOMIC_ACQUIRE);
+#endif
+}
+
 typedef struct uwp_ui_lock_s {
 #ifdef _WIN32
     CRITICAL_SECTION cs;
@@ -123,9 +131,11 @@ UwpResolutionScale uwp_ui_dpi_to_resolution_scale(float dpi);
 
 HRESULT uwp_ui_display_info_get_factory(REFIID iid, void **out_factory);
 HRESULT uwp_ui_app_view_get_factory(REFIID iid, void **out_factory);
+HRESULT uwp_ui_view_settings_get_factory(REFIID iid, void **out_factory);
 HRESULT uwp_ui_sys_nav_get_factory(REFIID iid, void **out_factory);
 HRESULT uwp_ui_core_cursor_get_factory(REFIID iid, void **out_factory);
 HRESULT uwp_ui_mouse_device_get_factory(REFIID iid, void **out_factory);
+HRESULT uwp_ui_pointer_vis_get_factory(REFIID iid, void **out_factory);
 HRESULT uwp_ui_display_request_get_factory(REFIID iid, void **out_factory);
 HRESULT uwp_ui_api_info_get_factory(REFIID iid, void **out_factory);
 HRESULT uwp_ui_hdmi_display_get_factory(REFIID iid, void **out_factory);

@@ -84,11 +84,15 @@ static ULONG di_release(display_info_obj_t *obj) {
     ULONG ref = uwp_ui_atomic_dec(&obj->ref_count);
     if (ref == 0) {
         uwp_ui_lock_acquire(&g_di_lock);
-        if (g_di_singleton == obj) {
-            g_di_singleton = NULL;
+        if (uwp_ui_atomic_load(&obj->ref_count) == 0) {
+            if (g_di_singleton == obj) {
+                g_di_singleton = NULL;
+            }
+            uwp_ui_lock_release(&g_di_lock);
+            uwp_ui_free(obj);
+            return 0;
         }
         uwp_ui_lock_release(&g_di_lock);
-        uwp_ui_free(obj);
     }
     return ref;
 }

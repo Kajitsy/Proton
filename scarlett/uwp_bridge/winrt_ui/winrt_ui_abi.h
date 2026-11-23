@@ -398,6 +398,11 @@ typedef enum UwpFullScreenSystemOverlayMode {
     UwpFullScreenSystemOverlayMode_Minimal  = 1
 } UwpFullScreenSystemOverlayMode;
 
+typedef enum UwpUserInteractionMode {
+    UwpUserInteractionMode_Mouse = 0,
+    UwpUserInteractionMode_Touch = 1
+} UwpUserInteractionMode;
+
 /* Wine IDL IIDs for ApplicationView */
 static const GUID SCARLETT_IID_IApplicationView =
     { 0xD222D519u, 0x4361u, 0x451Eu, { 0x96u, 0xC4u, 0x60u, 0xF4u, 0xF9u, 0x74u, 0x2Du, 0xB0u } };
@@ -419,6 +424,12 @@ static const GUID SCARLETT_IID_IApplicationViewInteropStatics =
     { 0xC446FB5Du, 0x4793u, 0x4896u, { 0xA8u, 0xE2u, 0xBEu, 0x57u, 0xA8u, 0xBBu, 0x0Fu, 0x50u } };
 static const GUID SCARLETT_IID_IApplicationViewTitleBar =
     { 0x00924AC0u, 0x932Bu, 0x4A6Bu, { 0x9Cu, 0x4Bu, 0xDCu, 0x38u, 0xC8u, 0x24u, 0x78u, 0xCEu } };
+/* IUIViewSettings: {C63657F6-8850-470D-88F8-455E16EA2C26} */
+static const GUID SCARLETT_IID_IUIViewSettings =
+    { 0xC63657F6u, 0x8850u, 0x470Du, { 0x88u, 0xF8u, 0x45u, 0x5Eu, 0x16u, 0xEAu, 0x2Cu, 0x26u } };
+/* IUIViewSettingsStatics: {595C97A5-F8F6-41CF-B0FB-AACDB81FD5F6} */
+static const GUID SCARLETT_IID_IUIViewSettingsStatics =
+    { 0x595C97A5u, 0xF8F6u, 0x41CFu, { 0xB0u, 0xFBu, 0xAAu, 0xCDu, 0xB8u, 0x1Fu, 0xD5u, 0xF6u } };
 
 typedef struct UwpIApplicationViewTitleBar UwpIApplicationViewTitleBar;
 typedef struct UwpIApplicationViewTitleBarVtbl {
@@ -616,6 +627,34 @@ typedef struct UwpIApplicationViewInteropStaticsVtbl {
 } UwpIApplicationViewInteropStaticsVtbl;
 struct UwpIApplicationViewInteropStatics {
     const UwpIApplicationViewInteropStaticsVtbl *lpVtbl;
+};
+
+typedef struct UwpIUIViewSettings UwpIUIViewSettings;
+typedef struct UwpIUIViewSettingsVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(UwpIUIViewSettings *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(UwpIUIViewSettings *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(UwpIUIViewSettings *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(UwpIUIViewSettings *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(UwpIUIViewSettings *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(UwpIUIViewSettings *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *get_UserInteractionMode)(UwpIUIViewSettings *This, UwpUserInteractionMode *value);
+} UwpIUIViewSettingsVtbl;
+struct UwpIUIViewSettings {
+    const UwpIUIViewSettingsVtbl *lpVtbl;
+};
+
+typedef struct UwpIUIViewSettingsStatics UwpIUIViewSettingsStatics;
+typedef struct UwpIUIViewSettingsStaticsVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(UwpIUIViewSettingsStatics *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(UwpIUIViewSettingsStatics *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(UwpIUIViewSettingsStatics *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(UwpIUIViewSettingsStatics *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(UwpIUIViewSettingsStatics *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(UwpIUIViewSettingsStatics *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *GetForCurrentView)(UwpIUIViewSettingsStatics *This, UwpIUIViewSettings **current);
+} UwpIUIViewSettingsStaticsVtbl;
+struct UwpIUIViewSettingsStatics {
+    const UwpIUIViewSettingsStaticsVtbl *lpVtbl;
 };
 
 /* ============================================================================
@@ -821,6 +860,58 @@ struct UwpIMouseDeviceStatics {
 };
 
 /* ============================================================================
+ * 5b. Windows.UI.Input.PointerVisualizationSettings
+ * ============================================================================ */
+
+/* IPointerVisualizationSettingsStatics: {68870EDB-165B-4214-B4F3-584ECA8C8A69} */
+static const GUID SCARLETT_IID_IPointerVisualizationSettingsStatics =
+    { 0x68870EDBu, 0x165Bu, 0x4214u, { 0xB4u, 0xF3u, 0x58u, 0x4Eu, 0xCAu, 0x8Cu, 0x8Au, 0x69u } };
+
+/* IPointerVisualizationSettings: {4D1E6461-84F7-499D-BD91-2A36E2B7AAA2} (Windows 10 default) */
+static const GUID SCARLETT_IID_IPointerVisualizationSettings =
+    { 0x4D1E6461u, 0x84F7u, 0x499Du, { 0xBDu, 0x91u, 0x2Au, 0x36u, 0xE2u, 0xB7u, 0xAAu, 0xA2u } };
+
+/* IPointerVisualizationSettings (Win8.1 legacy IID): {3CAAE965-564B-49C6-A446-268E976372F2} */
+static const GUID SCARLETT_IID_IPointerVisualizationSettings_Win81 =
+    { 0x3CAAE965u, 0x564Bu, 0x49C6u, { 0xA4u, 0x46u, 0x26u, 0x8Eu, 0x97u, 0x63u, 0x72u, 0xF2u } };
+
+typedef struct UwpIPointerVisualizationSettings UwpIPointerVisualizationSettings;
+typedef struct UwpIPointerVisualizationSettingsVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(UwpIPointerVisualizationSettings *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(UwpIPointerVisualizationSettings *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(UwpIPointerVisualizationSettings *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(UwpIPointerVisualizationSettings *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(UwpIPointerVisualizationSettings *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(UwpIPointerVisualizationSettings *This, TrustLevel *trustLevel);
+    /* Slot 6 (+0x30): put_IsContactFeedbackEnabled */
+    HRESULT (STDMETHODCALLTYPE *put_IsContactFeedbackEnabled)(UwpIPointerVisualizationSettings *This, boolean value);
+    /* Slot 7 (+0x38): get_IsContactFeedbackEnabled */
+    HRESULT (STDMETHODCALLTYPE *get_IsContactFeedbackEnabled)(UwpIPointerVisualizationSettings *This, boolean *value);
+    /* Slot 8 (+0x40): put_IsBarrelButtonFeedbackEnabled */
+    HRESULT (STDMETHODCALLTYPE *put_IsBarrelButtonFeedbackEnabled)(UwpIPointerVisualizationSettings *This, boolean value);
+    /* Slot 9 (+0x48): get_IsBarrelButtonFeedbackEnabled */
+    HRESULT (STDMETHODCALLTYPE *get_IsBarrelButtonFeedbackEnabled)(UwpIPointerVisualizationSettings *This, boolean *value);
+} UwpIPointerVisualizationSettingsVtbl;
+struct UwpIPointerVisualizationSettings {
+    const UwpIPointerVisualizationSettingsVtbl *lpVtbl;
+};
+
+typedef struct UwpIPointerVisualizationSettingsStatics UwpIPointerVisualizationSettingsStatics;
+typedef struct UwpIPointerVisualizationSettingsStaticsVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(UwpIPointerVisualizationSettingsStatics *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(UwpIPointerVisualizationSettingsStatics *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(UwpIPointerVisualizationSettingsStatics *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(UwpIPointerVisualizationSettingsStatics *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(UwpIPointerVisualizationSettingsStatics *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(UwpIPointerVisualizationSettingsStatics *This, TrustLevel *trustLevel);
+    /* Slot 6 (+0x30): GetForCurrentView */
+    HRESULT (STDMETHODCALLTYPE *GetForCurrentView)(UwpIPointerVisualizationSettingsStatics *This, UwpIPointerVisualizationSettings **current);
+} UwpIPointerVisualizationSettingsStaticsVtbl;
+struct UwpIPointerVisualizationSettingsStatics {
+    const UwpIPointerVisualizationSettingsStaticsVtbl *lpVtbl;
+};
+
+/* ============================================================================
  * 6. Windows.System.Display.DisplayRequest
  * ============================================================================ */
 
@@ -914,6 +1005,10 @@ static const GUID SCARLETT_IID_IHdmiDisplayMode =
 /* IHdmiDisplayMode2: {07CD4E9F-4B3C-42B8-84E7-895368718AF2} */
 static const GUID SCARLETT_IID_IHdmiDisplayMode2 =
     { 0x07CD4E9Fu, 0x4B3Cu, 0x42B8u, { 0x84u, 0xE7u, 0x89u, 0x53u, 0x68u, 0x71u, 0x8Au, 0xF2u } };
+
+/* IVectorView<HdmiDisplayMode*>: {7D0E7C64-DF0E-539A-AB5F-3C260026C5CE} */
+static const GUID SCARLETT_IID_IVectorView_HdmiDisplayMode =
+    { 0x7D0E7C64u, 0xDF0Eu, 0x539Au, { 0xABu, 0x5Fu, 0x3Cu, 0x26u, 0x00u, 0x26u, 0xC5u, 0xCEu } };
 
 typedef struct UwpIHdmiDisplayMode UwpIHdmiDisplayMode;
 typedef struct UwpIHdmiDisplayModeVtbl {

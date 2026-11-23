@@ -124,7 +124,7 @@ static HRESULT STDMETHODCALLTYPE ccf_CreateCursor(UwpICoreCursorFactory *This, U
     (void)This;
     if (!cursor) return E_POINTER;
     *cursor = NULL;
-    if (type < UwpCoreCursorType_Arrow || type > UwpCoreCursorType_Person) {
+    if ((int)type < (int)UwpCoreCursorType_Arrow || (int)type > (int)UwpCoreCursorType_Person) {
         return E_INVALIDARG;
     }
     cur = (core_cursor_obj_t *)uwp_ui_alloc(sizeof(core_cursor_obj_t));
@@ -306,9 +306,13 @@ static ULONG STDMETHODCALLTYPE md_Release(UwpIMouseDevice *This) {
     ULONG ref = uwp_ui_atomic_dec(&md->ref_count);
     if (ref == 0) {
         uwp_ui_lock_acquire(&g_md_lock);
-        if (g_md_singleton == md) g_md_singleton = NULL;
+        if (uwp_ui_atomic_load(&md->ref_count) == 0) {
+            if (g_md_singleton == md) g_md_singleton = NULL;
+            uwp_ui_lock_release(&g_md_lock);
+            uwp_ui_free(md);
+            return 0;
+        }
         uwp_ui_lock_release(&g_md_lock);
-        uwp_ui_free(md);
     }
     return ref;
 }
@@ -479,4 +483,248 @@ HRESULT uwp_winrt_ui_notify_mouse_moved(int32_t dx, int32_t dy) {
     mea_Release(&args->iface);
     md_Release(&md->iface);
     return S_OK;
+}
+
+/* ============================================================================
+ * Windows.UI.Input.PointerVisualizationSettings
+ * ============================================================================ */
+
+typedef struct pointer_vis_obj_s {
+    UwpIPointerVisualizationSettings iface;
+    volatile int32_t                 ref_count;
+    boolean                          is_contact_feedback_enabled;
+    boolean                          is_barrel_button_feedback_enabled;
+} pointer_vis_obj_t;
+
+typedef struct pointer_vis_statics_s {
+    UwpIPointerVisualizationSettingsStatics statics_iface;
+    IActivationFactory                      act_iface;
+    volatile int32_t                        ref_count;
+} pointer_vis_statics_t;
+
+static pointer_vis_obj_t *g_pvs_singleton = NULL;
+static uwp_ui_lock_t      g_pvs_lock = UWP_UI_LOCK_INIT;
+
+static HRESULT STDMETHODCALLTYPE pvs_QueryInterface(UwpIPointerVisualizationSettings *This, REFIID riid, void **ppv) {
+    pointer_vis_obj_t *cur = CONTAINING_RECORD(This, pointer_vis_obj_t, iface);
+    if (!riid || !ppv) return E_INVALIDARG;
+    *ppv = NULL;
+    if (IsEqualGUID(riid, &SCARLETT_IID_IUnknown) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IInspectable) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IAgileObject) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IPointerVisualizationSettings) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IPointerVisualizationSettings_Win81)) {
+        *ppv = &cur->iface;
+        uwp_ui_atomic_inc(&cur->ref_count);
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE pvs_AddRef(UwpIPointerVisualizationSettings *This) {
+    return uwp_ui_atomic_inc(&CONTAINING_RECORD(This, pointer_vis_obj_t, iface)->ref_count);
+}
+
+static ULONG STDMETHODCALLTYPE pvs_Release(UwpIPointerVisualizationSettings *This) {
+    pointer_vis_obj_t *cur = CONTAINING_RECORD(This, pointer_vis_obj_t, iface);
+    ULONG ref = uwp_ui_atomic_dec(&cur->ref_count);
+    if (ref == 0) {
+        uwp_ui_lock_acquire(&g_pvs_lock);
+        if (g_pvs_singleton == cur && uwp_ui_atomic_load(&cur->ref_count) == 0) {
+            g_pvs_singleton = NULL;
+        }
+        uwp_ui_lock_release(&g_pvs_lock);
+        uwp_ui_free(cur);
+    }
+    return ref;
+}
+
+static HRESULT STDMETHODCALLTYPE pvs_GetIids(UwpIPointerVisualizationSettings *This, ULONG *c, IID **iids) {
+    (void)This;
+    const GUID list[] = {
+        SCARLETT_IID_IPointerVisualizationSettings,
+        SCARLETT_IID_IPointerVisualizationSettings_Win81
+    };
+    return uwp_ui_get_iids(list, 2, c, iids);
+}
+
+static HRESULT STDMETHODCALLTYPE pvs_GetRuntimeClassName(UwpIPointerVisualizationSettings *This, HSTRING *name) {
+    (void)This;
+    return uwp_ui_get_runtime_class_name(L"Windows.UI.Input.PointerVisualizationSettings", name);
+}
+
+static HRESULT STDMETHODCALLTYPE pvs_GetTrustLevel(UwpIPointerVisualizationSettings *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE pvs_put_IsContactFeedbackEnabled(UwpIPointerVisualizationSettings *This, boolean value) {
+    pointer_vis_obj_t *cur = CONTAINING_RECORD(This, pointer_vis_obj_t, iface);
+    cur->is_contact_feedback_enabled = value ? 1 : 0;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE pvs_get_IsContactFeedbackEnabled(UwpIPointerVisualizationSettings *This, boolean *value) {
+    pointer_vis_obj_t *cur = CONTAINING_RECORD(This, pointer_vis_obj_t, iface);
+    if (!value) return E_POINTER;
+    *value = cur->is_contact_feedback_enabled;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE pvs_put_IsBarrelButtonFeedbackEnabled(UwpIPointerVisualizationSettings *This, boolean value) {
+    pointer_vis_obj_t *cur = CONTAINING_RECORD(This, pointer_vis_obj_t, iface);
+    cur->is_barrel_button_feedback_enabled = value ? 1 : 0;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE pvs_get_IsBarrelButtonFeedbackEnabled(UwpIPointerVisualizationSettings *This, boolean *value) {
+    pointer_vis_obj_t *cur = CONTAINING_RECORD(This, pointer_vis_obj_t, iface);
+    if (!value) return E_POINTER;
+    *value = cur->is_barrel_button_feedback_enabled;
+    return S_OK;
+}
+
+static const UwpIPointerVisualizationSettingsVtbl g_pvs_vtbl = {
+    pvs_QueryInterface, pvs_AddRef, pvs_Release,
+    pvs_GetIids, pvs_GetRuntimeClassName, pvs_GetTrustLevel,
+    pvs_put_IsContactFeedbackEnabled,
+    pvs_get_IsContactFeedbackEnabled,
+    pvs_put_IsBarrelButtonFeedbackEnabled,
+    pvs_get_IsBarrelButtonFeedbackEnabled
+};
+
+static pointer_vis_obj_t *pvs_get_or_create_instance(void) {
+    pointer_vis_obj_t *obj;
+    uwp_ui_lock_acquire(&g_pvs_lock);
+    if (!g_pvs_singleton) {
+        obj = (pointer_vis_obj_t *)uwp_ui_alloc(sizeof(pointer_vis_obj_t));
+        if (obj) {
+            obj->iface.lpVtbl = &g_pvs_vtbl;
+            obj->ref_count = 1;
+            obj->is_contact_feedback_enabled = TRUE;
+            obj->is_barrel_button_feedback_enabled = TRUE;
+            g_pvs_singleton = obj;
+        }
+    } else {
+        obj = g_pvs_singleton;
+        uwp_ui_atomic_inc(&obj->ref_count);
+    }
+    uwp_ui_lock_release(&g_pvs_lock);
+    return obj;
+}
+
+static HRESULT pvs_statics_qi(pointer_vis_statics_t *fac, REFIID riid, void **ppv) {
+    if (!riid || !ppv) return E_INVALIDARG;
+    *ppv = NULL;
+    if (IsEqualGUID(riid, &SCARLETT_IID_IUnknown) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IInspectable) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IAgileObject) ||
+        IsEqualGUID(riid, &SCARLETT_IID_IPointerVisualizationSettingsStatics)) {
+        *ppv = &fac->statics_iface;
+    } else if (IsEqualGUID(riid, &SCARLETT_IID_IActivationFactory)) {
+        *ppv = &fac->act_iface;
+    } else {
+        return E_NOINTERFACE;
+    }
+    uwp_ui_atomic_inc(&fac->ref_count);
+    return S_OK;
+}
+
+static HRESULT pvs_statics_get_iids(ULONG *c, IID **iids) {
+    const GUID list[] = { SCARLETT_IID_IPointerVisualizationSettingsStatics, SCARLETT_IID_IActivationFactory };
+    return uwp_ui_get_iids(list, 2, c, iids);
+}
+
+static HRESULT STDMETHODCALLTYPE pvss_QueryInterface(UwpIPointerVisualizationSettingsStatics *This, REFIID riid, void **ppv) {
+    return pvs_statics_qi(CONTAINING_RECORD(This, pointer_vis_statics_t, statics_iface), riid, ppv);
+}
+static ULONG STDMETHODCALLTYPE pvss_AddRef(UwpIPointerVisualizationSettingsStatics *This) {
+    return uwp_ui_atomic_inc(&CONTAINING_RECORD(This, pointer_vis_statics_t, statics_iface)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE pvss_Release(UwpIPointerVisualizationSettingsStatics *This) {
+    pointer_vis_statics_t *fac = CONTAINING_RECORD(This, pointer_vis_statics_t, statics_iface);
+    ULONG ref = uwp_ui_atomic_dec(&fac->ref_count);
+    if (ref == 0) uwp_ui_free(fac);
+    return ref;
+}
+static HRESULT STDMETHODCALLTYPE pvss_GetIids(UwpIPointerVisualizationSettingsStatics *This, ULONG *c, IID **iids) {
+    (void)This;
+    return pvs_statics_get_iids(c, iids);
+}
+static HRESULT STDMETHODCALLTYPE pvss_GetRuntimeClassName(UwpIPointerVisualizationSettingsStatics *This, HSTRING *name) {
+    (void)This;
+    return uwp_ui_get_runtime_class_name(L"Windows.UI.Input.PointerVisualizationSettings", name);
+}
+static HRESULT STDMETHODCALLTYPE pvss_GetTrustLevel(UwpIPointerVisualizationSettingsStatics *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE pvss_GetForCurrentView(UwpIPointerVisualizationSettingsStatics *This, UwpIPointerVisualizationSettings **current) {
+    pointer_vis_obj_t *obj;
+    (void)This;
+    if (!current) return E_POINTER;
+    obj = pvs_get_or_create_instance();
+    if (!obj) return E_OUTOFMEMORY;
+    *current = &obj->iface;
+    return S_OK;
+}
+
+static const UwpIPointerVisualizationSettingsStaticsVtbl g_pvss_vtbl = {
+    pvss_QueryInterface, pvss_AddRef, pvss_Release,
+    pvss_GetIids, pvss_GetRuntimeClassName, pvss_GetTrustLevel,
+    pvss_GetForCurrentView
+};
+
+static HRESULT STDMETHODCALLTYPE pvsa_QueryInterface(IActivationFactory *This, REFIID riid, void **ppv) {
+    return pvs_statics_qi(CONTAINING_RECORD(This, pointer_vis_statics_t, act_iface), riid, ppv);
+}
+static ULONG STDMETHODCALLTYPE pvsa_AddRef(IActivationFactory *This) {
+    return uwp_ui_atomic_inc(&CONTAINING_RECORD(This, pointer_vis_statics_t, act_iface)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE pvsa_Release(IActivationFactory *This) {
+    pointer_vis_statics_t *fac = CONTAINING_RECORD(This, pointer_vis_statics_t, act_iface);
+    ULONG ref = uwp_ui_atomic_dec(&fac->ref_count);
+    if (ref == 0) uwp_ui_free(fac);
+    return ref;
+}
+static HRESULT STDMETHODCALLTYPE pvsa_GetIids(IActivationFactory *This, ULONG *c, IID **iids) {
+    (void)This;
+    return pvs_statics_get_iids(c, iids);
+}
+static HRESULT STDMETHODCALLTYPE pvsa_GetRuntimeClassName(IActivationFactory *This, HSTRING *name) {
+    (void)This;
+    return uwp_ui_get_runtime_class_name(L"Windows.UI.Input.PointerVisualizationSettings", name);
+}
+static HRESULT STDMETHODCALLTYPE pvsa_GetTrustLevel(IActivationFactory *This, TrustLevel *tl) {
+    (void)This;
+    if (!tl) return E_POINTER;
+    *tl = BaseTrust;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE pvsa_ActivateInstance(IActivationFactory *This, IInspectable **instance) {
+    (void)This;
+    if (instance) *instance = NULL;
+    return uwp_ui_unimpl("PointerVisualizationSettingsFactory", "ActivateInstance");
+}
+
+static const IActivationFactoryVtbl g_pvsa_vtbl = {
+    pvsa_QueryInterface, pvsa_AddRef, pvsa_Release,
+    pvsa_GetIids, pvsa_GetRuntimeClassName, pvsa_GetTrustLevel,
+    pvsa_ActivateInstance
+};
+
+HRESULT uwp_ui_pointer_vis_get_factory(REFIID iid, void **out_factory) {
+    pointer_vis_statics_t *fac = (pointer_vis_statics_t *)uwp_ui_alloc(sizeof(pointer_vis_statics_t));
+    if (!fac) return E_OUTOFMEMORY;
+    fac->statics_iface.lpVtbl = &g_pvss_vtbl;
+    fac->act_iface.lpVtbl = &g_pvsa_vtbl;
+    fac->ref_count = 1;
+    HRESULT hr = pvs_statics_qi(fac, iid, out_factory);
+    uwp_ui_atomic_dec(&fac->ref_count);
+    if (FAILED(hr)) uwp_ui_free(fac);
+    return hr;
 }

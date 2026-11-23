@@ -469,12 +469,22 @@ static const GUID UWP_IID_IFrameworkView =
     { 0xFAAB5CD0u, 0x8924u, 0x45ACu, { 0xADu, 0x0Fu, 0xA0u, 0x8Fu, 0xAEu, 0x5Du, 0x03u, 0x24u } };
 static const GUID UWP_IID_IFrameworkViewSource =
     { 0xCD770614u, 0x65C4u, 0x426Cu, { 0x94u, 0x94u, 0x34u, 0xFCu, 0x43u, 0x55u, 0x48u, 0x62u } };
+static const GUID UWP_IID_IVectorView_CoreApplicationView =
+    { 0xDE9E16C4u, 0x1B7Cu, 0x5126u, { 0xB1u, 0xD8u, 0x7Cu, 0xD0u, 0x4Fu, 0x13u, 0xBDu, 0x08u } };
+static const GUID UWP_IID_IIterable_CoreApplicationView =
+    { 0x32BC12D1u, 0x2653u, 0x5A41u, { 0xA5u, 0x5Eu, 0x88u, 0xA1u, 0x2Au, 0xF2u, 0x02u, 0x6Au } };
+static const GUID UWP_IID_IIterator_CoreApplicationView =
+    { 0x4F5F6944u, 0x264Bu, 0x5868u, { 0x80u, 0x9Eu, 0xC7u, 0xACu, 0x1Au, 0xC5u, 0xEDu, 0xADu } };
 
 /* Windows.ApplicationModel / Activation */
 static const GUID UWP_IID_IActivatedEventArgs =
     { 0xCF651713u, 0xCD08u, 0x4FD8u, { 0xB6u, 0x97u, 0xA2u, 0x81u, 0xB6u, 0x54u, 0x4Eu, 0x2Eu } };
 static const GUID UWP_IID_ILaunchActivatedEventArgs =
     { 0xFBC93E26u, 0xA14Au, 0x4B4Fu, { 0x82u, 0xB0u, 0x33u, 0xBEu, 0xD9u, 0x20u, 0xAFu, 0x52u } };
+static const GUID UWP_IID_IPrelaunchActivatedEventArgs =
+    { 0x0C44717Bu, 0x19F7u, 0x48D6u, { 0xB0u, 0x46u, 0xCFu, 0x22u, 0x82u, 0x6Eu, 0xAAu, 0x74u } };
+static const GUID UWP_IID_IApplicationViewActivatedEventArgs =
+    { 0x930CEF4Bu, 0xB829u, 0x40FCu, { 0x88u, 0xF4u, 0x85u, 0x13u, 0xE8u, 0xA6u, 0x47u, 0x38u } };
 static const GUID UWP_IID_ISplashScreen =
     { 0xCA4D975Cu, 0xD4D6u, 0x43F0u, { 0x97u, 0xC0u, 0x08u, 0x33u, 0xC6u, 0x39u, 0x1Cu, 0x24u } };
 static const GUID UWP_IID_ISuspendingEventArgs =
@@ -1141,6 +1151,24 @@ struct UwpILaunchActivatedEventArgs {
     const UwpILaunchActivatedEventArgsVtbl *lpVtbl;
 };
 
+typedef struct UwpIPrelaunchActivatedEventArgs UwpIPrelaunchActivatedEventArgs;
+typedef struct UwpIPrelaunchActivatedEventArgsVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpIPrelaunchActivatedEventArgs);
+    HRESULT (UWP_CALL *get_PrelaunchActivated)(UwpIPrelaunchActivatedEventArgs *This, uint8_t *value);
+} UwpIPrelaunchActivatedEventArgsVtbl;
+struct UwpIPrelaunchActivatedEventArgs {
+    const UwpIPrelaunchActivatedEventArgsVtbl *lpVtbl;
+};
+
+typedef struct UwpIApplicationViewActivatedEventArgs UwpIApplicationViewActivatedEventArgs;
+typedef struct UwpIApplicationViewActivatedEventArgsVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpIApplicationViewActivatedEventArgs);
+    HRESULT (UWP_CALL *get_CurrentlyShownApplicationViewId)(UwpIApplicationViewActivatedEventArgs *This, int32_t *value);
+} UwpIApplicationViewActivatedEventArgsVtbl;
+struct UwpIApplicationViewActivatedEventArgs {
+    const UwpIApplicationViewActivatedEventArgsVtbl *lpVtbl;
+};
+
 typedef struct UwpISuspendingDeferral UwpISuspendingDeferral;
 typedef struct UwpISuspendingDeferralVtbl {
     UWP_IINSPECTABLE_VTBL_HEAD(UwpISuspendingDeferral);
@@ -1277,6 +1305,7 @@ HRESULT uwp_event_list_add(uwp_event_list_t *list, UwpTypedEventHandler *handler
 HRESULT uwp_event_list_remove(uwp_event_list_t *list, UwpEventRegistrationToken token);
 void    uwp_event_list_invoke(uwp_event_list_t *list, void *sender, void *args);
 size_t  uwp_event_list_count(uwp_event_list_t *list);
+HRESULT uwp_alloc_iids(const GUID *src, ULONG count, ULONG *out_count, IID **out_iids);
 
 typedef struct uwp_pointer_event_params_s {
     uint32_t pointer_id;

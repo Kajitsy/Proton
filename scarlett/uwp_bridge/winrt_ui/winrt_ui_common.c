@@ -491,6 +491,9 @@ HRESULT uwp_winrt_ui_get_activation_factory(const wchar_t *class_name, REFIID ii
     if (wcscmp(class_name, L"Windows.UI.ViewManagement.ApplicationView") == 0) {
         return uwp_ui_app_view_get_factory(iid, out_factory);
     }
+    if (wcscmp(class_name, L"Windows.UI.ViewManagement.UIViewSettings") == 0) {
+        return uwp_ui_view_settings_get_factory(iid, out_factory);
+    }
     if (wcscmp(class_name, L"Windows.UI.Core.SystemNavigationManager") == 0) {
         return uwp_ui_sys_nav_get_factory(iid, out_factory);
     }
@@ -499,6 +502,9 @@ HRESULT uwp_winrt_ui_get_activation_factory(const wchar_t *class_name, REFIID ii
     }
     if (wcscmp(class_name, L"Windows.Devices.Input.MouseDevice") == 0) {
         return uwp_ui_mouse_device_get_factory(iid, out_factory);
+    }
+    if (wcscmp(class_name, L"Windows.UI.Input.PointerVisualizationSettings") == 0) {
+        return uwp_ui_pointer_vis_get_factory(iid, out_factory);
     }
     if (wcscmp(class_name, L"Windows.System.Display.DisplayRequest") == 0) {
         return uwp_ui_display_request_get_factory(iid, out_factory);

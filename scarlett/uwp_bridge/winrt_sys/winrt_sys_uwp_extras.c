@@ -57,13 +57,9 @@ static const GUID WINRT_IID_IIterable_AccessListEntry =
 static const GUID WINRT_IID_IIterator_AccessListEntry =
     { 0x3636826cu, 0x1149u, 0x5b6eu, { 0xb7u, 0xc7u, 0x07u, 0xbau, 0x14u, 0x0eu, 0x0du, 0x1au } };
 
-/* CryptographicBuffer & IBuffer */
+/* CryptographicBuffer */
 static const GUID WINRT_IID_ICryptographicBufferStatics =
     { 0x320b7e22u, 0x3cb0u, 0x4cdfu, { 0x86u, 0x63u, 0x1du, 0x28u, 0x91u, 0x00u, 0x65u, 0xebu } };
-static const GUID WINRT_IID_IBuffer =
-    { 0x905a0fe0u, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } };
-static const GUID WINRT_IID_IBufferByteAccess =
-    { 0x905a0fefu, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } };
 
 /* PopupMenu & UICommand */
 static const GUID WINRT_IID_IPopupMenu =
@@ -1747,7 +1743,7 @@ static const WinrtBufferByteAccessVtbl g_ba_vtbl = {
     ba_qi, ba_addref, ba_release, ba_buffer
 };
 
-static HRESULT create_winrt_buffer(const uint8_t *bytes, uint32_t len, void **out_buf) {
+HRESULT winrt_sys_create_buffer(const uint8_t *bytes, uint32_t len, void **out_buf) {
     if (!out_buf) return E_POINTER;
     *out_buf = NULL;
     WinrtBufferObj *b = (WinrtBufferObj *)winrt_sys_alloc(sizeof(*b));
@@ -1767,7 +1763,7 @@ static HRESULT create_winrt_buffer(const uint8_t *bytes, uint32_t len, void **ou
     return S_OK;
 }
 
-static HRESULT read_winrt_buffer(void *buf_iface, uint8_t **out_ptr, uint32_t *out_len) {
+HRESULT winrt_sys_read_buffer(void *buf_iface, uint8_t **out_ptr, uint32_t *out_len) {
     if (!out_ptr || !out_len) return E_POINTER;
     *out_ptr = NULL;
     *out_len = 0;
@@ -1788,6 +1784,14 @@ static HRESULT read_winrt_buffer(void *buf_iface, uint8_t **out_ptr, uint32_t *o
     *out_ptr = ptr;
     *out_len = len;
     return S_OK;
+}
+
+static HRESULT create_winrt_buffer(const uint8_t *bytes, uint32_t len, void **out_buf) {
+    return winrt_sys_create_buffer(bytes, len, out_buf);
+}
+
+static HRESULT read_winrt_buffer(void *buf_iface, uint8_t **out_ptr, uint32_t *out_len) {
+    return winrt_sys_read_buffer(buf_iface, out_ptr, out_len);
 }
 
 static uint64_t g_prng_state = 0x9e3779b97f4a7c15ULL;
@@ -2883,7 +2887,9 @@ static HRESULT STDMETHODCALLTYPE tpa_put_completed(void *This, void *handler) {
     }
     LeaveCriticalSection(&a->lock);
     if (to_call) {
+        tpa_addref(&a->lpVtblAction);
         to_call->lpVtbl->Invoke(to_call, &a->lpVtblAction, st);
+        tpa_release(&a->lpVtblAction);
         to_call->lpVtbl->Release(to_call);
     }
     return S_OK;
@@ -2901,6 +2907,7 @@ static HRESULT STDMETHODCALLTYPE tpa_get_results(void *This) {
     ThreadPoolActionObj *a = WINRT_SYS_FROM(ThreadPoolActionObj, lpVtblAction, This);
     EnterCriticalSection(&a->lock);
     HRESULT hr = a->err_hr;
+    if (a->status == Canceled && SUCCEEDED(hr)) hr = E_ABORT;
     LeaveCriticalSection(&a->lock);
     return hr;
 }
@@ -2978,7 +2985,9 @@ static void tp_run_worker_body(ThreadPoolActionObj *a) {
     LeaveCriticalSection(&a->lock);
 
     if (to_call) {
+        tpa_addref(&a->lpVtblAction);
         to_call->lpVtbl->Invoke(to_call, &a->lpVtblAction, st);
+        tpa_release(&a->lpVtblAction);
         to_call->lpVtbl->Release(to_call);
     }
     tp_act_release_impl(a);
@@ -2986,7 +2995,39 @@ static void tp_run_worker_body(ThreadPoolActionObj *a) {
 
 #ifdef _WIN32
 static DWORD WINAPI tp_win32_thread(LPVOID param) {
+    typedef HRESULT (WINAPI *RoInitFn)(int);
+    typedef void (WINAPI *RoUninitFn)(void);
+    typedef HRESULT (WINAPI *CoInitExFn)(LPVOID, DWORD);
+    typedef void (WINAPI *CoUninitFn)(void);
+    HMODULE hComb = LoadLibraryA("combase.dll");
+    HMODULE hOle = NULL;
+    int did_ro = 0;
+    int did_co = 0;
+    if (hComb) {
+        RoInitFn pRoInit = (RoInitFn)(void *)GetProcAddress(hComb, "RoInitialize");
+        if (pRoInit && SUCCEEDED(pRoInit(1 /* RO_INIT_MULTITHREADED */))) {
+            did_ro = 1;
+        }
+    }
+    if (!did_ro) {
+        hOle = LoadLibraryA("ole32.dll");
+        if (hOle) {
+            CoInitExFn pCoInit = (CoInitExFn)(void *)GetProcAddress(hOle, "CoInitializeEx");
+            if (pCoInit && SUCCEEDED(pCoInit(NULL, 0 /* COINIT_MULTITHREADED */))) {
+                did_co = 1;
+            }
+        }
+    }
     tp_run_worker_body((ThreadPoolActionObj *)param);
+    if (did_ro && hComb) {
+        RoUninitFn pRoUninit = (RoUninitFn)(void *)GetProcAddress(hComb, "RoUninitialize");
+        if (pRoUninit) pRoUninit();
+    } else if (did_co && hOle) {
+        CoUninitFn pCoUninit = (CoUninitFn)(void *)GetProcAddress(hOle, "CoUninitialize");
+        if (pCoUninit) pCoUninit();
+    }
+    if (hOle) FreeLibrary(hOle);
+    if (hComb) FreeLibrary(hComb);
     return 0;
 }
 #else
@@ -3115,4 +3156,298 @@ static ThreadPoolFactory g_tp_factory = { &g_tp_act_vtbl, &g_tp_stat_vtbl };
 
 HRESULT winrt_sys_get_thread_pool_factory(REFIID iid, void **out_factory) {
     return tp_fac_qi(&g_tp_factory.lpVtblAct, iid, out_factory);
+}
+
+/* ============================================================================
+ * Windows.System.Threading.ThreadPoolTimer
+ * ============================================================================ */
+
+static const GUID WINRT_IID_IThreadPoolTimerStatics =
+    { 0x1a8a9d02u, 0xe482u, 0x461bu, { 0xb8u, 0xc7u, 0x8eu, 0xfau, 0xd1u, 0xccu, 0xe5u, 0x90u } };
+static const GUID WINRT_IID_IThreadPoolTimer =
+    { 0x594ebe78u, 0x55eau, 0x4a88u, { 0xa5u, 0x0du, 0x34u, 0x02u, 0xaeu, 0x1fu, 0x9cu, 0xf2u } };
+
+typedef struct WinrtTimerHandlerObj {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *Invoke)(void *This, void *timer);
+    } *lpVtbl;
+} WinrtTimerHandlerObj;
+
+typedef struct ThreadPoolTimerObj {
+    const struct {
+        HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppv);
+        ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+        ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+        HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *c, IID **i);
+        HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *n);
+        HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *tl);
+        HRESULT (STDMETHODCALLTYPE *get_Period)(void *This, int64_t *val);
+        HRESULT (STDMETHODCALLTYPE *get_Delay)(void *This, int64_t *val);
+        HRESULT (STDMETHODCALLTYPE *Cancel)(void *This);
+    } *lpVtbl;
+    volatile LONG ref_count;
+    CRITICAL_SECTION lock;
+    int periodic;
+    int64_t period;
+    int64_t delay;
+    volatile LONG canceled;
+    WinrtTimerHandlerObj *elapsed;
+    WinrtTimerHandlerObj *destroyed;
+#ifdef _WIN32
+    HANDLE cancel_event;
+#else
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+#endif
+} ThreadPoolTimerObj;
+
+static HRESULT STDMETHODCALLTYPE tpt_qi(void *This, REFIID riid, void **ppv) {
+    ThreadPoolTimerObj *t = (ThreadPoolTimerObj *)This;
+    if (!ppv) return E_POINTER;
+    *ppv = NULL;
+    if (!riid) return E_INVALIDARG;
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IUnknown) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IInspectable) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IThreadPoolTimer)) {
+        InterlockedIncrement(&t->ref_count);
+        *ppv = t;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE tpt_ar(void *This) {
+    return (ULONG)InterlockedIncrement(&((ThreadPoolTimerObj *)This)->ref_count);
+}
+static ULONG STDMETHODCALLTYPE tpt_rel(void *This) {
+    ThreadPoolTimerObj *t = (ThreadPoolTimerObj *)This;
+    LONG rc = InterlockedDecrement(&t->ref_count);
+    if (rc == 0) {
+        if (t->elapsed) t->elapsed->lpVtbl->Release(t->elapsed);
+        if (t->destroyed) t->destroyed->lpVtbl->Release(t->destroyed);
+#ifdef _WIN32
+        if (t->cancel_event) CloseHandle(t->cancel_event);
+#else
+        pthread_cond_destroy(&t->cv);
+        pthread_mutex_destroy(&t->mu);
+#endif
+        DeleteCriticalSection(&t->lock);
+        winrt_sys_free(t);
+    }
+    return (ULONG)rc;
+}
+static HRESULT STDMETHODCALLTYPE tpt_iids(void *This, ULONG *c, IID **i) {
+    (void)This;
+    return winrt_sys_get_iids_copy(&WINRT_IID_IThreadPoolTimer, 1, c, i);
+}
+static HRESULT STDMETHODCALLTYPE tpt_rcn(void *This, HSTRING *n) {
+    (void)This;
+    return winrt_sys_make_hstring(L"Windows.System.Threading.ThreadPoolTimer", n);
+}
+static HRESULT STDMETHODCALLTYPE tpt_tl(void *This, TrustLevel *tl) {
+    (void)This; if (!tl) return E_POINTER; *tl = BaseTrust; return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE tpt_get_period(void *This, int64_t *val) {
+    if (!val) return E_POINTER;
+    *val = ((ThreadPoolTimerObj *)This)->period;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE tpt_get_delay(void *This, int64_t *val) {
+    if (!val) return E_POINTER;
+    *val = ((ThreadPoolTimerObj *)This)->delay;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE tpt_cancel(void *This) {
+    ThreadPoolTimerObj *t = (ThreadPoolTimerObj *)This;
+    InterlockedCompareExchange(&t->canceled, 1, 0);
+#ifdef _WIN32
+    if (t->cancel_event) SetEvent(t->cancel_event);
+#else
+    pthread_mutex_lock(&t->mu);
+    pthread_cond_broadcast(&t->cv);
+    pthread_mutex_unlock(&t->mu);
+#endif
+    return S_OK;
+}
+static const void *g_tpt_vtbl[] = {
+    tpt_qi, tpt_ar, tpt_rel, tpt_iids, tpt_rcn, tpt_tl,
+    tpt_get_period, tpt_get_delay, tpt_cancel
+};
+
+static int tpt_wait_100ns(ThreadPoolTimerObj *t, int64_t ticks) {
+    if (InterlockedCompareExchange(&t->canceled, 0, 0) != 0) return 1;
+    int64_t ms = (ticks > 0) ? (ticks / 10000LL) : 0;
+#ifdef _WIN32
+    if (t->cancel_event) {
+        DWORD wr = WaitForSingleObject(t->cancel_event, (DWORD)(ms > 0x7FFFFFFELL ? 0x7FFFFFFELL : ms));
+        if (wr == WAIT_OBJECT_0) return 1;
+    } else if (ms > 0) {
+        Sleep((DWORD)ms);
+    }
+#else
+    if (ms > 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += (time_t)(ms / 1000LL);
+        ts.tv_nsec += (long)((ms % 1000LL) * 1000000LL);
+        if (ts.tv_nsec >= 1000000000L) {
+            ts.tv_sec += 1;
+            ts.tv_nsec -= 1000000000L;
+        }
+        pthread_mutex_lock(&t->mu);
+        while (InterlockedCompareExchange(&t->canceled, 0, 0) == 0) {
+            int rc = pthread_cond_timedwait(&t->cv, &t->mu, &ts);
+            if (rc != 0) break;
+        }
+        pthread_mutex_unlock(&t->mu);
+    }
+#endif
+    return InterlockedCompareExchange(&t->canceled, 0, 0) != 0;
+}
+
+static void tpt_worker_body(ThreadPoolTimerObj *t) {
+    int64_t wait_ticks = t->periodic ? t->period : t->delay;
+    for (;;) {
+        if (tpt_wait_100ns(t, wait_ticks)) break;
+        if (t->elapsed) {
+            tpt_ar(t);
+            t->elapsed->lpVtbl->Invoke(t->elapsed, t);
+            tpt_rel(t);
+        }
+        if (!t->periodic) break;
+    }
+    if (t->destroyed) {
+        tpt_ar(t);
+        t->destroyed->lpVtbl->Invoke(t->destroyed, t);
+        tpt_rel(t);
+    }
+    tpt_rel(t);
+}
+
+#ifdef _WIN32
+static DWORD WINAPI tpt_win32_thread(LPVOID param) {
+    typedef HRESULT (WINAPI *RoInitFn)(int);
+    typedef void (WINAPI *RoUninitFn)(void);
+    HMODULE hComb = LoadLibraryA("combase.dll");
+    int did_ro = 0;
+    if (hComb) {
+        RoInitFn pRoInit = (RoInitFn)(void *)GetProcAddress(hComb, "RoInitialize");
+        if (pRoInit && SUCCEEDED(pRoInit(1))) did_ro = 1;
+    }
+    tpt_worker_body((ThreadPoolTimerObj *)param);
+    if (did_ro && hComb) {
+        RoUninitFn pRoUninit = (RoUninitFn)(void *)GetProcAddress(hComb, "RoUninitialize");
+        if (pRoUninit) pRoUninit();
+    }
+    if (hComb) FreeLibrary(hComb);
+    return 0;
+}
+#else
+static void *tpt_posix_thread(void *param) {
+    tpt_worker_body((ThreadPoolTimerObj *)param);
+    return NULL;
+}
+#endif
+
+typedef struct ThreadPoolTimerFactory {
+    const WinrtActivationFactoryVtbl *lpVtblAct;
+    const void *lpVtblStatics;
+} ThreadPoolTimerFactory;
+
+static ThreadPoolTimerFactory g_tpt_factory;
+
+static HRESULT STDMETHODCALLTYPE tpt_fac_qi(void *This, REFIID riid, void **ppv) {
+    (void)This;
+    if (!ppv) return E_POINTER;
+    *ppv = NULL;
+    if (!riid) return E_INVALIDARG;
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IUnknown) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IInspectable) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IAgileObject) ||
+        winrt_sys_guid_eq(riid, &WINRT_IID_IActivationFactory)) {
+        *ppv = &g_tpt_factory.lpVtblAct;
+        return S_OK;
+    }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IThreadPoolTimerStatics)) {
+        *ppv = &g_tpt_factory.lpVtblStatics;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static HRESULT STDMETHODCALLTYPE tpt_fac_iids(void *This, ULONG *c, IID **i) {
+    (void)This;
+    const GUID list[2] = { WINRT_IID_IActivationFactory, WINRT_IID_IThreadPoolTimerStatics };
+    return winrt_sys_get_iids_copy(list, 2, c, i);
+}
+static HRESULT STDMETHODCALLTYPE tpt_fac_act(void *This, IInspectable **inst) {
+    if (inst) *inst = NULL;
+    return winrt_sys_unimplemented("ThreadPoolTimer::ActivateInstance", This);
+}
+static HRESULT tpt_create_impl(int periodic, void *handler, int64_t ticks, void *destroyed, void **out_timer) {
+    if (!out_timer) return E_POINTER;
+    *out_timer = NULL;
+    if (!handler) return E_INVALIDARG;
+    ThreadPoolTimerObj *t = (ThreadPoolTimerObj *)winrt_sys_alloc(sizeof(*t));
+    if (!t) return E_OUTOFMEMORY;
+    t->lpVtbl = (const void *)&g_tpt_vtbl;
+    t->ref_count = 2; /* caller + worker */
+    InitializeCriticalSection(&t->lock);
+    t->periodic = periodic;
+    if (periodic) t->period = ticks;
+    else t->delay = ticks;
+    t->elapsed = (WinrtTimerHandlerObj *)handler;
+    t->elapsed->lpVtbl->AddRef(t->elapsed);
+    if (destroyed) {
+        t->destroyed = (WinrtTimerHandlerObj *)destroyed;
+        t->destroyed->lpVtbl->AddRef(t->destroyed);
+    }
+#ifdef _WIN32
+    t->cancel_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    HANDLE th = CreateThread(NULL, 0, tpt_win32_thread, t, 0, NULL);
+    if (!th) {
+        tpt_rel(t);
+        tpt_rel(t);
+        return E_OUTOFMEMORY;
+    }
+    CloseHandle(th);
+#else
+    pthread_mutex_init(&t->mu, NULL);
+    pthread_cond_init(&t->cv, NULL);
+    pthread_t th;
+    if (pthread_create(&th, NULL, tpt_posix_thread, t) != 0) {
+        tpt_rel(t);
+        tpt_rel(t);
+        return E_OUTOFMEMORY;
+    }
+    pthread_detach(th);
+#endif
+    *out_timer = t;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE tpt_create_periodic(void *This, void *h, int64_t period, void **out) {
+    (void)This; return tpt_create_impl(1, h, period, NULL, out);
+}
+static HRESULT STDMETHODCALLTYPE tpt_create_timer(void *This, void *h, int64_t delay, void **out) {
+    (void)This; return tpt_create_impl(0, h, delay, NULL, out);
+}
+static HRESULT STDMETHODCALLTYPE tpt_create_periodic_comp(void *This, void *h, int64_t period, void *dest, void **out) {
+    (void)This; return tpt_create_impl(1, h, period, dest, out);
+}
+static HRESULT STDMETHODCALLTYPE tpt_create_timer_comp(void *This, void *h, int64_t delay, void *dest, void **out) {
+    (void)This; return tpt_create_impl(0, h, delay, dest, out);
+}
+static const WinrtActivationFactoryVtbl g_tpt_act_vtbl = {
+    tpt_fac_qi, tp_fac_addref, tp_fac_release, tpt_fac_iids, tp_fac_rcn, tp_fac_tl, tpt_fac_act
+};
+static const void *g_tpt_stat_vtbl[] = {
+    tpt_fac_qi, tp_fac_addref, tp_fac_release, tpt_fac_iids, tp_fac_rcn, tp_fac_tl,
+    tpt_create_periodic, tpt_create_timer, tpt_create_periodic_comp, tpt_create_timer_comp
+};
+static ThreadPoolTimerFactory g_tpt_factory = { &g_tpt_act_vtbl, (const void *)&g_tpt_stat_vtbl };
+
+HRESULT winrt_sys_get_thread_pool_timer_factory(REFIID iid, void **out_factory) {
+    return tpt_fac_qi(&g_tpt_factory.lpVtblAct, iid, out_factory);
 }

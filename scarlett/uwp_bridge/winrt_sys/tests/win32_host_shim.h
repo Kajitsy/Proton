@@ -113,6 +113,14 @@ typedef struct _CRITICAL_SECTION {
     void *impl;
 } CRITICAL_SECTION;
 
+typedef union _LARGE_INTEGER {
+    struct {
+        DWORD LowPart;
+        LONG  HighPart;
+    };
+    LONGLONG QuadPart;
+} LARGE_INTEGER;
+
 typedef struct _OVERLAPPED OVERLAPPED;
 typedef struct _SECURITY_ATTRIBUTES SECURITY_ATTRIBUTES;
 
@@ -143,6 +151,7 @@ typedef enum GET_FILEEX_INFO_LEVELS {
 #define E_FAIL                  ((HRESULT)0x80004005L)
 #define E_UNEXPECTED            ((HRESULT)0x8000FFFFL)
 #define E_INVALIDARG            ((HRESULT)0x80070057L)
+#define E_ACCESSDENIED          ((HRESULT)0x80070005L)
 #define E_OUTOFMEMORY           ((HRESULT)0x8007000EL)
 #define E_BOUNDS                ((HRESULT)0x8000000BL)
 #define E_ILLEGAL_METHOD_CALL   ((HRESULT)0x8000000EL)
@@ -173,6 +182,11 @@ typedef enum GET_FILEEX_INFO_LEVELS {
 #define OPEN_EXISTING             3u
 #define OPEN_ALWAYS               4u
 #define FILE_ATTRIBUTE_NORMAL     0x00000080u
+
+#define FILE_BEGIN                0u
+#define FILE_CURRENT              1u
+#define FILE_END                  2u
+#define MOVEFILE_REPLACE_EXISTING 0x00000001u
 
 #define HEAP_ZERO_MEMORY          0x00000008u
 #define CP_UTF8                   65001u
@@ -233,6 +247,11 @@ HANDLE WINAPI CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwSha
                           DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
 BOOL  WINAPI ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, DWORD *lpNumberOfBytesRead, OVERLAPPED *lpOverlapped);
 BOOL  WINAPI WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, DWORD *lpNumberOfBytesWritten, OVERLAPPED *lpOverlapped);
+BOOL  WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, LARGE_INTEGER *lpNewFilePointer, DWORD dwMoveMethod);
+BOOL  WINAPI GetFileSizeEx(HANDLE hFile, LARGE_INTEGER *lpFileSize);
+BOOL  WINAPI SetEndOfFile(HANDLE hFile);
+BOOL  WINAPI FlushFileBuffers(HANDLE hFile);
+BOOL  WINAPI MoveFileExW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags);
 BOOL  WINAPI CloseHandle(HANDLE hObject);
 HANDLE WINAPI FindFirstFileW(LPCWSTR lpFileName, WIN32_FIND_DATAW *lpFindFileData);
 BOOL  WINAPI FindNextFileW(HANDLE hFindFile, WIN32_FIND_DATAW *lpFindFileData);

@@ -5,6 +5,7 @@ winrt_sys_sources = files(
   'winrt_sys_gamepad.c',
   'winrt_sys_system_ui.c',
   'winrt_sys_uwp_extras.c',
+  'winrt_sys_devices.c',
 )
 
 winrt_sys_inc = include_directories('.')

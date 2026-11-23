@@ -18,8 +18,135 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <objbase.h>
 #include <windowsx.h>
 #endif
+
+/* ============================================================================
+ * Local WinRT Definitions (DispatcherQueue, CoreCursor, InputEnabledEventArgs)
+ * ============================================================================ */
+
+static const GUID CW_IID_IInputEnabledEventArgs =
+    { 0x80371D4Fu, 0x2FD8u, 0x4C24u, { 0xAAu, 0x86u, 0x31u, 0x63u, 0xA8u, 0x7Bu, 0x4Eu, 0x5Au } };
+#ifdef _WIN32
+static const GUID CW_IID_ICoreCursor =
+    { 0x96893ACFu, 0x111Du, 0x442Cu, { 0x8Au, 0x77u, 0xB8u, 0x79u, 0x92u, 0xF8u, 0xE2u, 0xD6u } };
+#endif
+static const GUID CW_IID_ICoreCursorFactory =
+    { 0xF6359621u, 0xA79Du, 0x4ED3u, { 0x8Cu, 0x32u, 0xA9u, 0xEFu, 0x9Du, 0x6Bu, 0x76u, 0xA4u } };
+static const GUID CW_IID_IDispatcherQueue =
+    { 0x603E88E4u, 0xA338u, 0x4FFEu, { 0xA4u, 0x57u, 0xA5u, 0xCFu, 0xB9u, 0xCEu, 0xB8u, 0x99u } };
+static const GUID CW_IID_IDispatcherQueue2 =
+    { 0xC822C647u, 0x30EFu, 0x506Eu, { 0xBDu, 0x1Eu, 0xA6u, 0x47u, 0xAEu, 0x66u, 0x75u, 0xFFu } };
+static const GUID CW_IID_IDispatcherQueueTimer =
+    { 0x5FEABB1Du, 0xA31Cu, 0x4727u, { 0xB1u, 0xACu, 0x37u, 0x45u, 0x46u, 0x49u, 0xD5u, 0x6Au } };
+
+typedef struct UwpCWInputEnabledArgs UwpCWInputEnabledArgs;
+typedef struct UwpCWInputEnabledArgsVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpCWInputEnabledArgs);
+    HRESULT (UWP_CALL *get_InputEnabled)(UwpCWInputEnabledArgs *This, uint8_t *value);
+} UwpCWInputEnabledArgsVtbl;
+struct UwpCWInputEnabledArgs {
+    const UwpCWInputEnabledArgsVtbl *lpVtbl;
+};
+
+typedef struct UwpCWCoreCursor UwpCWCoreCursor;
+typedef struct UwpCWCoreCursorVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpCWCoreCursor);
+    HRESULT (UWP_CALL *get_Id)(UwpCWCoreCursor *This, uint32_t *value);
+    HRESULT (UWP_CALL *get_Type)(UwpCWCoreCursor *This, int32_t *value);
+} UwpCWCoreCursorVtbl;
+struct UwpCWCoreCursor {
+    const UwpCWCoreCursorVtbl *lpVtbl;
+};
+
+typedef struct UwpCWCoreCursorFactory UwpCWCoreCursorFactory;
+typedef struct UwpCWCoreCursorFactoryVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpCWCoreCursorFactory);
+    HRESULT (UWP_CALL *CreateCursor)(UwpCWCoreCursorFactory *This, int32_t type, uint32_t id, UwpCWCoreCursor **cursor);
+} UwpCWCoreCursorFactoryVtbl;
+struct UwpCWCoreCursorFactory {
+    const UwpCWCoreCursorFactoryVtbl *lpVtbl;
+};
+
+typedef struct UwpCWDispatcherQueue UwpCWDispatcherQueue;
+typedef struct UwpCWDispatcherQueueVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpCWDispatcherQueue);
+    HRESULT (UWP_CALL *CreateTimer)(UwpCWDispatcherQueue *This, void **result);
+    HRESULT (UWP_CALL *TryEnqueue)(UwpCWDispatcherQueue *This, UwpDispatchedHandler *callback, uint8_t *result);
+    HRESULT (UWP_CALL *TryEnqueueWithPriority)(UwpCWDispatcherQueue *This, int32_t priority, UwpDispatchedHandler *callback, uint8_t *result);
+    HRESULT (UWP_CALL *add_ShutdownStarting)(UwpCWDispatcherQueue *This, UwpTypedEventHandler *handler, UwpEventRegistrationToken *token);
+    HRESULT (UWP_CALL *remove_ShutdownStarting)(UwpCWDispatcherQueue *This, UwpEventRegistrationToken token);
+    HRESULT (UWP_CALL *add_ShutdownCompleted)(UwpCWDispatcherQueue *This, UwpTypedEventHandler *handler, UwpEventRegistrationToken *token);
+    HRESULT (UWP_CALL *remove_ShutdownCompleted)(UwpCWDispatcherQueue *This, UwpEventRegistrationToken token);
+} UwpCWDispatcherQueueVtbl;
+struct UwpCWDispatcherQueue {
+    const UwpCWDispatcherQueueVtbl *lpVtbl;
+};
+
+typedef struct UwpCWDispatcherQueue2 UwpCWDispatcherQueue2;
+typedef struct UwpCWDispatcherQueue2Vtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpCWDispatcherQueue2);
+    HRESULT (UWP_CALL *get_HasThreadAccess)(UwpCWDispatcherQueue2 *This, uint8_t *value);
+} UwpCWDispatcherQueue2Vtbl;
+struct UwpCWDispatcherQueue2 {
+    const UwpCWDispatcherQueue2Vtbl *lpVtbl;
+};
+
+typedef struct UwpCWDispatcherQueueTimer UwpCWDispatcherQueueTimer;
+typedef struct UwpCWDispatcherQueueTimerVtbl {
+    UWP_IINSPECTABLE_VTBL_HEAD(UwpCWDispatcherQueueTimer);
+    HRESULT (UWP_CALL *get_Interval)(UwpCWDispatcherQueueTimer *This, int64_t *value);
+    HRESULT (UWP_CALL *put_Interval)(UwpCWDispatcherQueueTimer *This, int64_t value);
+    HRESULT (UWP_CALL *get_IsRunning)(UwpCWDispatcherQueueTimer *This, uint8_t *value);
+    HRESULT (UWP_CALL *get_IsRepeating)(UwpCWDispatcherQueueTimer *This, uint8_t *value);
+    HRESULT (UWP_CALL *put_IsRepeating)(UwpCWDispatcherQueueTimer *This, uint8_t value);
+    HRESULT (UWP_CALL *Start)(UwpCWDispatcherQueueTimer *This);
+    HRESULT (UWP_CALL *Stop)(UwpCWDispatcherQueueTimer *This);
+    HRESULT (UWP_CALL *add_Tick)(UwpCWDispatcherQueueTimer *This, UwpTypedEventHandler *handler, UwpEventRegistrationToken *token);
+    HRESULT (UWP_CALL *remove_Tick)(UwpCWDispatcherQueueTimer *This, UwpEventRegistrationToken token);
+} UwpCWDispatcherQueueTimerVtbl;
+struct UwpCWDispatcherQueueTimer {
+    const UwpCWDispatcherQueueTimerVtbl *lpVtbl;
+};
+
+static HRESULT uwp_cw_alloc_iids(const GUID *list, ULONG count, ULONG *out_count, IID **out_iids) {
+    if (!out_count || !out_iids) return E_INVALIDARG;
+    *out_count = 0;
+    *out_iids = NULL;
+    if (count == 0 || !list) return S_OK;
+    size_t sz = (size_t)count * sizeof(IID);
+#ifdef _WIN32
+    IID *buf = (IID *)CoTaskMemAlloc(sz);
+#else
+    IID *buf = (IID *)malloc(sz);
+#endif
+    if (!buf) return E_OUTOFMEMORY;
+    memcpy(buf, list, sz);
+    *out_count = count;
+    *out_iids = buf;
+    return S_OK;
+}
+
+static const GUID k_corewindow_iids[] = {
+    { 0x79B9D5F2u, 0x879Eu, 0x4B89u, { 0xB7u, 0x98u, 0x79u, 0xE4u, 0x75u, 0x98u, 0x03u, 0x0Cu } }, /* ICoreWindow */
+    { 0x7C2B1B85u, 0x6917u, 0x4361u, { 0x9Cu, 0x02u, 0x0Du, 0x9Eu, 0x3Au, 0x42u, 0x0Bu, 0x95u } }, /* ICoreWindow2 */
+    { 0x32C20DD8u, 0xFAEFu, 0x4375u, { 0xA2u, 0xABu, 0x32u, 0x64u, 0x0Eu, 0x48u, 0x15u, 0xC7u } }, /* ICoreWindow3 */
+    { 0x35CAF0D0u, 0x47F0u, 0x436Cu, { 0xAFu, 0x97u, 0x0Du, 0xD8u, 0x8Fu, 0x6Fu, 0x5Fu, 0x02u } }, /* ICoreWindow4 */
+    { 0x4B4AE1E1u, 0x2E6Du, 0x4EAAu, { 0xBDu, 0xA1u, 0x1Cu, 0x5Cu, 0xC1u, 0xBEu, 0xE1u, 0x41u } }, /* ICoreWindow5 */
+    SCARLETT_IID_ICOREWINDOWINTEROP_INIT,
+    SCARLETT_IID_IPROTON_SCARLETT_COREWINDOW_BRIDGE_INIT
+};
+
+static const GUID k_dispatcher_iids[] = {
+    { 0x60DB2FA8u, 0xB705u, 0x4FDEu, { 0xA7u, 0xD6u, 0xEBu, 0xBBu, 0x18u, 0x91u, 0xD3u, 0x9Eu } }, /* ICoreDispatcher */
+    { 0x9FFDF7F5u, 0xB8C9u, 0x4EF0u, { 0xB7u, 0xD2u, 0x1Du, 0xE6u, 0x26u, 0x56u, 0x1Fu, 0xC8u } }  /* ICoreAcceleratorKeys */
+};
+
+static const GUID k_dispatcher_queue_iids[] = {
+    { 0x603E88E4u, 0xA338u, 0x4FFEu, { 0xA4u, 0x57u, 0xA5u, 0xCFu, 0xB9u, 0xCEu, 0xB8u, 0x99u } }, /* IDispatcherQueue */
+    { 0xC822C647u, 0x30EFu, 0x506Eu, { 0xBDu, 0x1Eu, 0xA6u, 0x47u, 0xAEu, 0x66u, 0x75u, 0xFFu } }  /* IDispatcherQueue2 */
+};
 
 /* ============================================================================
  * Priority Work Queue Item for CoreDispatcher::RunAsync / RunIdleAsync
@@ -49,6 +176,8 @@ struct UwpCoreWindowObj {
     IProtonScarlettCoreWindowBridge bridge;
     UwpICoreDispatcher              dispatcher;
     UwpICoreAcceleratorKeys         accel_keys;
+    UwpCWDispatcherQueue            dispatcher_queue;
+    UwpCWDispatcherQueue2           dispatcher_queue2;
 
     volatile int32_t ref;
     uwp_mutex_t lock;
@@ -64,6 +193,11 @@ struct UwpCoreWindowObj {
     uint8_t  is_input_enabled;
     uint8_t  message_handled;
     uint8_t  pointer_entered;
+    uint8_t  pointer_captured;
+    uint8_t  cursor_explicitly_set;
+    uint8_t  activated_once;
+    uint8_t  visibility_fired;
+    uint8_t  closed_notified;
     volatile int32_t closed;
     UwpCoreWindowFlowDirection flow_direction;
     UwpCoreWindowActivationMode activation_mode;
@@ -86,6 +220,7 @@ struct UwpCoreWindowObj {
     /* Dispatcher priority queue */
     uwp_mutex_t queue_lock;
     uwp_dispatch_item_t *queue_head;
+    int dispatch_msg_pending;
 
     /* CoreWindow & CoreDispatcher WinRT event listener lists */
     uwp_event_list_t ev_activated;
@@ -109,6 +244,8 @@ struct UwpCoreWindowObj {
     uwp_event_list_t ev_resize_started;
     uwp_event_list_t ev_resize_completed;
     uwp_event_list_t ev_accel_key;
+    uwp_event_list_t ev_dq_shutdown_starting;
+    uwp_event_list_t ev_dq_shutdown_completed;
 };
 
 /* ============================================================================
@@ -257,6 +394,13 @@ static UwpVirtualKeyModifiers uwp_mods_from_wparam(WPARAM wParam) {
  * CoreDispatcher Queue Helpers
  * ============================================================================ */
 
+#ifndef WM_CAPTURECHANGED
+#define WM_CAPTURECHANGED 0x0215u
+#endif
+#ifndef WM_MOUSELEAVE
+#define WM_MOUSELEAVE 0x02A3u
+#endif
+
 static HRESULT uwp_enqueue_work(UwpCoreWindowObj *win,
                                 UwpCoreDispatcherPriority priority,
                                 int is_idle,
@@ -285,6 +429,7 @@ static HRESULT uwp_enqueue_work(UwpCoreWindowObj *win,
     if (idle_cb) idle_cb->lpVtbl->AddRef(idle_cb);
 
     /* Priority-ordered insertion: Higher priority values run first; FIFO within same priority */
+    int should_post = 0;
     uwp_mutex_lock(&win->queue_lock);
     uwp_dispatch_item_t **pp = &win->queue_head;
     while (*pp != NULL && (*pp)->priority >= priority) {
@@ -292,6 +437,10 @@ static HRESULT uwp_enqueue_work(UwpCoreWindowObj *win,
     }
     item->next = *pp;
     *pp = item;
+    if (!win->dispatch_msg_pending) {
+        win->dispatch_msg_pending = 1;
+        should_post = 1;
+    }
     uwp_mutex_unlock(&win->queue_lock);
 
     if (out_action) {
@@ -299,9 +448,15 @@ static HRESULT uwp_enqueue_work(UwpCoreWindowObj *win,
     }
 
 #ifdef _WIN32
-    if (win->hwnd && !win->headless) {
-        PostMessageW(win->hwnd, WM_UWP_DISPATCH_WORK, 0, 0);
+    if (should_post && win->hwnd && !win->headless) {
+        if (!PostMessageW(win->hwnd, WM_UWP_DISPATCH_WORK, 0, 0)) {
+            uwp_mutex_lock(&win->queue_lock);
+            win->dispatch_msg_pending = 0;
+            uwp_mutex_unlock(&win->queue_lock);
+        }
     }
+#else
+    (void)should_post;
 #endif
     return S_OK;
 }
@@ -309,7 +464,8 @@ static HRESULT uwp_enqueue_work(UwpCoreWindowObj *win,
 uint32_t uwp_corewindow_drain_dispatched_work(UwpCoreWindowObj *win, uint32_t max_items) {
     if (!win) return 0u;
     uint32_t processed = 0u;
-    while (max_items == 0u || processed < max_items) {
+    uint32_t cap = (max_items == 0u) ? 4096u : max_items;
+    while (processed < cap) {
         uwp_mutex_lock(&win->queue_lock);
         uwp_dispatch_item_t *item = win->queue_head;
         if (item) {
@@ -336,6 +492,22 @@ uint32_t uwp_corewindow_drain_dispatched_work(UwpCoreWindowObj *win, uint32_t ma
         free(item);
         ++processed;
     }
+#ifdef _WIN32
+    if (max_items == 0u && processed >= cap && win->hwnd && !win->headless) {
+        int more = 0;
+        uwp_mutex_lock(&win->queue_lock);
+        if (win->queue_head != NULL && !win->dispatch_msg_pending) {
+            win->dispatch_msg_pending = 1;
+            more = 1;
+        }
+        uwp_mutex_unlock(&win->queue_lock);
+        if (more && !PostMessageW(win->hwnd, WM_UWP_DISPATCH_WORK, 0, 0)) {
+            uwp_mutex_lock(&win->queue_lock);
+            win->dispatch_msg_pending = 0;
+            uwp_mutex_unlock(&win->queue_lock);
+        }
+    }
+#endif
     return processed;
 }
 
@@ -346,6 +518,63 @@ static int uwp_has_dispatched_work(UwpCoreWindowObj *win) {
     uwp_mutex_unlock(&win->queue_lock);
     return has;
 }
+
+#ifdef _WIN32
+static const wchar_t *uwp_cw_cursor_resource(IUnknown *cursor_obj, int *out_hide) {
+    *out_hide = 0;
+    if (!cursor_obj) {
+        *out_hide = 1;
+        return NULL;
+    }
+    UwpCWCoreCursor *cc = NULL;
+    if (SUCCEEDED(cursor_obj->lpVtbl->QueryInterface(cursor_obj, &CW_IID_ICoreCursor, (void **)&cc)) && cc) {
+        int32_t ctype = 0;
+        HRESULT hr = cc->lpVtbl->get_Type(cc, &ctype);
+        cc->lpVtbl->Release(cc);
+        if (SUCCEEDED(hr)) {
+            switch (ctype) {
+                case 0:  return (const wchar_t *)(uintptr_t)32512; /* IDC_ARROW */
+                case 1:  return (const wchar_t *)(uintptr_t)32515; /* IDC_CROSS */
+                case 2:  *out_hide = 1; return NULL;               /* Custom (hidden/custom) */
+                case 3:  return (const wchar_t *)(uintptr_t)32649; /* IDC_HAND */
+                case 4:  return (const wchar_t *)(uintptr_t)32651; /* IDC_HELP */
+                case 5:  return (const wchar_t *)(uintptr_t)32513; /* IDC_IBEAM */
+                case 6:  return (const wchar_t *)(uintptr_t)32646; /* IDC_SIZEALL */
+                case 7:  return (const wchar_t *)(uintptr_t)32643; /* IDC_SIZENESW */
+                case 8:  return (const wchar_t *)(uintptr_t)32645; /* IDC_SIZENS */
+                case 9:  return (const wchar_t *)(uintptr_t)32642; /* IDC_SIZENWSE */
+                case 10: return (const wchar_t *)(uintptr_t)32644; /* IDC_SIZEWE */
+                case 11: return (const wchar_t *)(uintptr_t)32648; /* IDC_NO */
+                case 12: return (const wchar_t *)(uintptr_t)32516; /* IDC_UPARROW */
+                case 13: return (const wchar_t *)(uintptr_t)32514; /* IDC_WAIT */
+                case 14:
+                case 15: return (const wchar_t *)(uintptr_t)32649; /* IDC_HAND */
+                default: break;
+            }
+        }
+    }
+    return (const wchar_t *)(uintptr_t)32512; /* IDC_ARROW */
+}
+
+static void uwp_cw_apply_cursor(UwpCoreWindowObj *win) {
+    if (!win || win->headless) return;
+    uwp_mutex_lock(&win->lock);
+    IUnknown *cur = win->pointer_cursor;
+    uint8_t explicit_set = win->cursor_explicitly_set;
+    if (cur) cur->lpVtbl->AddRef(cur);
+    uwp_mutex_unlock(&win->lock);
+
+    if (!cur && explicit_set) {
+        SetCursor(NULL);
+        return;
+    }
+    int hide = 0;
+    const wchar_t *res = cur ? uwp_cw_cursor_resource(cur, &hide)
+                             : (const wchar_t *)(uintptr_t)32512;
+    if (cur) cur->lpVtbl->Release(cur);
+    SetCursor(hide ? NULL : LoadCursorW(NULL, res));
+}
+#endif
 
 /* ============================================================================
  * Portable Win32 Message -> WinRT Event Translation
@@ -398,6 +627,9 @@ int uwp_corewindow_handle_message(UwpCoreWindowObj *win, uint32_t msg, WPARAM wP
 
     switch (msg) {
         case WM_UWP_DISPATCH_WORK:
+            uwp_mutex_lock(&win->queue_lock);
+            win->dispatch_msg_pending = 0;
+            uwp_mutex_unlock(&win->queue_lock);
             uwp_corewindow_drain_dispatched_work(win, 0u);
             return 1;
 
@@ -406,6 +638,7 @@ int uwp_corewindow_handle_message(UwpCoreWindowObj *win, uint32_t msg, WPARAM wP
             uint32_t h = (uint32_t)HIWORD(lParam);
             if (wParam == SIZE_MINIMIZED) {
                 win->visible = 0u;
+                win->visibility_fired = 1u;
                 UwpIVisibilityChangedEventArgs *vargs = uwp_create_visibility_changed_args(0u);
                 if (vargs) {
                     uwp_event_list_invoke(&win->ev_visibility_changed, &win->core_window, vargs);
@@ -414,10 +647,24 @@ int uwp_corewindow_handle_message(UwpCoreWindowObj *win, uint32_t msg, WPARAM wP
                 return 1;
             }
             if (w > 0 && h > 0) {
+                int became_visible = 0;
                 uwp_mutex_lock(&win->lock);
                 win->client_width = w;
                 win->client_height = h;
+                if (!win->visible) {
+                    win->visible = 1u;
+                    win->visibility_fired = 1u;
+                    became_visible = 1;
+                }
                 uwp_mutex_unlock(&win->lock);
+
+                if (became_visible) {
+                    UwpIVisibilityChangedEventArgs *vargs = uwp_create_visibility_changed_args(1u);
+                    if (vargs) {
+                        uwp_event_list_invoke(&win->ev_visibility_changed, &win->core_window, vargs);
+                        vargs->lpVtbl->Release(vargs);
+                    }
+                }
 
                 UwpIWindowSizeChangedEventArgs *sargs =
                     uwp_create_size_changed_args((float)w, (float)h);
@@ -501,11 +748,41 @@ int uwp_corewindow_handle_message(UwpCoreWindowObj *win, uint32_t msg, WPARAM wP
             float y = (float)(int16_t)HIWORD(lParam);
             if (!win->pointer_entered) {
                 win->pointer_entered = 1u;
+#ifdef _WIN32
+                if (win->hwnd && !win->headless) {
+                    TRACKMOUSEEVENT tme;
+                    tme.cbSize = sizeof(tme);
+                    tme.dwFlags = TME_LEAVE;
+                    tme.hwndTrack = win->hwnd;
+                    tme.dwHoverTime = HOVER_DEFAULT;
+                    TrackMouseEvent(&tme);
+                }
+#endif
                 uwp_fire_pointer_event(win, &win->ev_pointer_entered, x, y, wParam,
                                        UWP_POINTER_UPDATE_OTHER, 0, 0u, 0);
             }
             uwp_fire_pointer_event(win, &win->ev_pointer_moved, x, y, wParam,
                                    UWP_POINTER_UPDATE_OTHER, 0, 0u, 0);
+            return 1;
+        }
+
+        case WM_MOUSELEAVE: {
+            if (win->pointer_entered) {
+                win->pointer_entered = 0u;
+                uwp_fire_pointer_event(win, &win->ev_pointer_exited,
+                                       win->pointer_pos.X, win->pointer_pos.Y,
+                                       0, UWP_POINTER_UPDATE_OTHER, 0, 0u, 0);
+            }
+            return 1;
+        }
+
+        case WM_CAPTURECHANGED: {
+            if (win->pointer_captured && (HWND)lParam != win->hwnd) {
+                win->pointer_captured = 0u;
+                uwp_fire_pointer_event(win, &win->ev_pointer_capture_lost,
+                                       win->pointer_pos.X, win->pointer_pos.Y,
+                                       0, UWP_POINTER_UPDATE_OTHER, 0, 0u, 0);
+            }
             return 1;
         }
 
@@ -571,16 +848,21 @@ int uwp_corewindow_handle_message(UwpCoreWindowObj *win, uint32_t msg, WPARAM wP
         case WM_ACTIVATE: {
             uint16_t active = LOWORD(wParam);
             UwpCoreWindowActivationState astate;
+            uwp_mutex_lock(&win->lock);
             if (active == WA_INACTIVE) {
                 astate = UWP_ACTIVATION_DEACTIVATED;
                 win->activation_mode = UWP_ACTIVATION_MODE_DEACTIVATED;
+                win->activated_once = 0u;
             } else if (active == WA_CLICKACTIVE) {
                 astate = UWP_ACTIVATION_POINTER_ACTIVATED;
                 win->activation_mode = UWP_ACTIVATION_MODE_ACTIVATED_IN_FOREGROUND;
+                win->activated_once = 1u;
             } else {
                 astate = UWP_ACTIVATION_CODE_ACTIVATED;
                 win->activation_mode = UWP_ACTIVATION_MODE_ACTIVATED_IN_FOREGROUND;
+                win->activated_once = 1u;
             }
+            uwp_mutex_unlock(&win->lock);
             UwpIWindowActivatedEventArgs *args = uwp_create_activated_args(astate);
             if (args) {
                 uwp_event_list_invoke(&win->ev_activated, &win->core_window, args);
@@ -591,7 +873,10 @@ int uwp_corewindow_handle_message(UwpCoreWindowObj *win, uint32_t msg, WPARAM wP
 
         case WM_SHOWWINDOW: {
             uint8_t vis = (wParam != 0) ? 1u : 0u;
+            uwp_mutex_lock(&win->lock);
             win->visible = vis;
+            win->visibility_fired = 1u;
+            uwp_mutex_unlock(&win->lock);
             UwpIVisibilityChangedEventArgs *vargs = uwp_create_visibility_changed_args(vis);
             if (vargs) {
                 uwp_event_list_invoke(&win->ev_visibility_changed, &win->core_window, vargs);
@@ -601,11 +886,20 @@ int uwp_corewindow_handle_message(UwpCoreWindowObj *win, uint32_t msg, WPARAM wP
         }
 
         case WM_CLOSE: {
+            int should_fire = 0;
+            uwp_mutex_lock(&win->lock);
             win->closed = 1;
-            UwpICoreWindowEventArgs *cargs = uwp_create_core_window_event_args();
-            if (cargs) {
-                uwp_event_list_invoke(&win->ev_closed, &win->core_window, cargs);
-                cargs->lpVtbl->Release(cargs);
+            if (!win->closed_notified) {
+                win->closed_notified = 1u;
+                should_fire = 1;
+            }
+            uwp_mutex_unlock(&win->lock);
+            if (should_fire) {
+                UwpICoreWindowEventArgs *cargs = uwp_create_core_window_event_args();
+                if (cargs) {
+                    uwp_event_list_invoke(&win->ev_closed, &win->core_window, cargs);
+                    cargs->lpVtbl->Release(cargs);
+                }
             }
 #ifdef _WIN32
             if (win->hwnd && !win->headless) {
@@ -634,6 +928,10 @@ static LRESULT CALLBACK uwp_corewindow_wndproc(HWND hwnd, UINT msg, WPARAM wPara
     }
     win = (UwpCoreWindowObj *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
     if (win) {
+        if (msg == WM_SETCURSOR && LOWORD(lParam) == HTCLIENT) {
+            uwp_cw_apply_cursor(win);
+            return TRUE;
+        }
         if (uwp_corewindow_handle_message(win, msg, wParam, lParam)) {
             if (msg == WM_CLOSE) {
                 DestroyWindow(hwnd);
@@ -645,8 +943,22 @@ static LRESULT CALLBACK uwp_corewindow_wndproc(HWND hwnd, UINT msg, WPARAM wPara
             }
         }
         if (msg == WM_DESTROY) {
+            int should_fire = 0;
+            uwp_mutex_lock(&win->lock);
             win->closed = 1;
             win->hwnd = NULL;
+            if (!win->closed_notified) {
+                win->closed_notified = 1u;
+                should_fire = 1;
+            }
+            uwp_mutex_unlock(&win->lock);
+            if (should_fire) {
+                UwpICoreWindowEventArgs *cargs = uwp_create_core_window_event_args();
+                if (cargs) {
+                    uwp_event_list_invoke(&win->ev_closed, &win->core_window, cargs);
+                    cargs->lpVtbl->Release(cargs);
+                }
+            }
             PostQuitMessage(0);
             return 0;
         }
@@ -733,10 +1045,118 @@ static void cw_destroy(UwpCoreWindowObj *win) {
     uwp_event_list_destroy(&win->ev_resize_started);
     uwp_event_list_destroy(&win->ev_resize_completed);
     uwp_event_list_destroy(&win->ev_accel_key);
+    uwp_event_list_destroy(&win->ev_dq_shutdown_starting);
+    uwp_event_list_destroy(&win->ev_dq_shutdown_completed);
 
     uwp_mutex_destroy(&win->queue_lock);
     uwp_mutex_destroy(&win->lock);
     free(win);
+}
+
+typedef struct UwpCWInputEnabledObj {
+    UwpCWInputEnabledArgs primary;
+    UwpICoreWindowEventArgs event_args;
+    volatile int32_t ref;
+    uint8_t input_enabled;
+    uint8_t handled;
+} UwpCWInputEnabledObj;
+
+static HRESULT uwp_cw_ie_qi_impl(UwpCWInputEnabledObj *o, REFIID riid, void **ppv) {
+    if (!riid || !ppv) return E_INVALIDARG;
+    *ppv = NULL;
+    if (uwp_guid_equal(riid, &UWP_IID_IUnknown) ||
+        uwp_guid_equal(riid, &UWP_IID_IInspectable) ||
+        uwp_guid_equal(riid, &UWP_IID_IAgileObject) ||
+        uwp_guid_equal(riid, &CW_IID_IInputEnabledEventArgs)) {
+        uwp_atomic_inc(&o->ref);
+        *ppv = &o->primary;
+        return S_OK;
+    }
+    if (uwp_guid_equal(riid, &UWP_IID_ICoreWindowEventArgs)) {
+        uwp_atomic_inc(&o->ref);
+        *ppv = &o->event_args;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static HRESULT UWP_CALL cwie_QI(UwpCWInputEnabledArgs *T, REFIID r, void **p) {
+    return uwp_cw_ie_qi_impl(UWP_CONTAINING_RECORD(T, UwpCWInputEnabledObj, primary), r, p);
+}
+static ULONG UWP_CALL cwie_AddRef(UwpCWInputEnabledArgs *T) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(T, UwpCWInputEnabledObj, primary)->ref);
+}
+static ULONG UWP_CALL cwie_Release(UwpCWInputEnabledArgs *T) {
+    UwpCWInputEnabledObj *o = UWP_CONTAINING_RECORD(T, UwpCWInputEnabledObj, primary);
+    int32_t r = uwp_atomic_dec(&o->ref);
+    if (r == 0) free(o);
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL cwie_GetIids(UwpCWInputEnabledArgs *T, ULONG *c, IID **i) {
+    (void)T;
+    const GUID list[2] = { CW_IID_IInputEnabledEventArgs, UWP_IID_ICoreWindowEventArgs };
+    return uwp_cw_alloc_iids(list, 2u, c, i);
+}
+static HRESULT UWP_CALL cwie_GetName(UwpCWInputEnabledArgs *T, UWP_HSTRING *n) {
+    (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.InputEnabledEventArgs", n);
+}
+static HRESULT UWP_CALL cwie_GetTrust(UwpCWInputEnabledArgs *T, UwpTrustLevel *t) {
+    (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
+}
+static HRESULT UWP_CALL cwie_get_InputEnabled(UwpCWInputEnabledArgs *T, uint8_t *v) {
+    if (!v) return E_INVALIDARG;
+    *v = UWP_CONTAINING_RECORD(T, UwpCWInputEnabledObj, primary)->input_enabled;
+    return S_OK;
+}
+static HRESULT UWP_CALL cwie_ea_QI(UwpICoreWindowEventArgs *T, REFIID r, void **p) {
+    return uwp_cw_ie_qi_impl(UWP_CONTAINING_RECORD(T, UwpCWInputEnabledObj, event_args), r, p);
+}
+static ULONG UWP_CALL cwie_ea_AddRef(UwpICoreWindowEventArgs *T) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(T, UwpCWInputEnabledObj, event_args)->ref);
+}
+static ULONG UWP_CALL cwie_ea_Release(UwpICoreWindowEventArgs *T) {
+    UwpCWInputEnabledObj *o = UWP_CONTAINING_RECORD(T, UwpCWInputEnabledObj, event_args);
+    int32_t r = uwp_atomic_dec(&o->ref);
+    if (r == 0) free(o);
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL cwie_ea_GetIids(UwpICoreWindowEventArgs *T, ULONG *c, IID **i) {
+    (void)T;
+    const GUID list[2] = { CW_IID_IInputEnabledEventArgs, UWP_IID_ICoreWindowEventArgs };
+    return uwp_cw_alloc_iids(list, 2u, c, i);
+}
+static HRESULT UWP_CALL cwie_ea_GetName(UwpICoreWindowEventArgs *T, UWP_HSTRING *n) {
+    (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.InputEnabledEventArgs", n);
+}
+static HRESULT UWP_CALL cwie_ea_GetTrust(UwpICoreWindowEventArgs *T, UwpTrustLevel *t) {
+    (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
+}
+static HRESULT UWP_CALL cwie_ea_get_Handled(UwpICoreWindowEventArgs *T, uint8_t *v) {
+    if (!v) return E_INVALIDARG;
+    *v = UWP_CONTAINING_RECORD(T, UwpCWInputEnabledObj, event_args)->handled;
+    return S_OK;
+}
+static HRESULT UWP_CALL cwie_ea_put_Handled(UwpICoreWindowEventArgs *T, uint8_t v) {
+    UWP_CONTAINING_RECORD(T, UwpCWInputEnabledObj, event_args)->handled = v ? 1u : 0u;
+    return S_OK;
+}
+static const UwpCWInputEnabledArgsVtbl g_cwie_vtbl = {
+    cwie_QI, cwie_AddRef, cwie_Release,
+    cwie_GetIids, cwie_GetName, cwie_GetTrust,
+    cwie_get_InputEnabled
+};
+static const UwpICoreWindowEventArgsVtbl g_cwie_ea_vtbl = {
+    cwie_ea_QI, cwie_ea_AddRef, cwie_ea_Release,
+    cwie_ea_GetIids, cwie_ea_GetName, cwie_ea_GetTrust,
+    cwie_ea_get_Handled, cwie_ea_put_Handled
+};
+static UwpCWInputEnabledArgs *uwp_create_cw_input_enabled_args(uint8_t enabled) {
+    UwpCWInputEnabledObj *o = (UwpCWInputEnabledObj *)calloc(1, sizeof(*o));
+    if (!o) return NULL;
+    o->primary.lpVtbl = &g_cwie_vtbl;
+    o->event_args.lpVtbl = &g_cwie_ea_vtbl;
+    o->ref = 1;
+    o->input_enabled = enabled ? 1u : 0u;
+    return &o->primary;
 }
 
 static HRESULT cw_qi_impl(UwpCoreWindowObj *win, REFIID riid, void **ppv) {
@@ -819,7 +1239,10 @@ static ULONG UWP_CALL cw_Release(UwpICoreWindow *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL cw_GetIids(UwpICoreWindow *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    return uwp_cw_alloc_iids(k_corewindow_iids,
+                             (ULONG)(sizeof(k_corewindow_iids) / sizeof(k_corewindow_iids[0])),
+                             c, i);
 }
 static HRESULT UWP_CALL cw_GetRuntimeClassName(UwpICoreWindow *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreWindow", n);
@@ -837,13 +1260,17 @@ static HRESULT UWP_CALL cw_get_Bounds(UwpICoreWindow *T, UwpRect *v) {
     if (w->hwnd && !w->headless) {
         RECT cr;
         if (GetClientRect(w->hwnd, &cr)) {
-            POINT origin = { cr.left, cr.top };
-            ClientToScreen(w->hwnd, &origin);
-            v->X = (float)origin.x;
-            v->Y = (float)origin.y;
-            v->Width = (float)(cr.right - cr.left);
-            v->Height = (float)(cr.bottom - cr.top);
-            return S_OK;
+            uint32_t cw = (cr.right > cr.left) ? (uint32_t)(cr.right - cr.left) : 0u;
+            uint32_t ch = (cr.bottom > cr.top) ? (uint32_t)(cr.bottom - cr.top) : 0u;
+            if (cw > 0u && ch > 0u) {
+                POINT origin = { cr.left, cr.top };
+                ClientToScreen(w->hwnd, &origin);
+                v->X = (float)origin.x;
+                v->Y = (float)origin.y;
+                v->Width = (float)cw;
+                v->Height = (float)ch;
+                return S_OK;
+            }
         }
     }
 #endif
@@ -889,16 +1316,66 @@ static HRESULT UWP_CALL cw_get_IsInputEnabled(UwpICoreWindow *T, uint8_t *v) {
     return S_OK;
 }
 static HRESULT UWP_CALL cw_put_IsInputEnabled(UwpICoreWindow *T, uint8_t v) {
-    UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, core_window)->is_input_enabled = v ? 1u : 0u;
+    UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, core_window);
+    uint8_t next = v ? 1u : 0u;
+    int changed = 0;
+    uwp_mutex_lock(&w->lock);
+    if (w->is_input_enabled != next) {
+        w->is_input_enabled = next;
+        changed = 1;
+    }
+#ifdef _WIN32
+    HWND hwnd = w->hwnd;
+    int headless = w->headless;
+#endif
+    uwp_mutex_unlock(&w->lock);
+#ifdef _WIN32
+    if (changed && hwnd && !headless) {
+        EnableWindow(hwnd, next ? TRUE : FALSE);
+    }
+#endif
+    if (changed && uwp_event_list_count(&w->ev_input_enabled) > 0u) {
+        UwpCWInputEnabledArgs *ie = uwp_create_cw_input_enabled_args(next);
+        if (ie) {
+            uwp_event_list_invoke(&w->ev_input_enabled, &w->core_window, ie);
+            ie->lpVtbl->Release(ie);
+        }
+    }
     return S_OK;
 }
 static HRESULT UWP_CALL cw_get_PointerCursor(UwpICoreWindow *T, void **v) {
     if (!v) return E_INVALIDARG;
     UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, core_window);
     uwp_mutex_lock(&w->lock);
-    *v = w->pointer_cursor;
-    if (w->pointer_cursor) w->pointer_cursor->lpVtbl->AddRef(w->pointer_cursor);
+    IUnknown *cur = w->pointer_cursor;
+    uint8_t explicit_set = w->cursor_explicitly_set;
+    if (cur) cur->lpVtbl->AddRef(cur);
     uwp_mutex_unlock(&w->lock);
+
+    if (!cur && !explicit_set) {
+        UwpCWCoreCursorFactory *fac = NULL;
+        if (SUCCEEDED(uwp_winrt_ui_get_activation_factory(
+                L"Windows.UI.Core.CoreCursor", &CW_IID_ICoreCursorFactory, (void **)&fac)) && fac) {
+            UwpCWCoreCursor *def_cur = NULL;
+            if (SUCCEEDED(fac->lpVtbl->CreateCursor(fac, 0 /* Arrow */, 0u, &def_cur)) && def_cur) {
+                uwp_mutex_lock(&w->lock);
+                if (!w->pointer_cursor && !w->cursor_explicitly_set) {
+                    w->pointer_cursor = (IUnknown *)def_cur;
+                    cur = (IUnknown *)def_cur;
+                    cur->lpVtbl->AddRef(cur);
+                    def_cur = NULL;
+                } else if (w->pointer_cursor) {
+                    cur = w->pointer_cursor;
+                    cur->lpVtbl->AddRef(cur);
+                }
+                uwp_mutex_unlock(&w->lock);
+                if (def_cur) def_cur->lpVtbl->Release(def_cur);
+            }
+            fac->lpVtbl->Release(fac);
+        }
+    }
+
+    *v = cur;
     return S_OK;
 }
 static HRESULT UWP_CALL cw_put_PointerCursor(UwpICoreWindow *T, void *v) {
@@ -908,16 +1385,11 @@ static HRESULT UWP_CALL cw_put_PointerCursor(UwpICoreWindow *T, void *v) {
     IUnknown *old_cur = w->pointer_cursor;
     if (new_cur) new_cur->lpVtbl->AddRef(new_cur);
     w->pointer_cursor = new_cur;
+    w->cursor_explicitly_set = 1u;
     uwp_mutex_unlock(&w->lock);
     if (old_cur) old_cur->lpVtbl->Release(old_cur);
 #ifdef _WIN32
-    if (!w->headless) {
-        if (!new_cur) {
-            SetCursor(NULL);
-        } else {
-            SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_ARROW));
-        }
-    }
+    uwp_cw_apply_cursor(w);
 #endif
     return S_OK;
 }
@@ -944,8 +1416,14 @@ static HRESULT UWP_CALL cw_get_Visible(UwpICoreWindow *T, uint8_t *v) {
 }
 static HRESULT UWP_CALL cw_Activate(UwpICoreWindow *T) {
     UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, core_window);
+    uwp_mutex_lock(&w->lock);
     w->visible = 1u;
-    w->activation_mode = UWP_ACTIVATION_MODE_ACTIVATED_IN_FOREGROUND;
+    if (w->activation_mode == UWP_ACTIVATION_MODE_NONE ||
+        w->activation_mode == UWP_ACTIVATION_MODE_DEACTIVATED) {
+        w->activation_mode = UWP_ACTIVATION_MODE_ACTIVATED_IN_FOREGROUND;
+    }
+    uwp_mutex_unlock(&w->lock);
+
 #ifdef _WIN32
     if (w->hwnd && !w->headless) {
         ShowWindow(w->hwnd, SW_SHOW);
@@ -953,15 +1431,34 @@ static HRESULT UWP_CALL cw_Activate(UwpICoreWindow *T) {
         UpdateWindow(w->hwnd);
     }
 #endif
-    UwpIVisibilityChangedEventArgs *vargs = uwp_create_visibility_changed_args(1u);
-    if (vargs) {
-        uwp_event_list_invoke(&w->ev_visibility_changed, &w->core_window, vargs);
-        vargs->lpVtbl->Release(vargs);
+
+    int fire_vis = 0;
+    int fire_act = 0;
+    uwp_mutex_lock(&w->lock);
+    if (!w->visibility_fired) {
+        w->visibility_fired = 1u;
+        fire_vis = 1;
     }
-    UwpIWindowActivatedEventArgs *aargs = uwp_create_activated_args(UWP_ACTIVATION_CODE_ACTIVATED);
-    if (aargs) {
-        uwp_event_list_invoke(&w->ev_activated, &w->core_window, aargs);
-        aargs->lpVtbl->Release(aargs);
+    if (!w->activated_once) {
+        w->activated_once = 1u;
+        w->activation_mode = UWP_ACTIVATION_MODE_ACTIVATED_IN_FOREGROUND;
+        fire_act = 1;
+    }
+    uwp_mutex_unlock(&w->lock);
+
+    if (fire_vis) {
+        UwpIVisibilityChangedEventArgs *vargs = uwp_create_visibility_changed_args(1u);
+        if (vargs) {
+            uwp_event_list_invoke(&w->ev_visibility_changed, &w->core_window, vargs);
+            vargs->lpVtbl->Release(vargs);
+        }
+    }
+    if (fire_act) {
+        UwpIWindowActivatedEventArgs *aargs = uwp_create_activated_args(UWP_ACTIVATION_CODE_ACTIVATED);
+        if (aargs) {
+            uwp_event_list_invoke(&w->ev_activated, &w->core_window, aargs);
+            aargs->lpVtbl->Release(aargs);
+        }
     }
     return S_OK;
 }
@@ -978,7 +1475,10 @@ static HRESULT UWP_CALL cw_GetAsyncKeyState(UwpICoreWindow *T, int32_t vk, UwpCo
         SHORT s = GetAsyncKeyState(vk);
         uint32_t out = UWP_KEYSTATE_NONE;
         if (s & 0x8000) out |= UWP_KEYSTATE_DOWN;
-        if (s & 0x0001) out |= UWP_KEYSTATE_LOCKED;
+        if ((vk == VK_CAPITAL || vk == VK_NUMLOCK || vk == VK_SCROLL) &&
+            (GetKeyState(vk) & 0x0001)) {
+            out |= UWP_KEYSTATE_LOCKED;
+        }
         *st = (UwpCoreVirtualKeyStates)out;
         return S_OK;
     }
@@ -1004,23 +1504,21 @@ static HRESULT UWP_CALL cw_GetKeyState(UwpICoreWindow *T, int32_t vk, UwpCoreVir
 }
 static HRESULT UWP_CALL cw_ReleasePointerCapture(UwpICoreWindow *T) {
     UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, core_window);
+    w->pointer_captured = 0u;
 #ifdef _WIN32
     if (w->hwnd && !w->headless) {
         ReleaseCapture();
     }
-#else
-    (void)w;
 #endif
     return S_OK;
 }
 static HRESULT UWP_CALL cw_SetPointerCapture(UwpICoreWindow *T) {
     UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, core_window);
+    w->pointer_captured = 1u;
 #ifdef _WIN32
     if (w->hwnd && !w->headless) {
         SetCapture(w->hwnd);
     }
-#else
-    (void)w;
 #endif
     return S_OK;
 }
@@ -1111,7 +1609,10 @@ static ULONG UWP_CALL cw2_Release(UwpICoreWindow2 *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL cw2_GetIids(UwpICoreWindow2 *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    return uwp_cw_alloc_iids(k_corewindow_iids,
+                             (ULONG)(sizeof(k_corewindow_iids) / sizeof(k_corewindow_iids[0])),
+                             c, i);
 }
 static HRESULT UWP_CALL cw2_GetName(UwpICoreWindow2 *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreWindow", n);
@@ -1149,7 +1650,10 @@ static ULONG UWP_CALL cw3_Release(UwpICoreWindow3 *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL cw3_GetIids(UwpICoreWindow3 *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    return uwp_cw_alloc_iids(k_corewindow_iids,
+                             (ULONG)(sizeof(k_corewindow_iids) / sizeof(k_corewindow_iids[0])),
+                             c, i);
 }
 static HRESULT UWP_CALL cw3_GetName(UwpICoreWindow3 *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreWindow", n);
@@ -1186,7 +1690,10 @@ static ULONG UWP_CALL cw4_Release(UwpICoreWindow4 *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL cw4_GetIids(UwpICoreWindow4 *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    return uwp_cw_alloc_iids(k_corewindow_iids,
+                             (ULONG)(sizeof(k_corewindow_iids) / sizeof(k_corewindow_iids[0])),
+                             c, i);
 }
 static HRESULT UWP_CALL cw4_GetName(UwpICoreWindow4 *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreWindow", n);
@@ -1226,7 +1733,10 @@ static ULONG UWP_CALL cw5_Release(UwpICoreWindow5 *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL cw5_GetIids(UwpICoreWindow5 *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    return uwp_cw_alloc_iids(k_corewindow_iids,
+                             (ULONG)(sizeof(k_corewindow_iids) / sizeof(k_corewindow_iids[0])),
+                             c, i);
 }
 static HRESULT UWP_CALL cw5_GetName(UwpICoreWindow5 *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreWindow", n);
@@ -1235,9 +1745,11 @@ static HRESULT UWP_CALL cw5_GetTrust(UwpICoreWindow5 *T, UwpTrustLevel *t) {
     (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
 }
 static HRESULT UWP_CALL cw5_get_DispatcherQueue(UwpICoreWindow5 *T, void **v) {
-    (void)T; if (v) *v = NULL;
-    uwp_bridge_log("corewindow", "ICoreWindow5::get_DispatcherQueue not implemented");
-    return E_NOTIMPL;
+    if (!v) return E_INVALIDARG;
+    UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, core_window5);
+    uwp_atomic_inc(&w->ref);
+    *v = &w->dispatcher_queue;
+    return S_OK;
 }
 static HRESULT UWP_CALL cw5_get_ActivationMode(UwpICoreWindow5 *T, UwpCoreWindowActivationMode *v) {
     if (!v) return E_INVALIDARG;
@@ -1369,7 +1881,10 @@ static ULONG UWP_CALL disp_Release(UwpICoreDispatcher *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL disp_GetIids(UwpICoreDispatcher *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    return uwp_cw_alloc_iids(k_dispatcher_iids,
+                             (ULONG)(sizeof(k_dispatcher_iids) / sizeof(k_dispatcher_iids[0])),
+                             c, i);
 }
 static HRESULT UWP_CALL disp_GetName(UwpICoreDispatcher *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreDispatcher", n);
@@ -1393,13 +1908,19 @@ static HRESULT UWP_CALL disp_ProcessEvents(UwpICoreDispatcher *T, UwpCoreProcess
                 if (uwp_corewindow_drain_dispatched_work(w, 1u) > 0u) {
                     return S_OK;
                 }
-                if (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+                while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
                     if (msg.message == WM_QUIT) {
                         w->closed = 1;
                         return S_OK;
                     }
+                    if (msg.message == WM_UWP_DISPATCH_WORK && !uwp_has_dispatched_work(w)) {
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                        continue;
+                    }
                     TranslateMessage(&msg);
                     DispatchMessageW(&msg);
+                    return S_OK;
                 }
                 return S_OK;
 
@@ -1444,6 +1965,7 @@ static HRESULT UWP_CALL disp_ProcessEvents(UwpICoreDispatcher *T, UwpCoreProcess
                 while (!w->closed) {
                     uwp_corewindow_drain_dispatched_work(w, 0u);
                     if (w->closed) break;
+                    if (uwp_has_dispatched_work(w)) continue;
                     BOOL gm = GetMessageW(&msg, NULL, 0, 0);
                     if (gm <= 0) {
                         w->closed = 1;
@@ -1511,7 +2033,10 @@ static ULONG UWP_CALL accel_Release(UwpICoreAcceleratorKeys *T) {
     return (ULONG)r;
 }
 static HRESULT UWP_CALL accel_GetIids(UwpICoreAcceleratorKeys *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    return uwp_cw_alloc_iids(k_dispatcher_iids,
+                             (ULONG)(sizeof(k_dispatcher_iids) / sizeof(k_dispatcher_iids[0])),
+                             c, i);
 }
 static HRESULT UWP_CALL accel_GetName(UwpICoreAcceleratorKeys *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreDispatcher", n);
@@ -1534,6 +2059,237 @@ static const UwpICoreAcceleratorKeysVtbl g_accel_vtbl = {
 };
 
 /* ============================================================================
+ * Windows.System.DispatcherQueue & DispatcherQueueTimer (ICoreWindow5)
+ * ============================================================================ */
+
+typedef struct UwpCWDQTimerObj {
+    UwpCWDispatcherQueueTimer iface;
+    volatile int32_t ref;
+    int64_t interval;
+    uint8_t is_running;
+    uint8_t is_repeating;
+    uwp_event_list_t ev_tick;
+} UwpCWDQTimerObj;
+
+static HRESULT UWP_CALL dqt_QI(UwpCWDispatcherQueueTimer *T, REFIID r, void **p) {
+    if (!r || !p) return E_INVALIDARG;
+    *p = NULL;
+    if (uwp_guid_equal(r, &UWP_IID_IUnknown) ||
+        uwp_guid_equal(r, &UWP_IID_IInspectable) ||
+        uwp_guid_equal(r, &UWP_IID_IAgileObject) ||
+        uwp_guid_equal(r, &CW_IID_IDispatcherQueueTimer)) {
+        T->lpVtbl->AddRef(T);
+        *p = T;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG UWP_CALL dqt_AddRef(UwpCWDispatcherQueueTimer *T) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->ref);
+}
+static ULONG UWP_CALL dqt_Release(UwpCWDispatcherQueueTimer *T) {
+    UwpCWDQTimerObj *o = UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface);
+    int32_t r = uwp_atomic_dec(&o->ref);
+    if (r == 0) {
+        uwp_event_list_destroy(&o->ev_tick);
+        free(o);
+    }
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL dqt_GetIids(UwpCWDispatcherQueueTimer *T, ULONG *c, IID **i) {
+    (void)T;
+    return uwp_cw_alloc_iids(&CW_IID_IDispatcherQueueTimer, 1u, c, i);
+}
+static HRESULT UWP_CALL dqt_GetName(UwpCWDispatcherQueueTimer *T, UWP_HSTRING *n) {
+    (void)T; return uwp_hstring_create_from_wstr(L"Windows.System.DispatcherQueueTimer", n);
+}
+static HRESULT UWP_CALL dqt_GetTrust(UwpCWDispatcherQueueTimer *T, UwpTrustLevel *t) {
+    (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
+}
+static HRESULT UWP_CALL dqt_get_Interval(UwpCWDispatcherQueueTimer *T, int64_t *v) {
+    if (!v) return E_INVALIDARG;
+    *v = UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->interval;
+    return S_OK;
+}
+static HRESULT UWP_CALL dqt_put_Interval(UwpCWDispatcherQueueTimer *T, int64_t v) {
+    UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->interval = v;
+    return S_OK;
+}
+static HRESULT UWP_CALL dqt_get_IsRunning(UwpCWDispatcherQueueTimer *T, uint8_t *v) {
+    if (!v) return E_INVALIDARG;
+    *v = UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->is_running;
+    return S_OK;
+}
+static HRESULT UWP_CALL dqt_get_IsRepeating(UwpCWDispatcherQueueTimer *T, uint8_t *v) {
+    if (!v) return E_INVALIDARG;
+    *v = UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->is_repeating;
+    return S_OK;
+}
+static HRESULT UWP_CALL dqt_put_IsRepeating(UwpCWDispatcherQueueTimer *T, uint8_t v) {
+    UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->is_repeating = v ? 1u : 0u;
+    return S_OK;
+}
+static HRESULT UWP_CALL dqt_Start(UwpCWDispatcherQueueTimer *T) {
+    UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->is_running = 1u;
+    return S_OK;
+}
+static HRESULT UWP_CALL dqt_Stop(UwpCWDispatcherQueueTimer *T) {
+    UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->is_running = 0u;
+    return S_OK;
+}
+static HRESULT UWP_CALL dqt_add_Tick(UwpCWDispatcherQueueTimer *T, UwpTypedEventHandler *h,
+                                     UwpEventRegistrationToken *tok) {
+    return uwp_event_list_add(&UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->ev_tick, h, tok);
+}
+static HRESULT UWP_CALL dqt_remove_Tick(UwpCWDispatcherQueueTimer *T, UwpEventRegistrationToken tok) {
+    return uwp_event_list_remove(&UWP_CONTAINING_RECORD(T, UwpCWDQTimerObj, iface)->ev_tick, tok);
+}
+
+static const UwpCWDispatcherQueueTimerVtbl g_dqt_vtbl = {
+    dqt_QI, dqt_AddRef, dqt_Release,
+    dqt_GetIids, dqt_GetName, dqt_GetTrust,
+    dqt_get_Interval, dqt_put_Interval,
+    dqt_get_IsRunning,
+    dqt_get_IsRepeating, dqt_put_IsRepeating,
+    dqt_Start, dqt_Stop,
+    dqt_add_Tick, dqt_remove_Tick
+};
+
+static HRESULT dq_qi_impl(UwpCoreWindowObj *win, REFIID riid, void **ppv) {
+    if (!riid || !ppv) return E_INVALIDARG;
+    *ppv = NULL;
+    if (uwp_guid_equal(riid, &UWP_IID_IUnknown) ||
+        uwp_guid_equal(riid, &UWP_IID_IInspectable) ||
+        uwp_guid_equal(riid, &UWP_IID_IAgileObject) ||
+        uwp_guid_equal(riid, &CW_IID_IDispatcherQueue)) {
+        uwp_atomic_inc(&win->ref);
+        *ppv = &win->dispatcher_queue;
+        return S_OK;
+    }
+    if (uwp_guid_equal(riid, &CW_IID_IDispatcherQueue2)) {
+        uwp_atomic_inc(&win->ref);
+        *ppv = &win->dispatcher_queue2;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static HRESULT UWP_CALL dq_QI(UwpCWDispatcherQueue *T, REFIID r, void **p) {
+    return dq_qi_impl(UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue), r, p);
+}
+static ULONG UWP_CALL dq_AddRef(UwpCWDispatcherQueue *T) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue)->ref);
+}
+static ULONG UWP_CALL dq_Release(UwpCWDispatcherQueue *T) {
+    UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue);
+    int32_t r = uwp_atomic_dec(&w->ref);
+    if (r == 0) cw_destroy(w);
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL dq_GetIids(UwpCWDispatcherQueue *T, ULONG *c, IID **i) {
+    (void)T;
+    return uwp_cw_alloc_iids(k_dispatcher_queue_iids,
+                             (ULONG)(sizeof(k_dispatcher_queue_iids) / sizeof(k_dispatcher_queue_iids[0])),
+                             c, i);
+}
+static HRESULT UWP_CALL dq_GetName(UwpCWDispatcherQueue *T, UWP_HSTRING *n) {
+    (void)T; return uwp_hstring_create_from_wstr(L"Windows.System.DispatcherQueue", n);
+}
+static HRESULT UWP_CALL dq_GetTrust(UwpCWDispatcherQueue *T, UwpTrustLevel *t) {
+    (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
+}
+static HRESULT UWP_CALL dq_CreateTimer(UwpCWDispatcherQueue *T, void **result) {
+    (void)T;
+    if (!result) return E_INVALIDARG;
+    *result = NULL;
+    UwpCWDQTimerObj *o = (UwpCWDQTimerObj *)calloc(1, sizeof(*o));
+    if (!o) return E_OUTOFMEMORY;
+    o->iface.lpVtbl = &g_dqt_vtbl;
+    o->ref = 1;
+    o->is_repeating = 1u;
+    uwp_event_list_init(&o->ev_tick);
+    *result = &o->iface;
+    return S_OK;
+}
+static HRESULT UWP_CALL dq_TryEnqueue(UwpCWDispatcherQueue *T, UwpDispatchedHandler *cb, uint8_t *result) {
+    UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue);
+    if (!cb || !result) return E_INVALIDARG;
+    HRESULT hr = uwp_enqueue_work(w, UWP_PRIORITY_NORMAL, 0, cb, NULL, NULL);
+    *result = SUCCEEDED(hr) ? 1u : 0u;
+    return hr;
+}
+static HRESULT UWP_CALL dq_TryEnqueueWithPriority(UwpCWDispatcherQueue *T, int32_t priority,
+                                                  UwpDispatchedHandler *cb, uint8_t *result) {
+    UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue);
+    if (!cb || !result) return E_INVALIDARG;
+    UwpCoreDispatcherPriority p = UWP_PRIORITY_NORMAL;
+    if (priority < 0) p = UWP_PRIORITY_LOW;
+    else if (priority > 0) p = UWP_PRIORITY_HIGH;
+    HRESULT hr = uwp_enqueue_work(w, p, 0, cb, NULL, NULL);
+    *result = SUCCEEDED(hr) ? 1u : 0u;
+    return hr;
+}
+static HRESULT UWP_CALL dq_add_ShutdownStarting(UwpCWDispatcherQueue *T, UwpTypedEventHandler *h,
+                                                UwpEventRegistrationToken *tok) {
+    return uwp_event_list_add(&UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue)->ev_dq_shutdown_starting, h, tok);
+}
+static HRESULT UWP_CALL dq_remove_ShutdownStarting(UwpCWDispatcherQueue *T, UwpEventRegistrationToken tok) {
+    return uwp_event_list_remove(&UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue)->ev_dq_shutdown_starting, tok);
+}
+static HRESULT UWP_CALL dq_add_ShutdownCompleted(UwpCWDispatcherQueue *T, UwpTypedEventHandler *h,
+                                                 UwpEventRegistrationToken *tok) {
+    return uwp_event_list_add(&UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue)->ev_dq_shutdown_completed, h, tok);
+}
+static HRESULT UWP_CALL dq_remove_ShutdownCompleted(UwpCWDispatcherQueue *T, UwpEventRegistrationToken tok) {
+    return uwp_event_list_remove(&UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue)->ev_dq_shutdown_completed, tok);
+}
+
+static const UwpCWDispatcherQueueVtbl g_dq_vtbl = {
+    dq_QI, dq_AddRef, dq_Release,
+    dq_GetIids, dq_GetName, dq_GetTrust,
+    dq_CreateTimer, dq_TryEnqueue, dq_TryEnqueueWithPriority,
+    dq_add_ShutdownStarting, dq_remove_ShutdownStarting,
+    dq_add_ShutdownCompleted, dq_remove_ShutdownCompleted
+};
+
+static HRESULT UWP_CALL dq2_QI(UwpCWDispatcherQueue2 *T, REFIID r, void **p) {
+    return dq_qi_impl(UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue2), r, p);
+}
+static ULONG UWP_CALL dq2_AddRef(UwpCWDispatcherQueue2 *T) {
+    return (ULONG)uwp_atomic_inc(&UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue2)->ref);
+}
+static ULONG UWP_CALL dq2_Release(UwpCWDispatcherQueue2 *T) {
+    UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue2);
+    int32_t r = uwp_atomic_dec(&w->ref);
+    if (r == 0) cw_destroy(w);
+    return (ULONG)r;
+}
+static HRESULT UWP_CALL dq2_GetIids(UwpCWDispatcherQueue2 *T, ULONG *c, IID **i) {
+    (void)T;
+    return uwp_cw_alloc_iids(k_dispatcher_queue_iids,
+                             (ULONG)(sizeof(k_dispatcher_queue_iids) / sizeof(k_dispatcher_queue_iids[0])),
+                             c, i);
+}
+static HRESULT UWP_CALL dq2_GetName(UwpCWDispatcherQueue2 *T, UWP_HSTRING *n) {
+    (void)T; return uwp_hstring_create_from_wstr(L"Windows.System.DispatcherQueue", n);
+}
+static HRESULT UWP_CALL dq2_GetTrust(UwpCWDispatcherQueue2 *T, UwpTrustLevel *t) {
+    (void)T; if (!t) return E_INVALIDARG; *t = UWP_TRUST_BASE; return S_OK;
+}
+static HRESULT UWP_CALL dq2_get_HasThreadAccess(UwpCWDispatcherQueue2 *T, uint8_t *v) {
+    if (!v) return E_INVALIDARG;
+    UwpCoreWindowObj *w = UWP_CONTAINING_RECORD(T, UwpCoreWindowObj, dispatcher_queue2);
+    *v = (w->owner_thread_id == uwp_current_thread_id()) ? 1u : 0u;
+    return S_OK;
+}
+
+static const UwpCWDispatcherQueue2Vtbl g_dq2_vtbl = {
+    dq2_QI, dq2_AddRef, dq2_Release,
+    dq2_GetIids, dq2_GetName, dq2_GetTrust,
+    dq2_get_HasThreadAccess
+};
+
+/* ============================================================================
  * CoreWindow Creation & Lifecycle Helpers
  * ============================================================================ */
 
@@ -1544,15 +2300,17 @@ UwpCoreWindowObj *uwp_corewindow_create(uint32_t width, uint32_t height,
     UwpCoreWindowObj *w = (UwpCoreWindowObj *)calloc(1, sizeof(*w));
     if (!w) return NULL;
 
-    w->core_window.lpVtbl  = &g_cw_vtbl;
-    w->core_window2.lpVtbl = &g_cw2_vtbl;
-    w->core_window3.lpVtbl = &g_cw3_vtbl;
-    w->core_window4.lpVtbl = &g_cw4_vtbl;
-    w->core_window5.lpVtbl = &g_cw5_vtbl;
-    w->interop.lpVtbl      = &g_interop_vtbl;
-    w->bridge.lpVtbl       = &g_bridge_vtbl;
-    w->dispatcher.lpVtbl   = &g_disp_vtbl;
-    w->accel_keys.lpVtbl   = &g_accel_vtbl;
+    w->core_window.lpVtbl       = &g_cw_vtbl;
+    w->core_window2.lpVtbl      = &g_cw2_vtbl;
+    w->core_window3.lpVtbl      = &g_cw3_vtbl;
+    w->core_window4.lpVtbl      = &g_cw4_vtbl;
+    w->core_window5.lpVtbl      = &g_cw5_vtbl;
+    w->interop.lpVtbl           = &g_interop_vtbl;
+    w->bridge.lpVtbl            = &g_bridge_vtbl;
+    w->dispatcher.lpVtbl        = &g_disp_vtbl;
+    w->accel_keys.lpVtbl        = &g_accel_vtbl;
+    w->dispatcher_queue.lpVtbl  = &g_dq_vtbl;
+    w->dispatcher_queue2.lpVtbl = &g_dq2_vtbl;
 
     w->ref = 1;
     uwp_mutex_init(&w->lock);
@@ -1563,7 +2321,7 @@ UwpCoreWindowObj *uwp_corewindow_create(uint32_t width, uint32_t height,
     w->client_width = width ? width : g_default_width;
     w->client_height = height ? height : g_default_height;
     w->is_input_enabled = 1u;
-    w->visible = 0u;
+    w->visible = 1u;
     w->flow_direction = UWP_FLOW_LEFT_TO_RIGHT;
     w->activation_mode = UWP_ACTIVATION_MODE_NONE;
 
@@ -1599,6 +2357,8 @@ UwpCoreWindowObj *uwp_corewindow_create(uint32_t width, uint32_t height,
     uwp_event_list_init(&w->ev_resize_started);
     uwp_event_list_init(&w->ev_resize_completed);
     uwp_event_list_init(&w->ev_accel_key);
+    uwp_event_list_init(&w->ev_dq_shutdown_starting);
+    uwp_event_list_init(&w->ev_dq_shutdown_completed);
 
 #ifdef _WIN32
     if (!w->headless && uwp_ensure_wndclass_registered()) {
@@ -1660,8 +2420,15 @@ UwpICoreDispatcher *uwp_corewindow_dispatcher_iface(UwpCoreWindowObj *win) {
 
 void uwp_corewindow_request_close(UwpCoreWindowObj *win) {
     if (!win) return;
-    if (!win->closed) {
-        win->closed = 1;
+    int should_fire = 0;
+    uwp_mutex_lock(&win->lock);
+    win->closed = 1;
+    if (!win->closed_notified) {
+        win->closed_notified = 1u;
+        should_fire = 1;
+    }
+    uwp_mutex_unlock(&win->lock);
+    if (should_fire) {
         UwpICoreWindowEventArgs *cargs = uwp_create_core_window_event_args();
         if (cargs) {
             uwp_event_list_invoke(&win->ev_closed, &win->core_window, cargs);
@@ -1671,6 +2438,8 @@ void uwp_corewindow_request_close(UwpCoreWindowObj *win) {
 #ifdef _WIN32
     if (win->hwnd && !win->headless) {
         PostMessageW(win->hwnd, WM_CLOSE, 0, 0);
+    } else if (!win->headless) {
+        PostQuitMessage(0);
     }
 #endif
 }
@@ -1710,7 +2479,9 @@ static HRESULT UWP_CALL cwf_QI(UwpIActivationFactory *T, REFIID r, void **p) {
 static ULONG UWP_CALL cwf_AddRef(UwpIActivationFactory *T) { (void)T; return 1u; }
 static ULONG UWP_CALL cwf_Release(UwpIActivationFactory *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL cwf_GetIids(UwpIActivationFactory *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    const GUID list[2] = { UWP_IID_IActivationFactory, UWP_IID_ICoreWindowStatic };
+    return uwp_cw_alloc_iids(list, 2u, c, i);
 }
 static HRESULT UWP_CALL cwf_GetName(UwpIActivationFactory *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreWindow", n);
@@ -1729,7 +2500,9 @@ static HRESULT UWP_CALL cws_QI(UwpICoreWindowStatic *T, REFIID r, void **p) {
 static ULONG UWP_CALL cws_AddRef(UwpICoreWindowStatic *T) { (void)T; return 1u; }
 static ULONG UWP_CALL cws_Release(UwpICoreWindowStatic *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL cws_GetIids(UwpICoreWindowStatic *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    const GUID list[2] = { UWP_IID_IActivationFactory, UWP_IID_ICoreWindowStatic };
+    return uwp_cw_alloc_iids(list, 2u, c, i);
 }
 static HRESULT UWP_CALL cws_GetName(UwpICoreWindowStatic *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreWindow", n);
@@ -1779,7 +2552,8 @@ static HRESULT UWP_CALL df_QI(UwpIActivationFactory *T, REFIID r, void **p) {
 static ULONG UWP_CALL df_AddRef(UwpIActivationFactory *T) { (void)T; return 1u; }
 static ULONG UWP_CALL df_Release(UwpIActivationFactory *T) { (void)T; return 1u; }
 static HRESULT UWP_CALL df_GetIids(UwpIActivationFactory *T, ULONG *c, IID **i) {
-    (void)T; if (!c || !i) return E_INVALIDARG; *c = 0; *i = NULL; return S_OK;
+    (void)T;
+    return uwp_cw_alloc_iids(&UWP_IID_IActivationFactory, 1u, c, i);
 }
 static HRESULT UWP_CALL df_GetName(UwpIActivationFactory *T, UWP_HSTRING *n) {
     (void)T; return uwp_hstring_create_from_wstr(L"Windows.UI.Core.CoreDispatcher", n);

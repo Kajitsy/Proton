@@ -922,12 +922,35 @@ static HRESULT STDMETHODCALLTYPE gpvw_indexof(void *This, void *elem, uint32_t *
     WinrtGamepadViewObj *obj = (WinrtGamepadViewObj *)This;
     if (!idx || !found) return E_POINTER;
     *idx = 0; *found = 0;
+    IUnknown *target_unk = NULL;
+    if (elem) {
+        IUnknown *u = (IUnknown *)elem;
+        if (FAILED(u->lpVtbl->QueryInterface(u, &WINRT_IID_IUnknown, (void **)&target_unk))) {
+            target_unk = u;
+        }
+    }
     for (uint32_t i = 0; i < obj->count; ++i) {
-        if ((void *)&obj->items[i]->lpVtbl == elem) {
+        IUnknown *item_unk = NULL;
+        IUnknown *item = (IUnknown *)&obj->items[i]->lpVtbl;
+        if (SUCCEEDED(item->lpVtbl->QueryInterface(item, &WINRT_IID_IUnknown, (void **)&item_unk))) {
+            int match = (item_unk == target_unk);
+            item_unk->lpVtbl->Release(item_unk);
+            if (match) {
+                *idx = i;
+                *found = 1;
+                break;
+            }
+        } else if ((void *)item == elem) {
             *idx = i;
             *found = 1;
             break;
         }
+    }
+    if (target_unk && target_unk != (IUnknown *)elem) {
+        target_unk->lpVtbl->Release(target_unk);
+    } else if (target_unk == (IUnknown *)elem && elem) {
+        /* QI on &lpVtbl returned AddRef'd IUnknown if elem was already primary */
+        target_unk->lpVtbl->Release(target_unk);
     }
     return S_OK;
 }

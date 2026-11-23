@@ -69,6 +69,7 @@ HRESULT winrt_sys_get_iids_copy(const GUID *iids, ULONG count, ULONG *out_count,
 HRESULT winrt_sys_unimplemented(const char *iface_method, void *self);
 
 void winrt_sys_copy_wstr(wchar_t *dst, size_t dst_chars, const wchar_t *src);
+int  winrt_sys_wcsicmp(const wchar_t *a, const wchar_t *b);
 void winrt_sys_normalize_path(const wchar_t *in_path, wchar_t *out_path, size_t out_chars);
 BOOL winrt_sys_ensure_dir_recursive(const wchar_t *dir_path);
 
@@ -170,12 +171,44 @@ static const GUID WINRT_IID_IKeyValuePair_HSTRING_AppDataContainer =
 
 static const GUID WINRT_IID_IStorageFolderStatics =
     { 0x08f327ffu, 0x85d5u, 0x48b9u, { 0xaeu, 0xe9u, 0x28u, 0x51u, 0x1eu, 0x33u, 0x9fu, 0x9fu } };
+static const GUID WINRT_IID_IStorageFileStatics =
+    { 0x5984c710u, 0xdaf2u, 0x43c8u, { 0x8bu, 0xb4u, 0xa4u, 0xd3u, 0xeau, 0xcfu, 0xd0u, 0x3fu } };
 static const GUID WINRT_IID_IStorageFolder =
     { 0x72d1cb78u, 0xb3efu, 0x4f75u, { 0xa8u, 0x0bu, 0x6fu, 0xd9u, 0xdau, 0xe2u, 0x94u, 0x4bu } };
+static const GUID WINRT_IID_IStorageFolder2 =
+    { 0xe827e8b9u, 0x08d9u, 0x4a8eu, { 0xa0u, 0xacu, 0xfeu, 0x5eu, 0xd3u, 0xcbu, 0xbbu, 0xd3u } };
 static const GUID WINRT_IID_IStorageFile =
     { 0xfa3f6186u, 0x4214u, 0x428cu, { 0xa6u, 0x4cu, 0x14u, 0xc9u, 0xacu, 0x73u, 0x15u, 0xeau } };
+static const GUID WINRT_IID_IStorageFile2 =
+    { 0x954e4bcfu, 0x0a77u, 0x42fbu, { 0xb7u, 0x77u, 0xc2u, 0xedu, 0x58u, 0xa5u, 0x2eu, 0x44u } };
 static const GUID WINRT_IID_IStorageItem =
     { 0x4207a996u, 0xca2fu, 0x42f7u, { 0xbdu, 0xe8u, 0x8bu, 0x10u, 0x45u, 0x7au, 0x7fu, 0x30u } };
+static const GUID WINRT_IID_IStorageItem2 =
+    { 0x53f926d2u, 0x083cu, 0x4283u, { 0xb4u, 0x5bu, 0x81u, 0xc0u, 0x07u, 0x23u, 0x7eu, 0x44u } };
+static const GUID WINRT_IID_IUriRuntimeClass =
+    { 0x9e365e57u, 0x48b2u, 0x4160u, { 0x95u, 0x6fu, 0xc7u, 0x38u, 0x51u, 0x20u, 0xbbu, 0xfcu } };
+static const GUID WINRT_IID_IBasicProperties =
+    { 0xd05d55dbu, 0x785eu, 0x4a66u, { 0xbeu, 0x02u, 0x9bu, 0xeeu, 0xc5u, 0x8au, 0xeau, 0x81u } };
+
+/* Windows.Storage.Streams */
+static const GUID WINRT_IID_IBuffer =
+    { 0x905a0fe0u, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } };
+static const GUID WINRT_IID_IBufferByteAccess =
+    { 0x905a0fefu, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } };
+static const GUID WINRT_IID_IInputStream =
+    { 0x905a0fe2u, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } };
+static const GUID WINRT_IID_IOutputStream =
+    { 0x905a0fe6u, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } };
+static const GUID WINRT_IID_IRandomAccessStream =
+    { 0x905a0fe1u, 0xbc53u, 0x11dfu, { 0x8cu, 0x49u, 0x00u, 0x1eu, 0x4fu, 0xc6u, 0x86u, 0xdau } };
+static const GUID WINRT_IID_IRandomAccessStreamWithContentType =
+    { 0xcc254827u, 0x4b3du, 0x438fu, { 0x92u, 0x32u, 0x10u, 0xc7u, 0x6bu, 0xc7u, 0xe0u, 0x38u } };
+static const GUID WINRT_IID_IContentTypeProvider =
+    { 0x97d098a5u, 0x3b99u, 0x4de9u, { 0x88u, 0xa5u, 0xe1u, 0x1du, 0x2fu, 0x50u, 0xc7u, 0x95u } };
+static const GUID WINRT_IID_IRandomAccessStreamReference =
+    { 0x33ee3134u, 0x1dd6u, 0x4e3au, { 0x80u, 0x67u, 0xd1u, 0xc1u, 0x62u, 0xe8u, 0x64u, 0x2bu } };
+static const GUID WINRT_IID_IInputStreamReference =
+    { 0x43929d18u, 0x5ec9u, 0x4b5au, { 0x91u, 0x9cu, 0x42u, 0x05u, 0xb0u, 0xc8u, 0x04u, 0xb6u } };
 
 static const GUID WINRT_IID_IAsyncOperation_StorageFolder =
     { 0x6be9e7d7u, 0xe83au, 0x5cbcu, { 0x80u, 0x2cu, 0x17u, 0x68u, 0x96u, 0x0bu, 0x52u, 0xc3u } };
@@ -185,12 +218,38 @@ static const GUID WINRT_IID_IAsyncOperation_IStorageItem =
     { 0x5fc9c137u, 0xebb7u, 0x5e6cu, { 0x9cu, 0xbau, 0x68u, 0x6fu, 0x2eu, 0xc2u, 0xb0u, 0xbbu } };
 static const GUID WINRT_IID_IAsyncOperation_ApplicationData =
     { 0x31456b58u, 0xa5cbu, 0x5c5bu, { 0xbdu, 0x6eu, 0xccu, 0xceu, 0x3au, 0x7bu, 0xf4u, 0xb4u } };
+static const GUID WINRT_IID_IAsyncOperation_BasicProperties =
+    { 0x5186131au, 0x4467u, 0x504bu, { 0x97u, 0x7au, 0x07u, 0x85u, 0xa8u, 0x23u, 0x04u, 0x85u } };
+static const GUID WINRT_IID_IAsyncOperation_IRandomAccessStream =
+    { 0x430ececeu, 0x1418u, 0x5d19u, { 0x81u, 0xb2u, 0x5du, 0xdbu, 0x38u, 0x16u, 0x03u, 0xccu } };
+static const GUID WINRT_IID_IAsyncOperation_IRandomAccessStreamWithContentType =
+    { 0xc4a57c5eu, 0x32b0u, 0x55b3u, { 0xadu, 0x13u, 0xceu, 0x1cu, 0x23u, 0x04u, 0x1eu, 0xd6u } };
+static const GUID WINRT_IID_IAsyncOperation_IInputStream =
+    { 0xa8fe0732u, 0x556du, 0x5841u, { 0xb7u, 0xeeu, 0xb3u, 0x45u, 0x0fu, 0xb5u, 0x26u, 0x66u } };
+static const GUID WINRT_IID_IAsyncOperation_Boolean =
+    { 0xcdb5efb3u, 0x5788u, 0x509du, { 0x9bu, 0xe1u, 0x71u, 0xccu, 0xb8u, 0xa3u, 0x36u, 0x2au } };
+static const GUID WINRT_IID_IAsyncOpWithProgress_IBuffer_UInt32 =
+    { 0xd26b2819u, 0x897fu, 0x5c7du, { 0x84u, 0xd6u, 0x56u, 0xd7u, 0x96u, 0x56u, 0x14u, 0x31u } };
+static const GUID WINRT_IID_IAsyncOpWithProgress_UInt32_UInt32 =
+    { 0xeccb574au, 0xc684u, 0x5572u, { 0xa6u, 0x79u, 0x6bu, 0x08u, 0x42u, 0xcfu, 0xb5u, 0x7fu } };
 static const GUID WINRT_IID_IVectorView_StorageFolder =
     { 0xe20debc6u, 0xdc4eu, 0x542eu, { 0xa2u, 0xe7u, 0xa2u, 0x4du, 0x19u, 0xc8u, 0xddu, 0x62u } };
+static const GUID WINRT_IID_IIterable_StorageFolder =
+    { 0x4669befcu, 0xae5cu, 0x52b1u, { 0x8au, 0x97u, 0x54u, 0x66u, 0xceu, 0x61u, 0xe9u, 0x4eu } };
+static const GUID WINRT_IID_IIterator_StorageFolder =
+    { 0x5aac96fbu, 0xb3b9u, 0x5a7fu, { 0xa9u, 0x20u, 0x4bu, 0x5au, 0x8du, 0xf8u, 0x11u, 0x68u } };
 static const GUID WINRT_IID_IVectorView_StorageFile =
     { 0x80646519u, 0x5e2au, 0x595du, { 0xa8u, 0xcdu, 0x2au, 0x24u, 0xb4u, 0x06u, 0x7fu, 0x1bu } };
+static const GUID WINRT_IID_IIterable_StorageFile =
+    { 0x9ac00304u, 0x83eau, 0x5688u, { 0x87u, 0xb6u, 0xaeu, 0x38u, 0xaau, 0xb6u, 0x5du, 0x0bu } };
+static const GUID WINRT_IID_IIterator_StorageFile =
+    { 0x43e29f53u, 0x0298u, 0x55aau, { 0xa6u, 0xc8u, 0x4eu, 0xddu, 0x32u, 0x3du, 0x95u, 0x98u } };
 static const GUID WINRT_IID_IVectorView_IStorageItem =
     { 0x85575a41u, 0x06cbu, 0x58d0u, { 0xb9u, 0x8au, 0x7cu, 0x8fu, 0x06u, 0xe6u, 0xe9u, 0xd7u } };
+static const GUID WINRT_IID_IIterable_IStorageItem =
+    { 0xbb8b8418u, 0x65d1u, 0x544bu, { 0xb0u, 0x83u, 0x6du, 0x17u, 0x2fu, 0x56u, 0x8cu, 0x73u } };
+static const GUID WINRT_IID_IIterator_IStorageItem =
+    { 0x05b487c2u, 0x3830u, 0x5d3cu, { 0x98u, 0xdau, 0x25u, 0xfau, 0x11u, 0x54u, 0x2du, 0xbdu } };
 
 /* Windows.ApplicationModel.Package */
 static const GUID WINRT_IID_IPackageStatics =
@@ -293,6 +352,46 @@ typedef struct WinrtAsyncOperationPtrVtbl {
     HRESULT (STDMETHODCALLTYPE *get_Completed)(void *This, void **handler);
     HRESULT (STDMETHODCALLTYPE *GetResults)(void *This, void **results);
 } WinrtAsyncOperationPtrVtbl;
+
+typedef struct WinrtAsyncOpWithProgressPtrVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *put_Progress)(void *This, void *handler);
+    HRESULT (STDMETHODCALLTYPE *get_Progress)(void *This, void **handler);
+    HRESULT (STDMETHODCALLTYPE *put_Completed)(void *This, void *handler);
+    HRESULT (STDMETHODCALLTYPE *get_Completed)(void *This, void **handler);
+    HRESULT (STDMETHODCALLTYPE *GetResults)(void *This, void **results);
+} WinrtAsyncOpWithProgressPtrVtbl;
+
+typedef struct WinrtAsyncOpWithProgressU32Vtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *put_Progress)(void *This, void *handler);
+    HRESULT (STDMETHODCALLTYPE *get_Progress)(void *This, void **handler);
+    HRESULT (STDMETHODCALLTYPE *put_Completed)(void *This, void *handler);
+    HRESULT (STDMETHODCALLTYPE *get_Completed)(void *This, void **handler);
+    HRESULT (STDMETHODCALLTYPE *GetResults)(void *This, uint32_t *results);
+} WinrtAsyncOpWithProgressU32Vtbl;
+
+typedef struct WinrtAsyncOperationBoolVtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *put_Completed)(void *This, void *handler);
+    HRESULT (STDMETHODCALLTYPE *get_Completed)(void *This, void **handler);
+    HRESULT (STDMETHODCALLTYPE *GetResults)(void *This, boolean *results);
+} WinrtAsyncOperationBoolVtbl;
 
 typedef struct WinrtAsyncCompletedHandlerPtrVtbl {
     HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
@@ -419,9 +518,27 @@ HRESULT winrt_sys_create_completed_async_op_ptr(
     IUnknown *result_obj,
     HRESULT err_hr,
     void **out_op);
+HRESULT winrt_sys_create_completed_async_op_bool(
+    boolean result_val,
+    HRESULT err_hr,
+    void **out_op);
+HRESULT winrt_sys_create_completed_async_op_with_progress_ptr(
+    const GUID *op_iid,
+    const wchar_t *runtime_class_name,
+    IUnknown *result_obj,
+    HRESULT err_hr,
+    void **out_op);
+HRESULT winrt_sys_create_completed_async_op_with_progress_u32(
+    const GUID *op_iid,
+    const wchar_t *runtime_class_name,
+    uint32_t result_val,
+    HRESULT err_hr,
+    void **out_op);
 
 HRESULT winrt_sys_create_storage_folder(const wchar_t *path, void **out_folder);
 HRESULT winrt_sys_create_storage_file(const wchar_t *path, void **out_file);
+HRESULT winrt_sys_create_buffer(const uint8_t *bytes, uint32_t len, void **out_buf);
+HRESULT winrt_sys_read_buffer(void *buf_iface, uint8_t **out_ptr, uint32_t *out_len);
 HRESULT winrt_sys_create_property_value_string(const wchar_t *str, void **out_pv);
 HRESULT winrt_sys_create_property_value_int32(int32_t val, void **out_pv);
 HRESULT winrt_sys_create_property_value_uint32(uint32_t val, void **out_pv);
@@ -431,9 +548,16 @@ HRESULT winrt_sys_create_property_value_single(float val, void **out_pv);
 HRESULT winrt_sys_create_property_value_double(double val, void **out_pv);
 HRESULT winrt_sys_create_property_value_boolean(boolean val, void **out_pv);
 HRESULT winrt_sys_create_property_value_guid(const GUID *val, void **out_pv);
+HRESULT winrt_sys_create_property_value_uint8(uint8_t val, void **out_pv);
+HRESULT winrt_sys_create_property_value_int16(int16_t val, void **out_pv);
+HRESULT winrt_sys_create_property_value_uint16(uint16_t val, void **out_pv);
+HRESULT winrt_sys_create_property_value_char16(wchar_t val, void **out_pv);
+HRESULT winrt_sys_create_property_value_datetime(int64_t val, void **out_pv);
+HRESULT winrt_sys_create_property_value_timespan(int64_t val, void **out_pv);
 
 HRESULT winrt_sys_get_application_data_factory(REFIID iid, void **out_factory);
 HRESULT winrt_sys_get_storage_folder_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_storage_file_factory(REFIID iid, void **out_factory);
 HRESULT winrt_sys_get_package_factory(REFIID iid, void **out_factory);
 HRESULT winrt_sys_get_gamepad_factory(REFIID iid, void **out_factory);
 HRESULT winrt_sys_get_analytics_info_factory(REFIID iid, void **out_factory);
@@ -445,6 +569,18 @@ HRESULT winrt_sys_get_cryptographic_buffer_factory(REFIID iid, void **out_factor
 HRESULT winrt_sys_get_popup_menu_factory(REFIID iid, void **out_factory);
 HRESULT winrt_sys_get_uicommand_factory(REFIID iid, void **out_factory);
 HRESULT winrt_sys_get_thread_pool_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_thread_pool_timer_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_pnp_object_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_hid_device_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_touch_capabilities_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_mouse_capabilities_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_keyboard_capabilities_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_hardware_identification_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_memory_manager_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_power_manager_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_network_information_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_host_name_factory(REFIID iid, void **out_factory);
+HRESULT winrt_sys_get_media_device_factory(REFIID iid, void **out_factory);
 
 #ifdef __cplusplus
 }
