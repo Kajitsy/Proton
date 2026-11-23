@@ -171,14 +171,23 @@ lines described in section 5.
 5. DXVK bug (not fixed): `dxvk/src/d3d11/d3d11_swapchain.cpp:181-182` `ChangeProperties`
    passes the old `m_desc` extent to `setSurfaceExtent`; also line ~667 logs `m_desc.Format`
    instead of `Format`.
-6. Existing Wine prefixes created before the `Calendar` runtimeclass was added lack its
-   ActivatableClassId registration. A fresh prefix gets it through `classes_r.res`; for an
-   existing prefix run once:
+6. Wine prefixes created before the `Calendar` runtimeclass was added lack its
+   ActivatableClassId registration (a fresh prefix normally gets it from `classes_r.res`
+   during wineboot). The current `build/dist/files/share/default_pfx` template contains the
+   registration, and the Steam prefix used for the HedgePhysics shortcut has been patched.
+   For an old prefix, run once:
    ```
-   WINEPREFIX=/tmp/uwp_pfx_hedgephysics/pfx build/dist/files/bin/wine reg add \
+   WINEPREFIX=/path/to/compatdata/pfx build/dist/files/bin/wine reg add \
      "HKLM\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Globalization.Calendar" \
      /v DllPath /t REG_SZ /d "C:\windows\system32\windows.globalization.dll" /f
    ```
+   To regenerate the template from scratch use `make -C build default_pfx` (it builds a
+   prefix with `python3 default_pfx.py build/dist/files/share/default_pfx build/dist/files 0`).
+   Note: in this local tree, a plain `wineboot` from the host fails to load 32-bit
+   `kernel32.dll` (the interrupted i386 build left the 32-bit tree inconsistent), so a
+   template can alternatively be produced by copying a working prefix, stripping run state
+   (`system.reg.old`, `.update-timestamp`, `creation_sync_guard`, game AppData) and running
+   `default_pfx.setup_dll_symlinks/fixup_drive_links/filter_registry`.
 7. Interactive check (keyboard/mouse/resize/cursor capture, actual gameplay past the loading
    screen) was not performed; only log-level frame-present evidence exists.
 
@@ -202,14 +211,14 @@ Incremental builds:
 make -C build wine-x86_64 scarlett-x86_64 dxvk-x86_64
 ```
 
-The run environment must be prepared once (it lives outside the repo):
+The run environment must be prepared once (it lives outside the repo). CoreCLR 1.1 is
+shipped as `Microsoft.NET.CoreRuntime.1.1.appx` next to the game package; unpack it to a
+**persistent** location (survives /tmp cleanup):
 
 ```bash
-# CoreCLR 1.1 shipped next to the game package
-mkdir -p /tmp/uwp_coreruntime_1.1/unpacked
+mkdir -p ~/.local/share/hedgephysics/coreclr_1.1 /tmp/uwp_logs
 unzip -o '/mnt/files/Downloads/HedgePhysics_1.2.3.0/Microsoft.NET.CoreRuntime.1.1.appx' \
-      -d /tmp/uwp_coreruntime_1.1/unpacked
-mkdir -p /tmp/uwp_logs
+      -d ~/.local/share/hedgephysics/coreclr_1.1
 ```
 
 Then just use the committed helper:
@@ -218,11 +227,13 @@ cd /home/kajitsy/Documents/GitHub/Proton
 ./scarlett/uwp_bridge/tools/run_hedgephysics.sh 30 /tmp/uwp_logs/hp_run_latest.log
 ```
 
-The script sets, among others:
-`STEAM_COMPAT_DATA_PATH=/tmp/uwp_pfx_hedgephysics`,
+The script resolves CoreCLR from `~/.local/share/hedgephysics/coreclr_1.1/coreclr.dll`
+(fallback: the old `/tmp/uwp_coreruntime_1.1/unpacked` unpack) and sets, among others:
+`STEAM_COMPAT_DATA_PATH=/tmp/uwp_pfx_hedgephysics` (override with `STEAM_COMPAT_DATA_PATH=...`
+or `UWP_CORECLR_UNIX=...` in the environment),
 `STEAM_COMPAT_CLIENT_INSTALL_PATH=/tmp`,
 `WINEDEBUG=+debugstr,+err,+uwp,+dxgi`,
-`PROTON_UWP_CORECLR_PATH=Z:\tmp\uwp_coreruntime_1.1\unpacked\coreclr.dll`,
+`PROTON_UWP_CORECLR_PATH=Z:\home\kajitsy\.local\share\hedgephysics\coreclr_1.1\coreclr.dll`,
 and (required for the frame evidence) `DXVK_LOG_LEVEL=info`, `DXVK_LOG_PATH=/tmp/uwp_logs`.
 Proton's `init_session()` defaults `DXVK_LOG_LEVEL` to `none`, so without setting it DXVK
 writes no `Present` lines at all. DXVK logs go to
@@ -237,7 +248,56 @@ grep 'DxgiSwapChain::Present: frame ' /tmp/uwp_logs/hp_run_latest.log | tail -1
 (DXVK logs frames 1..35 and then every 60th, so the last printed frame id is the real
 present count up to the next 59 frames.)
 
-## 8. Where the evidence lives
+### Running HedgePhysics through Steam (non-Steam shortcut)
+
+The build is registered as a Steam compatibility tool through a symlink:
+`~/.steam/steam/compatibilitytools.d/proton-scarlett -> build/dist` (restart Steam once to
+pick it up). Add `HedgePhysics.exe` as a non-Steam game and set, in
+Properties -> Compatibility -> force `proton-scarlett`, with these Launch Options:
+
+```
+PROTON_LOG=1 PROTON_UWP_CORECLR_PATH='Z:\home\kajitsy\.local\share\hedgephysics\coreclr_1.1\coreclr.dll' %command%
+```
+
+(the old `Z:\tmp\uwp_coreruntime_1.1\unpacked\coreclr.dll` path works too while `/tmp`
+still has it, but it does not survive a reboot). `PROTON_LOG=1` is what makes Proton write
+its log; the log lands in `~/steam-<unsigned appid>.log` (for the current HedgePhysics
+shortcut: `~/steam-13073843237460901888.log`). Search it for
+`DxgiSwapChain::Present: frame ` to confirm frames. UWP auto-detection works from the
+`AppxManifest.xml` next to the exe, so no other environment variables are needed.
+Note: Unity pauses the frame loop when its window is not focused, so a launch from a terminal
+while Steam has focus can show far fewer `Present` lines than a focused run - check the window
+before concluding it hangs. Also, a Steam prefix created before the Calendar fix lacks the
+registration (section 5 item 6) and the render thread dies after ~3 s - this is fixed in the
+current template and in the existing Steam prefix.
+
+## 8. Other UWP titles: SAB2 (non-Unity, .NET Native/C++-CX)
+
+SAB2 (`/home/kajitsy/Downloads/SAB2_1.0.0.0_x64/uwp_1.0.0.0_x64`) is a different UWP app
+(native C++/CX, SDL2 + GLFW + OpenGL, not Unity). With the current build it gets through the
+UWP lifecycle (manifest detected, `Initialize`/`SetWindow`/`Load`/`Activated`/`Run` all
+logged) but does not render: it first needs an OPC filename workaround for
+`libstdc%2B%2B-6.dll` (a `libstdc++-6.dll` symlink was added in the game folder), then it
+crashes with a NULL deref in its own `libuwp` (called from `glfw3`), and the log shows
+`[SCARLETT-CRT:STUB] [FAIL] vccorlib140_app.dll ?GetIBoxVtable@Details@Platform@@...`
+(SDL2 is hitting the unimplemented `GetIBoxVtable`/`GetIBoxArrayVtable` box vtables in
+`scarlett/uwp_bridge/forwarders/crt/vccorlib140_app.c`). Running it is therefore not a matter
+of launch parameters: the bridge needs, at least,
+1. OPC percent-encoded filename fallback at the **DLL loader** level (`ntdll` LdrLoadDll /
+   dependency resolution), not just kernelbase `CreateFileW`;
+2. real `Platform::Details::GetIBoxVtable` / `GetIBoxArrayVtable` implementations;
+3. `Windows.ApplicationModel.Package` / package-location support for native UWP apps.
+Command used for the test (prefix `/tmp/sab2_pfx`, auto UWP detection):
+```bash
+mkdir -p /tmp/sab2_pfx
+STEAM_COMPAT_DATA_PATH=/tmp/sab2_pfx STEAM_COMPAT_CLIENT_INSTALL_PATH=/tmp \
+  WINEDEBUG=+debugstr,+err,+uwp \
+  timeout 60s /home/kajitsy/Documents/GitHub/Proton/build/dist/proton run \
+  /home/kajitsy/Downloads/SAB2_1.0.0.0_x64/uwp_1.0.0.0_x64/uwp.exe
+```
+Logs: `/tmp/uwp_logs/sab2_run3.log` (lifecycle + crash backtrace).
+
+## 9. Where the evidence lives
 
 - `/tmp/uwp_logs/hp_run_final.log` — final combined run (both fixes, symlink removed)
 - `/tmp/uwp_logs/hp_run_7.log` — canonical lifecycle/first-frames run
@@ -248,3 +308,6 @@ present count up to the next 59 frames.)
 - `scarlett/uwp_bridge/NEXT_BLOCKERS.md` — audit of the next WinRT gaps and device enumeration
 - `/tmp/uwp_logs/verify_both.console.log` — orchestration log of runs #10/#11
 - `/tmp/uwp_logs/runner_evidence_summary.txt` — consolidated per-run criteria/evidence summary
+- `/tmp/uwp_logs/hp_run_steam_prefix3.log` — Steam-prefix run after the Calendar registration fix
+- `~/steam-13073843237460901888.log` — Proton log of the real Steam launch (shows the Calendar death before the fix)
+- `/tmp/uwp_logs/sab2_run3.log` — SAB2 UWP lifecycle + crash backtrace

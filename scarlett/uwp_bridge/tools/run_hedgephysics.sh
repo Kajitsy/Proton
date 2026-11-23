@@ -55,9 +55,15 @@ LOG="${2:-/tmp/uwp_logs/hp_run_latest.log}"
 
 PROTON=/home/kajitsy/Documents/GitHub/Proton/build/dist/proton
 GAME=/mnt/files/Downloads/HedgePhysics_1.2.3.0/HedgePhysics_1.2.3.0_x64/HedgePhysics_1.2.3.0_x64/HedgePhysics.exe
-PFX=/tmp/uwp_pfx_hedgephysics
-CORECLR='Z:\tmp\uwp_coreruntime_1.1\unpacked\coreclr.dll'
-DXVK_LOGDIR=/tmp/uwp_logs
+# Overridable so the same harness can drive the Steam-side prefix too.
+PFX=${STEAM_COMPAT_DATA_PATH:-/tmp/uwp_pfx_hedgephysics}
+# Persistent CoreCLR location (survives /tmp cleanup); fall back to the old /tmp unpack.
+CORECLR_UNIX=${UWP_CORECLR_UNIX:-$HOME/.local/share/hedgephysics/coreclr_1.1/coreclr.dll}
+if [ ! -f "$CORECLR_UNIX" ]; then
+  CORECLR_UNIX=/tmp/uwp_coreruntime_1.1/unpacked/coreclr.dll
+fi
+CORECLR="Z:$(printf '%s' "$CORECLR_UNIX" | sed 's#/#\\#g')"
+DXVK_LOGDIR=${DXVK_LOG_PATH:-/tmp/uwp_logs}
 
 mkdir -p "$DXVK_LOGDIR"
 LOG_DIR=$(dirname -- "$LOG")
