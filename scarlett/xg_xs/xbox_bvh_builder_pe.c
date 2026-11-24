@@ -132,6 +132,137 @@ SCARLETT_XG_API scarlett_hresult_t SCARLETT_XG_CALL XboxBvhBuildProceduralGeomet
         0u);
 }
 
+#define XBVH_DEF_STUB_DESC(var_name, sym_str) \
+    static const scarlett_stub_descriptor_t var_name = { \
+        SCARLETT_STUB_THUNK_ABI_VERSION, \
+        SCARLETT_STUB_FLAG_NONE, \
+        SCARLETT_STUB_ORDINAL_NONE, \
+        SCARLETT_STUB_SLOT_NONE, \
+        SCARLETT_ERR_UNIMPLEMENTED_STUB, \
+        0u, \
+        "XboxBvhBuilder.dll", \
+        sym_str, \
+    }
+
+typedef struct XboxBvhBuilder_Obj_S {
+    void *pDevice;
+    uint64_t flags;
+    uint64_t reserved;
+} XboxBvhBuilder_Obj;
+
+SCARLETT_STATIC_ASSERT(sizeof(XboxBvhBuilder_Obj) == 24,
+                       "XboxBvhBuilder_Obj must fit in 24 bytes");
+
+typedef struct XboxBvhPrebuildInfoDxr_S {
+    uint64_t ResultDataMaxSizeInBytes;
+    uint64_t ScratchDataSizeInBytes;
+    uint64_t UpdateScratchDataSizeInBytes;
+} XboxBvhPrebuildInfoDxr;
+
+XBVH_DEF_STUB_DESC(g_stub_bvh_build_batched2x, "XboxBvhBuilder::BuildRaytracingAccelerationStructureBatched2X");
+XBVH_DEF_STUB_DESC(g_stub_bvh_copy_as, "XboxBvhBuilder::CopyRaytracingAccelerationStructure");
+XBVH_DEF_STUB_DESC(g_stub_bvh_prebuild_dxr, "XboxBvhBuilder::GetRaytracingAccelerationStructurePrebuildInfo");
+XBVH_DEF_STUB_DESC(g_stub_bvh_rehydrate_batched2x, "XboxBvhBuilder::RehydrateRaytracingAccelerationStructureBatched2X");
+
+SCARLETT_XG_API void * SCARLETT_XG_CALL XboxBvhBuilder_ctor(
+    void *self,
+    void *pDevice,
+    uint8_t flag) {
+    if (self != NULL) {
+        XboxBvhBuilder_Obj *obj = (XboxBvhBuilder_Obj *)self;
+        xg_pe_zero_mem(obj, sizeof(*obj));
+        obj->pDevice = pDevice;
+        obj->flags = (uint64_t)(flag & 1u);
+    }
+    xg_pe_ods_printf(
+        "[XboxBvhBuilder] ctor self=0x%llx device=0x%llx flag=%u\n",
+        (unsigned long long)(uintptr_t)self,
+        (unsigned long long)(uintptr_t)pDevice,
+        (unsigned int)(flag & 1u));
+    return self;
+}
+
+SCARLETT_XG_API void SCARLETT_XG_CALL XboxBvhBuilder_dtor(void *self) {
+    if (self != NULL) {
+        xg_pe_zero_mem(self, sizeof(XboxBvhBuilder_Obj));
+    }
+}
+
+SCARLETT_XG_API void SCARLETT_XG_CALL XboxBvhBuilder_BuildRaytracingAccelerationStructureBatched2X(
+    void *self,
+    void *pCmdList,
+    uint32_t count,
+    const void *pDescs) {
+    (void)xg_pe_stub_dispatch_local(
+        &g_stub_bvh_build_batched2x,
+        (uint64_t)(uintptr_t)__builtin_return_address(0),
+        (uint64_t)(uintptr_t)self,
+        (uint64_t)(uintptr_t)pCmdList,
+        (uint64_t)count,
+        (uint64_t)(uintptr_t)pDescs);
+}
+
+SCARLETT_XG_API void SCARLETT_XG_CALL XboxBvhBuilder_CopyRaytracingAccelerationStructure(
+    void *self,
+    void *pCmdList,
+    uint64_t dst,
+    uint64_t src) {
+    (void)xg_pe_stub_dispatch_local(
+        &g_stub_bvh_copy_as,
+        (uint64_t)(uintptr_t)__builtin_return_address(0),
+        (uint64_t)(uintptr_t)self,
+        (uint64_t)(uintptr_t)pCmdList,
+        dst,
+        src);
+}
+
+SCARLETT_XG_API void SCARLETT_XG_CALL XboxBvhBuilder_GetRaytracingAccelerationStructurePrebuildInfo(
+    void *self,
+    const void *pInputs,
+    const void *pStreamDesc,
+    void *pOutInfo) {
+    if (pOutInfo != NULL) {
+        XboxBvhPrebuildInfoDxr *info = (XboxBvhPrebuildInfoDxr *)pOutInfo;
+        info->ResultDataMaxSizeInBytes = UINT64_C(65536);
+        info->ScratchDataSizeInBytes = UINT64_C(65536);
+        info->UpdateScratchDataSizeInBytes = UINT64_C(65536);
+    }
+    (void)xg_pe_stub_dispatch_local(
+        &g_stub_bvh_prebuild_dxr,
+        (uint64_t)(uintptr_t)__builtin_return_address(0),
+        (uint64_t)(uintptr_t)self,
+        (uint64_t)(uintptr_t)pInputs,
+        (uint64_t)(uintptr_t)pStreamDesc,
+        (uint64_t)(uintptr_t)pOutInfo);
+}
+
+SCARLETT_XG_API scarlett_hresult_t SCARLETT_XG_CALL XboxBvhBuilder_RehydrateRaytracingAccelerationStructureBatched2X(
+    void *self,
+    void *pCmdList,
+    uint32_t count,
+    const void *pDescs) {
+    return xg_pe_stub_dispatch_local(
+        &g_stub_bvh_rehydrate_batched2x,
+        (uint64_t)(uintptr_t)__builtin_return_address(0),
+        (uint64_t)(uintptr_t)self,
+        (uint64_t)(uintptr_t)pCmdList,
+        (uint64_t)count,
+        (uint64_t)(uintptr_t)pDescs);
+}
+
+SCARLETT_XG_API void SCARLETT_XG_CALL XboxBvhBuilder_Set64BitMortonCodes(
+    void *self,
+    uint8_t enabled) {
+    if (self != NULL) {
+        XboxBvhBuilder_Obj *obj = (XboxBvhBuilder_Obj *)self;
+        if (enabled != 0u) {
+            obj->flags |= UINT64_C(2);
+        } else {
+            obj->flags &= ~UINT64_C(2);
+        }
+    }
+}
+
 #if defined(_WIN32) || defined(__MINGW32__)
 uint32_t SCARLETT_XG_CALL DllMain(void *hinst, uint32_t reason, void *reserved) {
     (void)hinst;

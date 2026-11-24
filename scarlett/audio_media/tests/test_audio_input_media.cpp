@@ -211,10 +211,14 @@ struct GiDeviceVtbl {
     scarlett_hresult_t (SCARLETT_WIN64_API *QueryInterface)(void*, const scarlett_guid_t*, void**);
     uint32_t (SCARLETT_WIN64_API *AddRef)(void*);
     uint32_t (SCARLETT_WIN64_API *Release)(void*);
-    scarlett_hresult_t (SCARLETT_WIN64_API *GetDeviceInfo)(void*, const void**);
+    const void* (SCARLETT_WIN64_API *GetDeviceInfo)(void*);
     uint32_t (SCARLETT_WIN64_API *GetDeviceStatus)(void*);
-    void (SCARLETT_WIN64_API *SetRumbleState)(void*, const GiRumble*);
+    void (SCARLETT_WIN64_API *GetBatteryState)(void*, void*);
+    scarlett_hresult_t (SCARLETT_WIN64_API *CreateForceFeedbackEffect)(void*, uint32_t, const void*, void**);
+    uint32_t (SCARLETT_WIN64_API *IsForceFeedbackMotorPoweredOn)(void*, uint32_t);
+    void (SCARLETT_WIN64_API *SetForceFeedbackMotorGain)(void*, uint32_t, float);
     scarlett_hresult_t (SCARLETT_WIN64_API *SetHapticMotorState)(void*, uint32_t, const void*);
+    void (SCARLETT_WIN64_API *SetRumbleState)(void*, const GiRumble*);
 };
 
 struct GiDeviceObj {
@@ -229,6 +233,21 @@ struct GiReadingVtbl {
     uint64_t (SCARLETT_WIN64_API *GetSequenceNumber)(void*, uint32_t);
     uint64_t (SCARLETT_WIN64_API *GetTimestamp)(void*);
     void (SCARLETT_WIN64_API *GetDevice)(void*, void**);
+    uint32_t (SCARLETT_WIN64_API *GetRawReport)(void*, void**);
+    uint32_t (SCARLETT_WIN64_API *GetControllerAxisCount)(void*);
+    uint32_t (SCARLETT_WIN64_API *GetControllerAxisState)(void*, uint32_t, float*);
+    uint32_t (SCARLETT_WIN64_API *GetControllerButtonCount)(void*);
+    uint32_t (SCARLETT_WIN64_API *GetControllerButtonState)(void*, uint32_t, uint8_t*);
+    uint32_t (SCARLETT_WIN64_API *GetControllerSwitchCount)(void*);
+    uint32_t (SCARLETT_WIN64_API *GetControllerSwitchState)(void*, uint32_t, uint32_t*);
+    uint32_t (SCARLETT_WIN64_API *GetKeyCount)(void*);
+    uint32_t (SCARLETT_WIN64_API *GetKeyState)(void*, uint32_t, void*);
+    uint32_t (SCARLETT_WIN64_API *GetMouseState)(void*, void*);
+    uint32_t (SCARLETT_WIN64_API *GetTouchCount)(void*);
+    uint32_t (SCARLETT_WIN64_API *GetTouchState)(void*, uint32_t, void*);
+    uint32_t (SCARLETT_WIN64_API *GetMotionState)(void*, void*);
+    uint32_t (SCARLETT_WIN64_API *GetArcadeStickState)(void*, void*);
+    uint32_t (SCARLETT_WIN64_API *GetFlightStickState)(void*, void*);
     uint32_t (SCARLETT_WIN64_API *GetGamepadState)(void*, GiGamepadState*);
 };
 
@@ -243,9 +262,12 @@ struct GiVtbl {
     uint64_t (SCARLETT_WIN64_API *GetCurrentTimestamp)(void*);
     scarlett_hresult_t (SCARLETT_WIN64_API *GetCurrentReading)(void*, uint32_t, void*, void**);
     scarlett_hresult_t (SCARLETT_WIN64_API *GetNextReading)(void*, void*, uint32_t, void*, void**);
+    scarlett_hresult_t (SCARLETT_WIN64_API *GetPreviousReading)(void*, void*, uint32_t, void*, void**);
+    scarlett_hresult_t (SCARLETT_WIN64_API *GetTemporalReading)(void*, uint64_t, void*, void**);
+    scarlett_hresult_t (SCARLETT_WIN64_API *RegisterReadingCallback)(
+        void*, void*, uint32_t, float, void*, void*, uint64_t*);
     scarlett_hresult_t (SCARLETT_WIN64_API *RegisterDeviceCallback)(
         void*, void*, uint32_t, uint32_t, uint32_t, void*, void*, uint64_t*);
-    scarlett_hresult_t (SCARLETT_WIN64_API *GetPreviousReading)(void*, void*, uint32_t, void*, void**);
 };
 
 struct GiObj {
@@ -679,6 +701,41 @@ void test_gameinput_1000hz_and_4motor_rumble() {
     next_obj->lpVtbl->Release(next_obj);
     prev_obj->lpVtbl->Release(prev_obj);
     cur_obj->lpVtbl->Release(cur_obj);
+
+    /* Verify RegisterDeviceCallback (slot 9 / 0x48) with GameInputBlockingEnumeration (2)
+       and GetDeviceInfo() deviceId at offset 0x20 */
+    struct GiCbProbe {
+        uint32_t calls;
+        uint32_t status;
+        uint8_t  device_id[32];
+    } probe{};
+    auto on_dev_cb = [](uint64_t /*tok*/, void* ctx, void* device, uint64_t /*ts*/,
+                        uint32_t cur_status, uint32_t /*prev_status*/) SCARLETT_WIN64_API {
+        auto* p = static_cast<GiCbProbe*>(ctx);
+        p->calls += 1u;
+        p->status = cur_status;
+        if (device != nullptr) {
+            auto* d = static_cast<GiDeviceObj*>(device);
+            const auto* info = static_cast<const uint8_t*>(d->lpVtbl->GetDeviceInfo(d));
+            if (info != nullptr) {
+                std::memcpy(p->device_id, info + 0x20u, 32u);
+            }
+        }
+    };
+    uint64_t cb_tok = 0u;
+    void (*cb_ptr)(uint64_t, void*, void*, uint64_t, uint32_t, uint32_t) SCARLETT_WIN64_API = on_dev_cb;
+    CHECK(gi->lpVtbl->RegisterDeviceCallback(
+              gi, nullptr, SCARLETT_GAMEINPUT_KIND_GAMEPAD, 1u, 2u, &probe,
+              reinterpret_cast<void*>(cb_ptr), &cb_tok) == SCARLETT_OK);
+    CHECK(cb_tok != 0u);
+    CHECK(probe.calls == 1u);
+    CHECK(probe.status == 1u);
+    bool nonzero_id = false;
+    for (uint8_t b : probe.device_id) {
+        if (b != 0u) nonzero_id = true;
+    }
+    CHECK(nonzero_id);
+
     CHECK(gi->lpVtbl->Release(gi) == 0u);
 }
 

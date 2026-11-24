@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <dlfcn.h>
 
 namespace scarlett::audio_media {
 
@@ -18,6 +19,84 @@ std::vector<float> build_default_reverb_ir(uint32_t sample_rate_hz) {
     }
     return ir;
 }
+
+struct PaSampleSpec {
+    uint32_t format;
+    uint32_t rate;
+    uint8_t channels;
+};
+
+class PulseSimpleSink {
+public:
+    ~PulseSimpleSink() {
+        close();
+    }
+
+    bool open(uint32_t sample_rate_hz, uint32_t channels) noexcept {
+        close();
+        lib_ = dlopen("libpulse-simple.so.0", RTLD_LAZY | RTLD_LOCAL);
+        if (lib_ == nullptr) {
+            return false;
+        }
+        using new_fn_t = void* (*)(const char*, const char*, int, const char*,
+                                   const char*, const PaSampleSpec*, const void*, const void*, int*);
+        fn_new_ = reinterpret_cast<new_fn_t>(dlsym(lib_, "pa_simple_new"));
+        fn_write_ = reinterpret_cast<write_fn_t>(dlsym(lib_, "pa_simple_write"));
+        fn_free_ = reinterpret_cast<free_fn_t>(dlsym(lib_, "pa_simple_free"));
+        if (fn_new_ == nullptr || fn_write_ == nullptr || fn_free_ == nullptr) {
+            close();
+            return false;
+        }
+        PaSampleSpec ss{};
+        ss.format = 5u; /* PA_SAMPLE_FLOAT32LE */
+        ss.rate = sample_rate_hz == 0u ? 48000u : sample_rate_hz;
+        ss.channels = static_cast<uint8_t>(std::clamp<uint32_t>(channels, 1u, 8u));
+        int err = 0;
+        pa_ = fn_new_(nullptr, "GTA6 Scarlett", 1 /* PA_STREAM_PLAYBACK */,
+                      nullptr, "GTA6 Scarlett Audio", &ss, nullptr, nullptr, &err);
+        if (pa_ == nullptr) {
+            close();
+            return false;
+        }
+        return true;
+    }
+
+    bool write(const float* samples, size_t sample_count) noexcept {
+        if (pa_ == nullptr || fn_write_ == nullptr || samples == nullptr || sample_count == 0u) {
+            return false;
+        }
+        int err = 0;
+        return fn_write_(pa_, samples, sample_count * sizeof(float), &err) >= 0;
+    }
+
+    void close() noexcept {
+        if (pa_ != nullptr && fn_free_ != nullptr) {
+            fn_free_(pa_);
+        }
+        pa_ = nullptr;
+        if (lib_ != nullptr) {
+            dlclose(lib_);
+        }
+        lib_ = nullptr;
+        fn_new_ = nullptr;
+        fn_write_ = nullptr;
+        fn_free_ = nullptr;
+    }
+
+    bool is_open() const noexcept { return pa_ != nullptr; }
+
+private:
+    using new_fn_t = void* (*)(const char*, const char*, int, const char*,
+                               const char*, const PaSampleSpec*, const void*, const void*, int*);
+    using write_fn_t = int (*)(void*, const void*, size_t, int*);
+    using free_fn_t = void (*)(void*);
+
+    void* lib_ = nullptr;
+    void* pa_ = nullptr;
+    new_fn_t fn_new_ = nullptr;
+    write_fn_t fn_write_ = nullptr;
+    free_fn_t fn_free_ = nullptr;
+};
 
 } // namespace
 
@@ -98,27 +177,47 @@ scarlett_hresult_t XAudio2MixerManager::start_engine(uint64_t engine_handle) noe
     if (eng->worker_running.exchange(true, std::memory_order_acq_rel)) {
         return SCARLETT_OK;
     }
+    if (eng->worker_thread.joinable()) {
+        eng->worker_thread.join();
+    }
 
     eng->worker_thread = std::thread([this, eng]() {
         using clock = std::chrono::steady_clock;
+        PulseSimpleSink sink;
+        if (eng->active_sink != SCARLETT_AUDIO_SINK_HEADLESS) {
+            (void)sink.open(eng->sample_rate_hz, eng->channels);
+        }
         const auto quantum_dur = std::chrono::microseconds(
             (SCARLETT_AUDIO_QUANTUM_FRAMES * 1000000ull) / eng->sample_rate_hz);
         auto next_tick = clock::now() + quantum_dur;
+        std::vector<float> pcm_out(SCARLETT_AUDIO_QUANTUM_FRAMES * eng->channels, 0.0f);
         while (eng->worker_running.load(std::memory_order_acquire)) {
+            bool ok = true;
             {
                 std::lock_guard<std::mutex> glock(global_mutex_);
                 if (engines_.find(eng->handle) == engines_.end()) {
                     break;
                 }
-                (void)render_engine_quantum_locked(*eng, SCARLETT_AUDIO_QUANTUM_FRAMES, nullptr, nullptr);
+                if (scarlett_failed(render_engine_quantum_locked(
+                        *eng, SCARLETT_AUDIO_QUANTUM_FRAMES, pcm_out.data(), nullptr))) {
+                    ok = false;
+                }
             }
-            std::this_thread::sleep_until(next_tick);
-            next_tick += quantum_dur;
-            const auto now = clock::now();
-            if (next_tick + quantum_dur * 4 < now) {
-                next_tick = now + quantum_dur;
+            if (ok && sink.is_open()) {
+                if (!sink.write(pcm_out.data(), pcm_out.size())) {
+                    sink.close();
+                }
+            }
+            if (!sink.is_open()) {
+                std::this_thread::sleep_until(next_tick);
+                next_tick += quantum_dur;
+                const auto now = clock::now();
+                if (next_tick + quantum_dur * 4 < now) {
+                    next_tick = now + quantum_dur;
+                }
             }
         }
+        sink.close();
     });
     return SCARLETT_OK;
 }
@@ -242,6 +341,7 @@ scarlett_hresult_t XAudio2MixerManager::voice_control(
         case SCARLETT_VOICE_CTRL_FLUSH: {
             std::lock_guard<std::mutex> qlock(v.queue_mutex);
             v.pcm_queue.clear();
+            v.queued_buffer_frames.clear();
             v.resampler.reset();
             v.hrtf.reset();
             v.reverb.reset();
@@ -262,6 +362,13 @@ scarlett_hresult_t XAudio2MixerManager::voice_control(
             params.out_sample_rate = v.sample_rate_hz;
             params.param_f0 = v.volume;
             return SCARLETT_OK;
+        case SCARLETT_VOICE_CTRL_GET_STATE: {
+            std::lock_guard<std::mutex> qlock(v.queue_mutex);
+            params.out_channels = static_cast<uint32_t>(v.queued_buffer_frames.size());
+            params.out_sample_rate = static_cast<uint32_t>(v.samples_played & 0xffffffffu);
+            params.param_u32 = static_cast<uint32_t>(v.samples_played >> 32);
+            return SCARLETT_OK;
+        }
         default:
             return SCARLETT_E_INVALIDARG;
     }
@@ -369,8 +476,12 @@ scarlett_hresult_t XAudio2MixerManager::submit_voice_buffer(
 
     const uint32_t repeats = std::max(1u, req.loop_count + 1u);
     std::lock_guard<std::mutex> qlock(v->queue_mutex);
+    const uint64_t frames_added = final_samples / std::max(1u, v->channels);
     for (uint32_t r = 0u; r < repeats; ++r) {
         v->pcm_queue.insert(v->pcm_queue.end(), final_ptr, final_ptr + final_samples);
+        if (frames_added > 0u) {
+            v->queued_buffer_frames.push_back(frames_added);
+        }
     }
     return SCARLETT_OK;
 }
@@ -456,6 +567,17 @@ scarlett_hresult_t XAudio2MixerManager::render_engine_quantum_locked(
                 for (size_t i = 0u; i < avail; ++i) {
                     voice_scratch[i] = v.pcm_queue.front() * v.volume;
                     v.pcm_queue.pop_front();
+                }
+                uint64_t consumed_frames = avail / std::max(1u, v.channels);
+                v.samples_played += consumed_frames;
+                while (consumed_frames > 0u && !v.queued_buffer_frames.empty()) {
+                    if (v.queued_buffer_frames.front() <= consumed_frames) {
+                        consumed_frames -= v.queued_buffer_frames.front();
+                        v.queued_buffer_frames.pop_front();
+                    } else {
+                        v.queued_buffer_frames.front() -= consumed_frames;
+                        consumed_frames = 0u;
+                    }
                 }
             }
         }

@@ -121,15 +121,24 @@ SCARLETT_STATIC_ASSERT(sizeof(DSTORAGE_REQUEST_OPTIONS) == 8,
                        "DSTORAGE_REQUEST_OPTIONS must be exactly 64 bits");
 
 typedef struct DSTORAGE_QUEUE_DESC_S {
-    uint64_t SourceType;
-    uint32_t Capacity;
-    uint32_t Priority; /* DSTORAGE_PRIORITY */
-    const char *Name;
-    void *Device;
+    uint64_t SourceType;  /* offset  0, size 8 */
+    uint16_t Capacity;    /* offset  8, size 2 */
+    int8_t   Priority;    /* offset 10, size 1 (DSTORAGE_PRIORITY) */
+    uint8_t  Reserved[5]; /* offset 11, size 5 */
+    const char *Name;     /* offset 16, size 8 */
+    void *Device;         /* offset 24, size 8 */
 } DSTORAGE_QUEUE_DESC;
 
 SCARLETT_STATIC_ASSERT(sizeof(DSTORAGE_QUEUE_DESC) == 32,
                        "DSTORAGE_QUEUE_DESC must be 32 bytes");
+SCARLETT_STATIC_ASSERT(offsetof(DSTORAGE_QUEUE_DESC, Capacity) == 8,
+                       "DSTORAGE_QUEUE_DESC::Capacity offset must be 8");
+SCARLETT_STATIC_ASSERT(offsetof(DSTORAGE_QUEUE_DESC, Priority) == 10,
+                       "DSTORAGE_QUEUE_DESC::Priority offset must be 10");
+SCARLETT_STATIC_ASSERT(offsetof(DSTORAGE_QUEUE_DESC, Name) == 16,
+                       "DSTORAGE_QUEUE_DESC::Name offset must be 16");
+SCARLETT_STATIC_ASSERT(offsetof(DSTORAGE_QUEUE_DESC, Device) == 24,
+                       "DSTORAGE_QUEUE_DESC::Device offset must be 24");
 
 typedef struct DSTORAGE_REQUEST_S {
     DSTORAGE_REQUEST_OPTIONS Options;   /* offset  0, size 8 */
@@ -254,7 +263,8 @@ typedef enum scarlett_dstorage_unix_ext_op_e {
     SCARLETT_DSTORAGE_UNIX_QUERY_CAPS            = 20,
     SCARLETT_DSTORAGE_UNIX_SUBMIT_BATCH          = 21,
     SCARLETT_DSTORAGE_UNIX_REPORT_STUB           = 22,
-    SCARLETT_DSTORAGE_UNIX_EXT_OP_COUNT          = 23
+    SCARLETT_DSTORAGE_UNIX_WAIT_SIGNALS          = 23,
+    SCARLETT_DSTORAGE_UNIX_EXT_OP_COUNT          = 24
 } scarlett_dstorage_unix_ext_op_t;
 
 /* ============================================================================
@@ -503,6 +513,34 @@ typedef struct scarlett_dstorage_submit_batch_params_s {
 
 SCARLETT_STATIC_ASSERT(sizeof(scarlett_dstorage_submit_batch_params_t) == 48,
                        "scarlett_dstorage_submit_batch_params_t must be 48 bytes");
+
+#define SCARLETT_DSTORAGE_SIGNAL_MODE_HOST_FENCE  UINT32_C(0)
+#define SCARLETT_DSTORAGE_SIGNAL_MODE_HOST_EVENT  UINT32_C(1)
+#define SCARLETT_DSTORAGE_SIGNAL_MODE_PE_FENCE    UINT32_C(2)
+#define SCARLETT_DSTORAGE_SIGNAL_MODE_PE_EVENT    UINT32_C(3)
+#define SCARLETT_DSTORAGE_PE_SIGNAL_BATCH_MAX     UINT32_C(32)
+
+typedef struct scarlett_dstorage_pe_signal_item_s {
+    uint64_t target_addr;
+    uint64_t value;
+    uint32_t mode;
+    uint32_t reserved;
+} scarlett_dstorage_pe_signal_item_t;
+
+SCARLETT_STATIC_ASSERT(sizeof(scarlett_dstorage_pe_signal_item_t) == 24,
+                       "scarlett_dstorage_pe_signal_item_t must be 24 bytes");
+
+/* Opcode 23: SCARLETT_DSTORAGE_UNIX_WAIT_SIGNALS */
+typedef struct scarlett_dstorage_wait_signals_params_s {
+    uint32_t blocking;
+    uint32_t out_count;
+    uint32_t out_stop;
+    scarlett_hresult_t out_status;
+    scarlett_dstorage_pe_signal_item_t items[SCARLETT_DSTORAGE_PE_SIGNAL_BATCH_MAX];
+} scarlett_dstorage_wait_signals_params_t;
+
+SCARLETT_STATIC_ASSERT(sizeof(scarlett_dstorage_wait_signals_params_t) == 16 + 32 * 24,
+                       "scarlett_dstorage_wait_signals_params_t must be 784 bytes");
 
 /* Opcode 22: SCARLETT_DSTORAGE_UNIX_REPORT_STUB */
 typedef struct scarlett_dstorage_report_stub_params_s {

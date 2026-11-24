@@ -62,8 +62,8 @@ EXPORTS
     "?GetHashCode@uint32@default@@QEAAHXZ" = "vccorlib140.?GetHashCode@uint32@default@@QEAAHXZ"
     "?GetHashCode@uint64@default@@QEAAHXZ" = "vccorlib140.?GetHashCode@uint64@default@@QEAAHXZ"
     "?GetHashCode@uint8@default@@QEAAHXZ" = "vccorlib140.?GetHashCode@uint8@default@@QEAAHXZ"
-    "?GetIBoxArrayVtable@Details@Platform@@YAPEAXPEAX@Z" = crt_stub_vcc_GetIBoxArrayVtable
-    "?GetIBoxVtable@Details@Platform@@YAPEAXPEAX@Z" = crt_stub_vcc_GetIBoxVtable
+    "?GetIBoxArrayVtable@Details@Platform@@YAPEAXPEAX@Z" = crt_impl_vcc_GetIBoxArrayVtable
+    "?GetIBoxVtable@Details@Platform@@YAPEAXPEAX@Z" = crt_impl_vcc_GetIBoxVtable
     "?GetIidsFn@@YAJHPEAKPEBU__s_GUID@@PEAPEAVGuid@Platform@@@Z" = "vccorlib140.?GetIidsFn@@YAJHPEAKPEBU__s_GUID@@PEAPEAVGuid@Platform@@@Z"
     "?GetObjectContext@Details@Platform@@YAPEAUIUnknown@@XZ" = crt_impl_vcc_GetObjectContext
     "?GetProxyImpl@Details@Platform@@YAJPEAUIUnknown@@AEBU_GUID@@0PEAPEAU3@@Z" = crt_impl_vcc_GetProxyImpl

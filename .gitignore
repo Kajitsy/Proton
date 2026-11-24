@@ -10,3 +10,4 @@
 # Local build dependency downloads (wine-gecko/mono/xalia) and Python caches
 /contrib/
 __pycache__/
+play_gta6.sh

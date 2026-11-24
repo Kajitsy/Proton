@@ -70,29 +70,98 @@ typedef struct scarlett_waveformatex_s {
     uint16_t cbSize;
 } scarlett_waveformatex_t;
 
+typedef struct scarlett_xa2_voice_state_s {
+    void *pCurrentBufferContext;
+    uint32_t BuffersQueued;
+    uint32_t Reserved0;
+    uint64_t SamplesPlayed;
+} scarlett_xa2_voice_state_t;
+
 typedef struct scarlett_xa2_voice_obj_s scarlett_xa2_voice_obj_t;
 typedef struct scarlett_xa2_engine_obj_s scarlett_xa2_engine_obj_t;
 
 typedef struct scarlett_xa2_voice_vtbl_s {
     void (SCARLETT_WIN64_API *GetVoiceDetails)(scarlett_xa2_voice_obj_t *self,
                                                scarlett_xa2_voice_details_t *pVoiceDetails);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SetOutputVoices)(scarlett_xa2_voice_obj_t *self,
+                                                             const void *pSendList);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SetEffectChain)(scarlett_xa2_voice_obj_t *self,
+                                                            const void *pEffectChain);
+    scarlett_hresult_t (SCARLETT_WIN64_API *EnableEffect)(scarlett_xa2_voice_obj_t *self,
+                                                          uint32_t EffectIndex,
+                                                          uint32_t OperationSet);
+    scarlett_hresult_t (SCARLETT_WIN64_API *DisableEffect)(scarlett_xa2_voice_obj_t *self,
+                                                           uint32_t EffectIndex,
+                                                           uint32_t OperationSet);
+    void (SCARLETT_WIN64_API *GetEffectState)(scarlett_xa2_voice_obj_t *self,
+                                              uint32_t EffectIndex,
+                                              uint32_t *pEnabled);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SetEffectParameters)(scarlett_xa2_voice_obj_t *self,
+                                                                 uint32_t EffectIndex,
+                                                                 const void *pParameters,
+                                                                 uint32_t ParametersByteSize,
+                                                                 uint32_t OperationSet);
+    scarlett_hresult_t (SCARLETT_WIN64_API *GetEffectParameters)(scarlett_xa2_voice_obj_t *self,
+                                                                 uint32_t EffectIndex,
+                                                                 void *pParameters,
+                                                                 uint32_t ParametersByteSize);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SetFilterParameters)(scarlett_xa2_voice_obj_t *self,
+                                                                 const void *pParameters,
+                                                                 uint32_t OperationSet);
+    void (SCARLETT_WIN64_API *GetFilterParameters)(scarlett_xa2_voice_obj_t *self,
+                                                   void *pParameters);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SetOutputFilterParameters)(scarlett_xa2_voice_obj_t *self,
+                                                                       void *pDestinationVoice,
+                                                                       const void *pParameters,
+                                                                       uint32_t OperationSet);
+    void (SCARLETT_WIN64_API *GetOutputFilterParameters)(scarlett_xa2_voice_obj_t *self,
+                                                         void *pDestinationVoice,
+                                                         void *pParameters);
     scarlett_hresult_t (SCARLETT_WIN64_API *SetVolume)(scarlett_xa2_voice_obj_t *self,
                                                        float Volume,
                                                        uint32_t OperationSet);
     void (SCARLETT_WIN64_API *GetVolume)(scarlett_xa2_voice_obj_t *self, float *pVolume);
-    scarlett_hresult_t (SCARLETT_WIN64_API *SubmitSourceBuffer)(scarlett_xa2_voice_obj_t *self,
-                                                                const scarlett_xa2_buffer_t *pBuffer,
-                                                                const void *pBufferWMA);
-    scarlett_hresult_t (SCARLETT_WIN64_API *SetOutputVoices)(scarlett_xa2_voice_obj_t *self,
-                                                             const void *pSendList);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SetChannelVolumes)(scarlett_xa2_voice_obj_t *self,
+                                                               uint32_t Channels,
+                                                               const float *pVolumes,
+                                                               uint32_t OperationSet);
+    void (SCARLETT_WIN64_API *GetChannelVolumes)(scarlett_xa2_voice_obj_t *self,
+                                                 uint32_t Channels,
+                                                 float *pVolumes);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SetOutputMatrix)(scarlett_xa2_voice_obj_t *self,
+                                                             void *pDestinationVoice,
+                                                             uint32_t SourceChannels,
+                                                             uint32_t DestinationChannels,
+                                                             const float *pLevelMatrix,
+                                                             uint32_t OperationSet);
+    void (SCARLETT_WIN64_API *GetOutputMatrix)(scarlett_xa2_voice_obj_t *self,
+                                               void *pDestinationVoice,
+                                               uint32_t SourceChannels,
+                                               uint32_t DestinationChannels,
+                                               float *pLevelMatrix);
+    void (SCARLETT_WIN64_API *DestroyVoice)(scarlett_xa2_voice_obj_t *self);
     scarlett_hresult_t (SCARLETT_WIN64_API *Start)(scarlett_xa2_voice_obj_t *self,
                                                    uint32_t Flags,
                                                    uint32_t OperationSet);
     scarlett_hresult_t (SCARLETT_WIN64_API *Stop)(scarlett_xa2_voice_obj_t *self,
                                                   uint32_t Flags,
                                                   uint32_t OperationSet);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SubmitSourceBuffer)(scarlett_xa2_voice_obj_t *self,
+                                                                const scarlett_xa2_buffer_t *pBuffer,
+                                                                const void *pBufferWMA);
     scarlett_hresult_t (SCARLETT_WIN64_API *FlushSourceBuffers)(scarlett_xa2_voice_obj_t *self);
-    void (SCARLETT_WIN64_API *DestroyVoice)(scarlett_xa2_voice_obj_t *self);
+    scarlett_hresult_t (SCARLETT_WIN64_API *Discontinuity)(scarlett_xa2_voice_obj_t *self);
+    scarlett_hresult_t (SCARLETT_WIN64_API *ExitLoop)(scarlett_xa2_voice_obj_t *self,
+                                                      uint32_t OperationSet);
+    void (SCARLETT_WIN64_API *GetState)(scarlett_xa2_voice_obj_t *self,
+                                        scarlett_xa2_voice_state_t *pVoiceState,
+                                        uint32_t Flags);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SetFrequencyRatio)(scarlett_xa2_voice_obj_t *self,
+                                                               float Ratio,
+                                                               uint32_t OperationSet);
+    void (SCARLETT_WIN64_API *GetFrequencyRatio)(scarlett_xa2_voice_obj_t *self, float *pRatio);
+    scarlett_hresult_t (SCARLETT_WIN64_API *SetSourceSampleRate)(scarlett_xa2_voice_obj_t *self,
+                                                                 uint32_t NewSourceSampleRate);
 } scarlett_xa2_voice_vtbl_t;
 
 struct scarlett_xa2_voice_obj_s {
@@ -336,16 +405,156 @@ static void SCARLETT_WIN64_API voice_destroy(scarlett_xa2_voice_obj_t *self) {
     self->in_use = 0u;
 }
 
+static scarlett_hresult_t SCARLETT_WIN64_API voice_set_effect_chain(
+    scarlett_xa2_voice_obj_t *self, const void *pEffectChain) {
+    (void)self; (void)pEffectChain;
+    return SCARLETT_OK;
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_enable_effect(
+    scarlett_xa2_voice_obj_t *self, uint32_t idx, uint32_t op) {
+    (void)self; (void)idx; (void)op;
+    return SCARLETT_OK;
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_disable_effect(
+    scarlett_xa2_voice_obj_t *self, uint32_t idx, uint32_t op) {
+    (void)self; (void)idx; (void)op;
+    return SCARLETT_OK;
+}
+static void SCARLETT_WIN64_API voice_get_effect_state(
+    scarlett_xa2_voice_obj_t *self, uint32_t idx, uint32_t *pEnabled) {
+    (void)self; (void)idx;
+    if (pEnabled != NULL) *pEnabled = 0u;
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_set_effect_params(
+    scarlett_xa2_voice_obj_t *self, uint32_t idx, const void *p, uint32_t sz, uint32_t op) {
+    (void)self; (void)idx; (void)p; (void)sz; (void)op;
+    return SCARLETT_OK;
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_get_effect_params(
+    scarlett_xa2_voice_obj_t *self, uint32_t idx, void *p, uint32_t sz) {
+    (void)self; (void)idx;
+    if (p != NULL && sz > 0u) audio_pe_zero_mem(p, sz);
+    return SCARLETT_OK;
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_set_filter_params(
+    scarlett_xa2_voice_obj_t *self, const void *p, uint32_t op) {
+    (void)self; (void)p; (void)op;
+    return SCARLETT_OK;
+}
+static void SCARLETT_WIN64_API voice_get_filter_params(
+    scarlett_xa2_voice_obj_t *self, void *p) {
+    (void)self;
+    if (p != NULL) audio_pe_zero_mem(p, 12u);
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_set_output_filter_params(
+    scarlett_xa2_voice_obj_t *self, void *dst, const void *p, uint32_t op) {
+    (void)self; (void)dst; (void)p; (void)op;
+    return SCARLETT_OK;
+}
+static void SCARLETT_WIN64_API voice_get_output_filter_params(
+    scarlett_xa2_voice_obj_t *self, void *dst, void *p) {
+    (void)self; (void)dst;
+    if (p != NULL) audio_pe_zero_mem(p, 12u);
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_set_channel_volumes(
+    scarlett_xa2_voice_obj_t *self, uint32_t ch, const float *vols, uint32_t op) {
+    (void)self; (void)ch; (void)vols; (void)op;
+    return SCARLETT_OK;
+}
+static void SCARLETT_WIN64_API voice_get_channel_volumes(
+    scarlett_xa2_voice_obj_t *self, uint32_t ch, float *vols) {
+    (void)self;
+    if (vols != NULL) {
+        for (uint32_t i = 0u; i < ch; ++i) vols[i] = 1.0f;
+    }
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_set_output_matrix(
+    scarlett_xa2_voice_obj_t *self, void *dst, uint32_t src_ch, uint32_t dst_ch,
+    const float *matrix, uint32_t op) {
+    (void)self; (void)dst; (void)src_ch; (void)dst_ch; (void)matrix; (void)op;
+    return SCARLETT_OK;
+}
+static void SCARLETT_WIN64_API voice_get_output_matrix(
+    scarlett_xa2_voice_obj_t *self, void *dst, uint32_t src_ch, uint32_t dst_ch, float *matrix) {
+    (void)self; (void)dst;
+    if (matrix != NULL) audio_pe_zero_mem(matrix, (size_t)src_ch * dst_ch * sizeof(float));
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_discontinuity(scarlett_xa2_voice_obj_t *self) {
+    (void)self;
+    return SCARLETT_OK;
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_exit_loop(
+    scarlett_xa2_voice_obj_t *self, uint32_t op) {
+    (void)self; (void)op;
+    return SCARLETT_OK;
+}
+static void SCARLETT_WIN64_API voice_get_state(
+    scarlett_xa2_voice_obj_t *self,
+    scarlett_xa2_voice_state_t *pVoiceState,
+    uint32_t Flags) {
+    (void)Flags;
+    if (pVoiceState == NULL) {
+        return;
+    }
+    audio_pe_zero_mem(pVoiceState, sizeof(*pVoiceState));
+    if (self == NULL || self->in_use == 0u) {
+        return;
+    }
+    scarlett_audio_voice_ctrl_params_t p;
+    audio_pe_zero_mem(&p, sizeof(p));
+    p.voice_handle = self->unix_voice_handle;
+    p.ctrl_op = (uint32_t)SCARLETT_VOICE_CTRL_GET_STATE;
+    if (scarlett_succeeded(audio_pe_unix_call(SCARLETT_AUDIO_UNIX_EX_VOICE_CONTROL, &p))) {
+        pVoiceState->BuffersQueued = p.out_channels;
+        pVoiceState->SamplesPlayed = ((uint64_t)p.param_u32 << 32) | (uint64_t)p.out_sample_rate;
+    }
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_set_freq_ratio(
+    scarlett_xa2_voice_obj_t *self, float ratio, uint32_t op) {
+    (void)self; (void)ratio; (void)op;
+    return SCARLETT_OK;
+}
+static void SCARLETT_WIN64_API voice_get_freq_ratio(
+    scarlett_xa2_voice_obj_t *self, float *pRatio) {
+    (void)self;
+    if (pRatio != NULL) *pRatio = 1.0f;
+}
+static scarlett_hresult_t SCARLETT_WIN64_API voice_set_sample_rate(
+    scarlett_xa2_voice_obj_t *self, uint32_t rate) {
+    if (self != NULL) self->sample_rate = rate;
+    return SCARLETT_OK;
+}
+
 static const scarlett_xa2_voice_vtbl_t g_voice_vtbl = {
     voice_get_details,
+    voice_set_output_voices,
+    voice_set_effect_chain,
+    voice_enable_effect,
+    voice_disable_effect,
+    voice_get_effect_state,
+    voice_set_effect_params,
+    voice_get_effect_params,
+    voice_set_filter_params,
+    voice_get_filter_params,
+    voice_set_output_filter_params,
+    voice_get_output_filter_params,
     voice_set_volume,
     voice_get_volume,
-    voice_submit_source_buffer,
-    voice_set_output_voices,
+    voice_set_channel_volumes,
+    voice_get_channel_volumes,
+    voice_set_output_matrix,
+    voice_get_output_matrix,
+    voice_destroy,
     voice_start,
     voice_stop,
+    voice_submit_source_buffer,
     voice_flush,
-    voice_destroy
+    voice_discontinuity,
+    voice_exit_loop,
+    voice_get_state,
+    voice_set_freq_ratio,
+    voice_get_freq_ratio,
+    voice_set_sample_rate
 };
 
 /* ============================================================================
@@ -653,6 +862,7 @@ scarlett_hresult_t SCARLETT_WIN64_API XAudio2Create(
     p.sink_mode = (uint32_t)SCARLETT_AUDIO_SINK_AUTO;
     p.sample_rate_hz = 48000u;
     p.channels = 2u;
+    p.enable_worker_thread = 1u;
 
     const scarlett_hresult_t hr = audio_pe_unix_call(SCARLETT_AUDIO_UNIX_EX_CREATE_ENGINE, &p);
     if (scarlett_failed(hr)) {

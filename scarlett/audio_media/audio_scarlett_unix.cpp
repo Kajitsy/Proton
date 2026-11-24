@@ -45,8 +45,8 @@ struct AudioUnixState {
 };
 
 AudioUnixState& g_state() {
-    static AudioUnixState state;
-    return state;
+    static AudioUnixState* state = new AudioUnixState();
+    return *state;
 }
 
 bool read_env_strict_mode() noexcept {
@@ -260,6 +260,54 @@ scarlett_hresult_t handle_apu_mem(void* args) noexcept {
         case SCARLETT_APU_OP_FREE_SHAPE_CTX:
             hr = mgr.free_shape_contexts(p->handle_or_ptr);
             break;
+        case SCARLETT_APU_OP_XAPU_CONNECT:
+            hr = mgr.xapu_connect(p->out_ptr_or_handle);
+            break;
+        case SCARLETT_APU_OP_XAPU_DISCONNECT:
+            hr = mgr.xapu_disconnect(p->handle_or_ptr);
+            break;
+        case SCARLETT_APU_OP_XAPU_ENQUEUE:
+            hr = mgr.xapu_enqueue(p->handle_or_ptr,
+                                  reinterpret_cast<const void*>(static_cast<uintptr_t>(p->out_ptr_or_handle)),
+                                  static_cast<uint32_t>(p->size_or_count),
+                                  p->alignment);
+            break;
+        case SCARLETT_APU_OP_XAPU_GET_COUNT: {
+            uint32_t cnt = 0u;
+            hr = mgr.xapu_get_result_count(p->handle_or_ptr, p->alignment, cnt);
+            p->size_or_count = cnt;
+            break;
+        }
+        case SCARLETT_APU_OP_XAPU_DEQUEUE:
+            hr = mgr.xapu_dequeue_result(p->handle_or_ptr,
+                                         reinterpret_cast<void*>(static_cast<uintptr_t>(p->out_ptr_or_handle)),
+                                         static_cast<uint32_t>(p->size_or_count));
+            break;
+        case SCARLETT_APU_OP_XAPU_CREATE_DEC: {
+            const uint32_t codec_id = p->alignment;
+            const uint32_t sample_rate = static_cast<uint32_t>(p->size_or_count);
+            const uint32_t channels = static_cast<uint32_t>(p->out_aux >> 32);
+            const uint32_t extra_size = static_cast<uint32_t>(p->out_aux & 0xFFFFFFFFu);
+            const void* extra = reinterpret_cast<const void*>(static_cast<uintptr_t>(p->handle_or_ptr));
+            hr = mgr.xapu_create_decoder(codec_id, sample_rate, channels, extra, extra_size, p->out_ptr_or_handle);
+            break;
+        }
+        case SCARLETT_APU_OP_XAPU_DESTROY_DEC:
+            hr = mgr.xapu_destroy_decoder(p->handle_or_ptr);
+            break;
+        case SCARLETT_APU_OP_XAPU_PROCESS: {
+            const uint32_t in_size = p->alignment;
+            const uint32_t out_cap = static_cast<uint32_t>(p->size_or_count);
+            const uint8_t* in_data = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(p->out_ptr_or_handle));
+            uint8_t* out_pcm = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(p->out_aux));
+            uint32_t written = 0u;
+            hr = mgr.xapu_process(p->handle_or_ptr, in_data, in_size, out_pcm, out_cap, written);
+            p->size_or_count = written;
+            break;
+        }
+        case SCARLETT_APU_OP_XAPU_FLUSH:
+            hr = mgr.xapu_flush(p->handle_or_ptr);
+            break;
         default:
             hr = SCARLETT_E_INVALIDARG;
             break;
@@ -355,6 +403,7 @@ scarlett_hresult_t handle_input_ring_op(void* args) noexcept {
             auto* rec = reinterpret_cast<scarlett_input_reading_record_t*>(
                 static_cast<uintptr_t>(p->record_addr));
             if (p->op == SCARLETT_INPUT_OP_GET_CURRENT) {
+                gi.poll_live_input(p->instance_handle);
                 hr = gi.get_current_reading(p->instance_handle, p->input_kind, p->device_id, *rec);
             } else if (p->op == SCARLETT_INPUT_OP_GET_NEXT) {
                 hr = gi.get_next_reading(p->instance_handle, p->ref_sequence, p->input_kind, p->device_id, *rec);

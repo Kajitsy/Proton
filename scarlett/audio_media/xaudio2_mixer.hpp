@@ -59,6 +59,8 @@ private:
 
         std::mutex queue_mutex;
         std::deque<float> pcm_queue; /* Already decoded & resampled to engine sample_rate_hz */
+        std::deque<uint64_t> queued_buffer_frames;
+        uint64_t samples_played = 0;
         std::vector<float> submix_accum;
 
         std::unique_ptr<OpusStreamDecoder> opus_dec;
@@ -85,6 +87,13 @@ private:
 
         std::atomic<uint32_t> xruns{0};
         std::atomic<uint64_t> total_cycles{0};
+
+        ~Engine() {
+            worker_running.store(false, std::memory_order_release);
+            if (worker_thread.joinable()) {
+                worker_thread.join();
+            }
+        }
     };
 
     scarlett_hresult_t render_engine_quantum_locked(Engine& eng,

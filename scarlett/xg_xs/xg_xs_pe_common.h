@@ -189,6 +189,173 @@ static inline int32_t xg_pe_unix_call(uint32_t opcode, void *params) {
 
 #endif
 
+#if defined(_WIN32) || defined(__MINGW32__)
+
+typedef void (SCARLETT_XG_CALL *scarlett_xg_ods_fn_t)(const char *lpOutputString);
+
+typedef struct xg_pe_list_entry_s {
+    struct xg_pe_list_entry_s *Flink;
+    struct xg_pe_list_entry_s *Blink;
+} xg_pe_list_entry_t;
+
+typedef struct xg_pe_unicode_string_s {
+    uint16_t Length;
+    uint16_t MaximumLength;
+    uint32_t Reserved;
+    const uint16_t *Buffer;
+} xg_pe_unicode_string_t;
+
+static scarlett_xg_ods_fn_t g_xg_pfn_OutputDebugStringA = NULL;
+static uint32_t g_xg_ods_resolved = 0u;
+
+static inline bool xg_pe_ascii_ieq(const char *a, const char *b) {
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+    while (*a != '\0' && *b != '\0') {
+        char ca = *a++;
+        char cb = *b++;
+        if (ca >= 'A' && ca <= 'Z') {
+            ca = (char)(ca + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (ca != cb) {
+            return false;
+        }
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static inline bool xg_pe_utf16_ascii_ieq(const uint16_t *w, uint16_t byte_len, const char *ascii) {
+    uint32_t wchar_len = (uint32_t)(byte_len / 2u);
+    uint32_t i = 0u;
+    while (i < wchar_len && ascii[i] != '\0') {
+        uint16_t wc = w[i];
+        char cb = ascii[i];
+        if (wc >= 'A' && wc <= 'Z') {
+            wc = (uint16_t)(wc + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (wc != (uint16_t)(uint8_t)cb) {
+            return false;
+        }
+        ++i;
+    }
+    return i == wchar_len && ascii[i] == '\0';
+}
+
+static inline void *xg_pe_find_export(const uint8_t *base, const char *proc_name) {
+    if (base == NULL || proc_name == NULL) {
+        return NULL;
+    }
+    if (base[0] != 'M' || base[1] != 'Z') {
+        return NULL;
+    }
+    uint32_t pe_off = *(const uint32_t *)(base + 0x3Cu);
+    const uint8_t *nt = base + pe_off;
+    if (nt[0] != 'P' || nt[1] != 'E' || nt[2] != 0 || nt[3] != 0) {
+        return NULL;
+    }
+    uint16_t magic = *(const uint16_t *)(nt + 0x18u);
+    if (magic != 0x020Bu) {
+        return NULL;
+    }
+    uint32_t exp_rva = *(const uint32_t *)(nt + 0x88u);
+    uint32_t exp_size = *(const uint32_t *)(nt + 0x8Cu);
+    if (exp_rva == 0u || exp_size == 0u) {
+        return NULL;
+    }
+
+    const uint8_t *exp_dir = base + exp_rva;
+    uint32_t num_names = *(const uint32_t *)(exp_dir + 0x18u);
+    uint32_t addr_funcs_rva = *(const uint32_t *)(exp_dir + 0x1Cu);
+    uint32_t addr_names_rva = *(const uint32_t *)(exp_dir + 0x20u);
+    uint32_t addr_ords_rva = *(const uint32_t *)(exp_dir + 0x24u);
+
+    const uint32_t *names = (const uint32_t *)(base + addr_names_rva);
+    const uint16_t *ords = (const uint16_t *)(base + addr_ords_rva);
+    const uint32_t *funcs = (const uint32_t *)(base + addr_funcs_rva);
+
+    for (uint32_t i = 0u; i < num_names; ++i) {
+        const char *name = (const char *)(base + names[i]);
+        if (xg_pe_ascii_ieq(name, proc_name)) {
+            uint32_t fn_rva = funcs[ords[i]];
+            if (fn_rva >= exp_rva && fn_rva < exp_rva + exp_size) {
+                return NULL;
+            }
+            return (void *)(uintptr_t)(base + fn_rva);
+        }
+    }
+    return NULL;
+}
+
+static inline void xg_pe_resolve_ods(void) {
+    if (__atomic_load_n(&g_xg_ods_resolved, __ATOMIC_ACQUIRE) != 0u) {
+        return;
+    }
+    const uint8_t *peb = NULL;
+    __asm__ volatile("movq %%gs:0x60, %0" : "=r"(peb));
+    if (peb == NULL) {
+        return;
+    }
+    const uint8_t *ldr = *(const uint8_t *const *)(peb + 0x18u);
+    if (ldr == NULL) {
+        return;
+    }
+    const xg_pe_list_entry_t *head = (const xg_pe_list_entry_t *)(ldr + 0x20u);
+    const uint8_t *k32_base = NULL;
+    const uint8_t *kbase_base = NULL;
+
+    for (const xg_pe_list_entry_t *cur = head->Flink;
+         cur != NULL && cur != head;
+         cur = cur->Flink) {
+        const uint8_t *entry = (const uint8_t *)cur;
+        const uint8_t *dll_base = *(const uint8_t *const *)(entry + 0x20u);
+        const xg_pe_unicode_string_t *base_name =
+            (const xg_pe_unicode_string_t *)(entry + 0x48u);
+        if (dll_base != NULL && base_name->Buffer != NULL) {
+            if (xg_pe_utf16_ascii_ieq(base_name->Buffer, base_name->Length, "kernel32.dll")) {
+                k32_base = dll_base;
+            } else if (xg_pe_utf16_ascii_ieq(base_name->Buffer, base_name->Length, "kernelbase.dll")) {
+                kbase_base = dll_base;
+            }
+        }
+    }
+
+    void *ods = xg_pe_find_export(k32_base, "OutputDebugStringA");
+    if (ods == NULL) {
+        ods = xg_pe_find_export(kbase_base, "OutputDebugStringA");
+    }
+    __atomic_store_n(&g_xg_pfn_OutputDebugStringA, (scarlett_xg_ods_fn_t)ods, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_xg_ods_resolved, 1u, __ATOMIC_RELEASE);
+}
+
+static inline void xg_pe_ods_printf(const char *fmt, ...) {
+    xg_pe_resolve_ods();
+    scarlett_xg_ods_fn_t ods = __atomic_load_n(&g_xg_pfn_OutputDebugStringA, __ATOMIC_ACQUIRE);
+    if (ods == NULL || fmt == NULL) {
+        return;
+    }
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    xg_pe_format_label_va(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    ods(buf);
+}
+
+#else
+
+static inline void xg_pe_ods_printf(const char *fmt, ...) {
+    (void)fmt;
+}
+
+#endif
+
 static inline scarlett_hresult_t xg_pe_stub_dispatch_local(
     const scarlett_stub_descriptor_t *desc,
     uint64_t return_address,
@@ -225,6 +392,16 @@ static inline scarlett_hresult_t xg_pe_stub_dispatch_local(
     params.ctx.rdx = rdx;
     params.ctx.r8 = r8;
     params.ctx.r9 = r9;
+
+    xg_pe_ods_printf(
+        "[scarlett-stub] dll=%s sym=%s ret=0x%llx rcx=0x%llx rdx=0x%llx r8=0x%llx r9=0x%llx\n",
+        params.ctx.dll_name,
+        params.ctx.symbol_name,
+        (unsigned long long)return_address,
+        (unsigned long long)rcx,
+        (unsigned long long)rdx,
+        (unsigned long long)r8,
+        (unsigned long long)r9);
 
     (void)xg_pe_unix_call(SCARLETT_XG_XS_UNIX_REPORT_STUB, &params);
     if (params.out_action == (uint32_t)SCARLETT_STUB_ACTION_LOG_AND_ABORT) {

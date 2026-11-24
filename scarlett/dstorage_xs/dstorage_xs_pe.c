@@ -102,6 +102,291 @@ static inline bool dstorage_guid_eq(const scarlett_guid_t *a, const scarlett_gui
     return true;
 }
 
+static inline char *dstorage_pe_append_str(char *p, char *end, const char *s) {
+    if (s == NULL) {
+        s = "(null)";
+    }
+    while (*s != '\0' && p + 1 < end) {
+        *p++ = *s++;
+    }
+    return p;
+}
+
+static inline char *dstorage_pe_append_hex64(char *p, char *end, uint64_t val) {
+    static const char kHex[] = "0123456789abcdef";
+    p = dstorage_pe_append_str(p, end, "0x");
+    bool started = false;
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        uint32_t nib = (uint32_t)((val >> shift) & 0xFu);
+        if (nib != 0u || started || shift == 0) {
+            started = true;
+            if (p + 1 < end) {
+                *p++ = kHex[nib];
+            }
+        }
+    }
+    return p;
+}
+
+#if defined(_WIN32) || defined(__MINGW32__)
+
+/* ============================================================================
+ * Freestanding PE64 PEB -> kernel32/kernelbase Export Resolver (Zero Imports)
+ * ============================================================================ */
+
+typedef struct scarlett_unicode_string_s {
+    uint16_t Length;
+    uint16_t MaximumLength;
+    uint32_t Reserved;
+    const uint16_t *Buffer;
+} scarlett_unicode_string_t;
+
+typedef struct scarlett_list_entry_s {
+    struct scarlett_list_entry_s *Flink;
+    struct scarlett_list_entry_s *Blink;
+} scarlett_list_entry_t;
+
+typedef void (SCARLETT_DSTORAGEXS_CALL *scarlett_ods_fn_t)(const char *lpOutputString);
+typedef int32_t (SCARLETT_DSTORAGEXS_CALL *scarlett_set_event_fn_t)(void *hEvent);
+typedef void *(SCARLETT_DSTORAGEXS_CALL *scarlett_create_thread_fn_t)(
+    void *lpThreadAttributes,
+    size_t dwStackSize,
+    uint32_t (SCARLETT_DSTORAGEXS_CALL *lpStartAddress)(void *),
+    void *lpParameter,
+    uint32_t dwCreationFlags,
+    uint32_t *lpThreadId);
+
+typedef struct scarlett_d3d12_fence_vtbl_s {
+    void *slots[10]; /* IUnknown(0..2), ID3D12Object(3..6), ID3D12DeviceChild(7), ID3D12Fence(8..9) */
+    scarlett_hresult_t (SCARLETT_DSTORAGEXS_CALL *Signal)(void *self, uint64_t Value);
+} scarlett_d3d12_fence_vtbl_t;
+
+typedef struct scarlett_d3d12_fence_s {
+    const scarlett_d3d12_fence_vtbl_t *lpVtbl;
+} scarlett_d3d12_fence_t;
+
+static scarlett_ods_fn_t g_pfn_OutputDebugStringA = NULL;
+static scarlett_set_event_fn_t g_pfn_SetEvent = NULL;
+static scarlett_create_thread_fn_t g_pfn_CreateThread = NULL;
+static uint32_t g_k32_resolved = 0u;
+
+static bool dstorage_pe_ascii_ieq(const char *a, const char *b) {
+    if (a == NULL || b == NULL) return false;
+    while (*a != '\0' && *b != '\0') {
+        char ca = *a++;
+        char cb = *b++;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + ('a' - 'A'));
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + ('a' - 'A'));
+        if (ca != cb) return false;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static bool dstorage_pe_utf16_ascii_ieq(const uint16_t *w, uint16_t byte_len, const char *ascii) {
+    uint32_t wchar_len = (uint32_t)(byte_len / 2u);
+    uint32_t i = 0u;
+    while (i < wchar_len && ascii[i] != '\0') {
+        uint16_t wc = w[i];
+        char cb = ascii[i];
+        if (wc >= 'A' && wc <= 'Z') wc = (uint16_t)(wc + ('a' - 'A'));
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + ('a' - 'A'));
+        if (wc != (uint16_t)(uint8_t)cb) return false;
+        ++i;
+    }
+    return i == wchar_len && ascii[i] == '\0';
+}
+
+static void *dstorage_pe_find_export(const uint8_t *base, const char *proc_name) {
+    if (base == NULL || proc_name == NULL) return NULL;
+    if (base[0] != 'M' || base[1] != 'Z') return NULL;
+    uint32_t pe_off = *(const uint32_t *)(base + 0x3Cu);
+    const uint8_t *nt = base + pe_off;
+    if (nt[0] != 'P' || nt[1] != 'E' || nt[2] != 0 || nt[3] != 0) return NULL;
+    uint16_t magic = *(const uint16_t *)(nt + 0x18u);
+    if (magic != 0x020Bu) return NULL; /* PE32+ */
+    uint32_t exp_rva = *(const uint32_t *)(nt + 0x88u);
+    uint32_t exp_size = *(const uint32_t *)(nt + 0x8Cu);
+    if (exp_rva == 0u || exp_size == 0u) return NULL;
+
+    const uint8_t *exp_dir = base + exp_rva;
+    uint32_t num_names = *(const uint32_t *)(exp_dir + 0x18u);
+    uint32_t addr_funcs_rva = *(const uint32_t *)(exp_dir + 0x1Cu);
+    uint32_t addr_names_rva = *(const uint32_t *)(exp_dir + 0x20u);
+    uint32_t addr_ords_rva = *(const uint32_t *)(exp_dir + 0x24u);
+
+    const uint32_t *names = (const uint32_t *)(base + addr_names_rva);
+    const uint16_t *ords = (const uint16_t *)(base + addr_ords_rva);
+    const uint32_t *funcs = (const uint32_t *)(base + addr_funcs_rva);
+
+    for (uint32_t i = 0u; i < num_names; ++i) {
+        const char *name = (const char *)(base + names[i]);
+        if (dstorage_pe_ascii_ieq(name, proc_name)) {
+            uint32_t fn_rva = funcs[ords[i]];
+            if (fn_rva >= exp_rva && fn_rva < exp_rva + exp_size) {
+                return NULL; /* Forwarder */
+            }
+            return (void *)(uintptr_t)(base + fn_rva);
+        }
+    }
+    return NULL;
+}
+
+static void dstorage_pe_resolve_kernel32(void) {
+    if (__atomic_load_n(&g_k32_resolved, __ATOMIC_ACQUIRE) != 0u) {
+        return;
+    }
+    const uint8_t *peb = NULL;
+    __asm__ volatile("movq %%gs:0x60, %0" : "=r"(peb));
+    if (peb == NULL) {
+        return;
+    }
+    const uint8_t *ldr = *(const uint8_t *const *)(peb + 0x18u);
+    if (ldr == NULL) {
+        return;
+    }
+    const scarlett_list_entry_t *head = (const scarlett_list_entry_t *)(ldr + 0x20u);
+    const uint8_t *k32_base = NULL;
+    const uint8_t *kbase_base = NULL;
+
+    for (const scarlett_list_entry_t *cur = head->Flink;
+         cur != NULL && cur != head;
+         cur = cur->Flink) {
+        const uint8_t *entry = (const uint8_t *)cur;
+        const uint8_t *dll_base = *(const uint8_t *const *)(entry + 0x20u);
+        const scarlett_unicode_string_t *base_name =
+            (const scarlett_unicode_string_t *)(entry + 0x48u);
+        if (dll_base != NULL && base_name->Buffer != NULL) {
+            if (dstorage_pe_utf16_ascii_ieq(base_name->Buffer, base_name->Length, "kernel32.dll")) {
+                k32_base = dll_base;
+            } else if (dstorage_pe_utf16_ascii_ieq(base_name->Buffer, base_name->Length, "kernelbase.dll")) {
+                kbase_base = dll_base;
+            }
+        }
+    }
+
+    void *ods = dstorage_pe_find_export(k32_base, "OutputDebugStringA");
+    if (ods == NULL) ods = dstorage_pe_find_export(kbase_base, "OutputDebugStringA");
+    void *sev = dstorage_pe_find_export(k32_base, "SetEvent");
+    if (sev == NULL) sev = dstorage_pe_find_export(kbase_base, "SetEvent");
+    void *cth = dstorage_pe_find_export(k32_base, "CreateThread");
+    if (cth == NULL) cth = dstorage_pe_find_export(kbase_base, "CreateThread");
+
+    __atomic_store_n(&g_pfn_OutputDebugStringA, (scarlett_ods_fn_t)ods, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_pfn_SetEvent, (scarlett_set_event_fn_t)sev, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_pfn_CreateThread, (scarlett_create_thread_fn_t)cth, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_k32_resolved, 1u, __ATOMIC_RELEASE);
+}
+
+static inline char *dstorage_pe_append_hex_padded(
+    char *p, char *end, uint64_t val, int digits) {
+    static const char kHex[] = "0123456789ABCDEF";
+    for (int i = digits - 1; i >= 0; --i) {
+        if (p + 1 < end) {
+            *p++ = kHex[(val >> (i * 4)) & 0xFu];
+        }
+    }
+    return p;
+}
+
+static void dstorage_pe_ods(const char *msg) {
+    dstorage_pe_resolve_kernel32();
+    scarlett_ods_fn_t ods = __atomic_load_n(&g_pfn_OutputDebugStringA, __ATOMIC_ACQUIRE);
+    if (ods != NULL && msg != NULL) {
+        ods(msg);
+    }
+}
+
+static void dstorage_pe_log_hr(const char *fn_name, const char *detail, scarlett_hresult_t hr) {
+    char buf[512];
+    char *p = buf;
+    char *end = buf + sizeof(buf);
+    p = dstorage_pe_append_str(p, end, "[scarlett:dstorage_xs] ");
+    p = dstorage_pe_append_str(p, end, fn_name);
+    if (detail != NULL) {
+        p = dstorage_pe_append_str(p, end, " ");
+        p = dstorage_pe_append_str(p, end, detail);
+    }
+    p = dstorage_pe_append_str(p, end, " hr=0x");
+    p = dstorage_pe_append_hex_padded(p, end, (uint32_t)hr, 8);
+    if (p + 1 < end) *p++ = '\n';
+    *p = '\0';
+    dstorage_pe_ods(buf);
+}
+
+static void dstorage_pe_log_unknown_iid(const char *where, const scarlett_guid_t *riid) {
+    char buf[256];
+    char *p = buf;
+    char *end = buf + sizeof(buf);
+    p = dstorage_pe_append_str(p, end, "[scarlett:dstorage_xs] E_NOINTERFACE in ");
+    p = dstorage_pe_append_str(p, end, where);
+    p = dstorage_pe_append_str(p, end, " riid={");
+    p = dstorage_pe_append_hex_padded(p, end, riid->data1, 8);
+    if (p + 1 < end) *p++ = '-';
+    p = dstorage_pe_append_hex_padded(p, end, riid->data2, 4);
+    if (p + 1 < end) *p++ = '-';
+    p = dstorage_pe_append_hex_padded(p, end, riid->data3, 4);
+    if (p + 1 < end) *p++ = '-';
+    p = dstorage_pe_append_hex_padded(p, end, riid->data4[0], 2);
+    p = dstorage_pe_append_hex_padded(p, end, riid->data4[1], 2);
+    if (p + 1 < end) *p++ = '-';
+    for (int i = 2; i < 8; ++i) {
+        p = dstorage_pe_append_hex_padded(p, end, riid->data4[i], 2);
+    }
+    p = dstorage_pe_append_str(p, end, "}\n");
+    *p = '\0';
+    dstorage_pe_ods(buf);
+}
+
+static void dstorage_pe_log_trace(
+    const char *op,
+    uint64_t a0,
+    uint64_t a1,
+    uint64_t a2,
+    uint64_t a3) {
+    char buf[256];
+    char *p = buf;
+    char *end = buf + sizeof(buf);
+    p = dstorage_pe_append_str(p, end, "[scarlett:dstorage_xs] ");
+    p = dstorage_pe_append_str(p, end, op);
+    p = dstorage_pe_append_str(p, end, " a0=");
+    p = dstorage_pe_append_hex64(p, end, a0);
+    p = dstorage_pe_append_str(p, end, " a1=");
+    p = dstorage_pe_append_hex64(p, end, a1);
+    p = dstorage_pe_append_str(p, end, " a2=");
+    p = dstorage_pe_append_hex64(p, end, a2);
+    p = dstorage_pe_append_str(p, end, " a3=");
+    p = dstorage_pe_append_hex64(p, end, a3);
+    p = dstorage_pe_append_str(p, end, "\n");
+    *p = '\0';
+    dstorage_pe_ods(buf);
+}
+
+#else
+
+static inline void dstorage_pe_log_hr(
+    const char *fn_name, const char *detail, scarlett_hresult_t hr) {
+    (void)fn_name;
+    (void)detail;
+    (void)hr;
+}
+
+static inline void dstorage_pe_log_unknown_iid(
+    const char *where, const scarlett_guid_t *riid) {
+    (void)where;
+    (void)riid;
+}
+
+static inline void dstorage_pe_log_trace(
+    const char *op, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)op;
+    (void)a0;
+    (void)a1;
+    (void)a2;
+    (void)a3;
+}
+
+#endif /* _WIN32 || __MINGW32__ */
+
 /* ============================================================================
  * WINE_UNIX_CALL Bridge Abstraction (PE64 vs Linux Host Test Link)
  * ============================================================================ */
@@ -203,6 +488,35 @@ static scarlett_hresult_t dstorage_pe_dispatch_stub(
                           sizeof(params.ctx.caller_module_name),
                           "dstorage_xs_caller");
 
+#if defined(_WIN32) || defined(__MINGW32__)
+    dstorage_pe_resolve_kernel32();
+    scarlett_ods_fn_t ods = __atomic_load_n(&g_pfn_OutputDebugStringA, __ATOMIC_ACQUIRE);
+    if (ods != NULL) {
+        char log_buf[384];
+        char *p = log_buf;
+        char *end = log_buf + sizeof(log_buf);
+        p = dstorage_pe_append_str(p, end, "[scarlett:dstorage_xs:stub] dll=");
+        p = dstorage_pe_append_str(p, end, params.ctx.dll_name);
+        p = dstorage_pe_append_str(p, end, " fn=");
+        p = dstorage_pe_append_str(p, end, params.ctx.symbol_name);
+        p = dstorage_pe_append_str(p, end, " caller=");
+        p = dstorage_pe_append_hex64(p, end, return_address);
+        p = dstorage_pe_append_str(p, end, " rcx=");
+        p = dstorage_pe_append_hex64(p, end, rcx);
+        p = dstorage_pe_append_str(p, end, " rdx=");
+        p = dstorage_pe_append_hex64(p, end, rdx);
+        p = dstorage_pe_append_str(p, end, " r8=");
+        p = dstorage_pe_append_hex64(p, end, r8);
+        p = dstorage_pe_append_str(p, end, " r9=");
+        p = dstorage_pe_append_hex64(p, end, r9);
+        if (p + 1 < end) {
+            *p++ = '\n';
+        }
+        *p = '\0';
+        ods(log_buf);
+    }
+#endif
+
     int32_t rc = dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_REPORT_STUB, &params);
     if (params.out_action == (uint32_t)SCARLETT_STUB_ACTION_LOG_AND_ABORT) {
         return SCARLETT_ERR_STRICT_STUB_ABORT;
@@ -251,6 +565,86 @@ static scarlett_hresult_t dstorage_pe_ensure_unix_init(void) {
     return SCARLETT_OK;
 }
 
+#if defined(_WIN32) || defined(__MINGW32__)
+static uint32_t g_pe_signal_thread_started = 0u;
+
+static void dstorage_pe_dispatch_signal_batch(
+    const scarlett_dstorage_wait_signals_params_t *sp) {
+    scarlett_set_event_fn_t set_event_fn = __atomic_load_n(&g_pfn_SetEvent, __ATOMIC_ACQUIRE);
+    for (uint32_t i = 0u; i < sp->out_count; ++i) {
+        const scarlett_dstorage_pe_signal_item_t *item = &sp->items[i];
+        if (item->target_addr == 0u) {
+            continue;
+        }
+        if (item->mode == SCARLETT_DSTORAGE_SIGNAL_MODE_PE_FENCE) {
+            scarlett_d3d12_fence_t *fence =
+                (scarlett_d3d12_fence_t *)(uintptr_t)item->target_addr;
+            if (fence->lpVtbl != NULL && fence->lpVtbl->Signal != NULL) {
+                (void)fence->lpVtbl->Signal(fence, item->value);
+            }
+        } else if (item->mode == SCARLETT_DSTORAGE_SIGNAL_MODE_PE_EVENT) {
+            if (set_event_fn != NULL) {
+                (void)set_event_fn((void *)(uintptr_t)item->target_addr);
+            }
+        }
+    }
+}
+
+static uint32_t SCARLETT_DSTORAGEXS_CALL dstorage_pe_signal_worker(void *arg) {
+    (void)arg;
+    for (;;) {
+        scarlett_dstorage_wait_signals_params_t sp;
+        dstorage_pe_zero(&sp, sizeof(sp));
+        sp.blocking = 1u;
+        int32_t rc = dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_WAIT_SIGNALS, &sp);
+        if (scarlett_failed(rc)) {
+            break;
+        }
+        if (sp.out_count > 0u) {
+            dstorage_pe_dispatch_signal_batch(&sp);
+        }
+        if (sp.out_stop != 0u) {
+            break;
+        }
+    }
+    return 0u;
+}
+
+static void dstorage_pe_ensure_signal_worker(void) {
+    if (__atomic_load_n(&g_pe_signal_thread_started, __ATOMIC_ACQUIRE) != 0u) {
+        return;
+    }
+    dstorage_pe_resolve_kernel32();
+    uint32_t expected = 0u;
+    if (__atomic_compare_exchange_n(&g_pe_signal_thread_started, &expected, 1u,
+                                      false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+        scarlett_create_thread_fn_t create_thread =
+            __atomic_load_n(&g_pfn_CreateThread, __ATOMIC_ACQUIRE);
+        if (create_thread != NULL) {
+            void *th = create_thread(NULL, 0u, dstorage_pe_signal_worker, NULL, 0u, NULL);
+            if (th == NULL) {
+                __atomic_store_n(&g_pe_signal_thread_started, 0u, __ATOMIC_RELEASE);
+            }
+        } else {
+            __atomic_store_n(&g_pe_signal_thread_started, 0u, __ATOMIC_RELEASE);
+        }
+    }
+}
+
+static void dstorage_pe_drain_signals_nonblocking(void) {
+    scarlett_dstorage_wait_signals_params_t sp;
+    for (;;) {
+        dstorage_pe_zero(&sp, sizeof(sp));
+        sp.blocking = 0u;
+        int32_t rc = dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_WAIT_SIGNALS, &sp);
+        if (scarlett_failed(rc) || sp.out_count == 0u) {
+            break;
+        }
+        dstorage_pe_dispatch_signal_batch(&sp);
+    }
+}
+#endif
+
 /* ============================================================================
  * IDStorageFileX COM Implementation
  * ============================================================================ */
@@ -272,20 +666,28 @@ static IDStorageFileX *dstorage_pe_alloc_file(void) {
     return NULL;
 }
 
+static bool dstorage_is_file_iid(const scarlett_guid_t *riid) {
+    static const scarlett_guid_t kIUnknown = SCARLETT_IID_IUNKNOWN_INIT;
+    static const scarlett_guid_t kIFile = SCARLETT_IID_IDSTORAGEFILEX_INIT;
+    static const scarlett_guid_t kIFileXbox = SCARLETT_IID_IDSTORAGEFILEX_XBOX_INIT;
+    return dstorage_guid_eq(riid, &kIUnknown) ||
+           dstorage_guid_eq(riid, &kIFile) ||
+           dstorage_guid_eq(riid, &kIFileXbox);
+}
+
 static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL file_QueryInterface(
     IDStorageFileX *self,
     const scarlett_guid_t *riid,
     void **ppvObject) {
-    static const scarlett_guid_t kIUnknown = SCARLETT_IID_IUNKNOWN_INIT;
-    static const scarlett_guid_t kIFile = SCARLETT_IID_IDSTORAGEFILEX_INIT;
     if (self == NULL || riid == NULL || ppvObject == NULL) {
         return SCARLETT_E_POINTER;
     }
-    if (dstorage_guid_eq(riid, &kIUnknown) || dstorage_guid_eq(riid, &kIFile)) {
+    if (dstorage_is_file_iid(riid)) {
         self->lpVtbl->AddRef(self);
         *ppvObject = self;
         return SCARLETT_OK;
     }
+    dstorage_pe_log_unknown_iid("IDStorageFileX::QueryInterface", riid);
     *ppvObject = NULL;
     return SCARLETT_E_NOINTERFACE;
 }
@@ -401,20 +803,28 @@ static IDStorageStatusArrayX *dstorage_pe_alloc_status(void) {
     return NULL;
 }
 
+static bool dstorage_is_status_iid(const scarlett_guid_t *riid) {
+    static const scarlett_guid_t kIUnknown = SCARLETT_IID_IUNKNOWN_INIT;
+    static const scarlett_guid_t kIStatus = SCARLETT_IID_IDSTORAGESTATUSARRAYX_INIT;
+    static const scarlett_guid_t kIStatusXbox = SCARLETT_IID_IDSTORAGESTATUSARRAYX_XBOX_INIT;
+    return dstorage_guid_eq(riid, &kIUnknown) ||
+           dstorage_guid_eq(riid, &kIStatus) ||
+           dstorage_guid_eq(riid, &kIStatusXbox);
+}
+
 static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL status_QueryInterface(
     IDStorageStatusArrayX *self,
     const scarlett_guid_t *riid,
     void **ppvObject) {
-    static const scarlett_guid_t kIUnknown = SCARLETT_IID_IUNKNOWN_INIT;
-    static const scarlett_guid_t kIStatus = SCARLETT_IID_IDSTORAGESTATUSARRAYX_INIT;
     if (self == NULL || riid == NULL || ppvObject == NULL) {
         return SCARLETT_E_POINTER;
     }
-    if (dstorage_guid_eq(riid, &kIUnknown) || dstorage_guid_eq(riid, &kIStatus)) {
+    if (dstorage_is_status_iid(riid)) {
         self->lpVtbl->AddRef(self);
         *ppvObject = self;
         return SCARLETT_OK;
     }
+    dstorage_pe_log_unknown_iid("IDStorageStatusArrayX::QueryInterface", riid);
     *ppvObject = NULL;
     return SCARLETT_E_NOINTERFACE;
 }
@@ -506,6 +916,8 @@ static IDStorageQueueX2 *dstorage_pe_alloc_queue(void) {
             g_queue_pool[i].capacity = 0u;
             g_queue_pool[i].priority = 0u;
             g_queue_pool[i].source_type = 0u;
+            g_queue_pool[i].device = NULL;
+            g_queue_pool[i].name[0] = '\0';
             __atomic_store_n(&g_queue_pool[i].ref_count, 1u, __ATOMIC_RELEASE);
             return &g_queue_pool[i];
         }
@@ -513,25 +925,32 @@ static IDStorageQueueX2 *dstorage_pe_alloc_queue(void) {
     return NULL;
 }
 
+static bool dstorage_is_queue_iid(const scarlett_guid_t *riid) {
+    static const scarlett_guid_t kIUnknown = SCARLETT_IID_IUNKNOWN_INIT;
+    static const scarlett_guid_t kIQ = SCARLETT_IID_IDSTORAGEQUEUEX_INIT;
+    static const scarlett_guid_t kIQ1 = SCARLETT_IID_IDSTORAGEQUEUEX1_INIT;
+    static const scarlett_guid_t kIQ2 = SCARLETT_IID_IDSTORAGEQUEUEX2_INIT;
+    static const scarlett_guid_t kIQXbox = SCARLETT_IID_IDSTORAGEQUEUEX_XBOX_INIT;
+    return dstorage_guid_eq(riid, &kIUnknown) ||
+           dstorage_guid_eq(riid, &kIQ) ||
+           dstorage_guid_eq(riid, &kIQ1) ||
+           dstorage_guid_eq(riid, &kIQ2) ||
+           dstorage_guid_eq(riid, &kIQXbox);
+}
+
 static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL queue_QueryInterface(
     IDStorageQueueX *self,
     const scarlett_guid_t *riid,
     void **ppvObject) {
-    static const scarlett_guid_t kIUnknown = SCARLETT_IID_IUNKNOWN_INIT;
-    static const scarlett_guid_t kIQ0 = SCARLETT_IID_IDSTORAGEQUEUEX_INIT;
-    static const scarlett_guid_t kIQ1 = SCARLETT_IID_IDSTORAGEQUEUEX1_INIT;
-    static const scarlett_guid_t kIQ2 = SCARLETT_IID_IDSTORAGEQUEUEX2_INIT;
     if (self == NULL || riid == NULL || ppvObject == NULL) {
         return SCARLETT_E_POINTER;
     }
-    if (dstorage_guid_eq(riid, &kIUnknown) ||
-        dstorage_guid_eq(riid, &kIQ0) ||
-        dstorage_guid_eq(riid, &kIQ1) ||
-        dstorage_guid_eq(riid, &kIQ2)) {
+    if (dstorage_is_queue_iid(riid)) {
         self->lpVtbl->AddRef(self);
         *ppvObject = self;
         return SCARLETT_OK;
     }
+    dstorage_pe_log_unknown_iid("IDStorageQueueX::QueryInterface", riid);
     *ppvObject = NULL;
     return SCARLETT_E_NOINTERFACE;
 }
@@ -569,6 +988,71 @@ static uint32_t SCARLETT_DSTORAGEXS_CALL queue_Release(IDStorageQueueX *self) {
     return refs;
 }
 
+#if defined(_WIN32) || defined(__MINGW32__)
+/*
+ * Exact Xbox Scarlett GDK DSTORAGE_REQUEST layout (72 bytes, Destination-before-Source):
+ *   +0x00: Options (8)
+ *   +0x08: DestinationAddress (8)
+ *   +0x10: DestinationReserved (8)
+ *   +0x18: DestinationSize (4)
+ *   +0x1C: DestinationReserved2 (4)
+ *   +0x20: Source (IDStorageFileX* or SourceAddress) (8)
+ *   +0x28: FileOffset (8)
+ *   +0x30: SourceSize (4)
+ *   +0x34: SwizzleSubresourceIndex / IntermediateSize (4)
+ *   +0x38: CancellationTag (8)
+ *   +0x40: Name (8)
+ */
+typedef struct scarlett_xbox_dstorage_request_s {
+    DSTORAGE_REQUEST_OPTIONS Options;
+    uint64_t DestinationAddress;
+    uint64_t DestinationReserved;
+    uint32_t DestinationSize;
+    uint32_t DestinationReserved2;
+    uint64_t Source;
+    uint64_t FileOffset;
+    uint32_t SourceSize;
+    uint32_t SwizzleSubresourceIndex;
+    uint64_t CancellationTag;
+    const char *Name;
+} scarlett_xbox_dstorage_request_t;
+
+SCARLETT_STATIC_ASSERT(sizeof(scarlett_xbox_dstorage_request_t) == 72,
+                       "Xbox Scarlett DSTORAGE_REQUEST must be 72 bytes");
+SCARLETT_STATIC_ASSERT(offsetof(scarlett_xbox_dstorage_request_t, DestinationAddress) == 0x08,
+                       "Xbox DestinationAddress offset");
+SCARLETT_STATIC_ASSERT(offsetof(scarlett_xbox_dstorage_request_t, DestinationSize) == 0x18,
+                       "Xbox DestinationSize offset");
+SCARLETT_STATIC_ASSERT(offsetof(scarlett_xbox_dstorage_request_t, Source) == 0x20,
+                       "Xbox Source offset");
+SCARLETT_STATIC_ASSERT(offsetof(scarlett_xbox_dstorage_request_t, FileOffset) == 0x28,
+                       "Xbox FileOffset offset");
+SCARLETT_STATIC_ASSERT(offsetof(scarlett_xbox_dstorage_request_t, SourceSize) == 0x30,
+                       "Xbox SourceSize offset");
+SCARLETT_STATIC_ASSERT(offsetof(scarlett_xbox_dstorage_request_t, CancellationTag) == 0x38,
+                       "Xbox CancellationTag offset");
+SCARLETT_STATIC_ASSERT(offsetof(scarlett_xbox_dstorage_request_t, Name) == 0x40,
+                       "Xbox Name offset");
+#endif
+
+static uint64_t dstorage_pe_unwrap_file_handle(uint64_t raw_handle) {
+    if (raw_handle == 0u) {
+        return 0u;
+    }
+    uintptr_t fh_ptr = (uintptr_t)raw_handle;
+    uintptr_t pool_start = (uintptr_t)&g_file_pool[0];
+    uintptr_t pool_end = (uintptr_t)&g_file_pool[SCARLETT_DSTORAGE_FILE_POOL_CAP];
+    if (fh_ptr >= pool_start && fh_ptr < pool_end &&
+        ((fh_ptr - pool_start) % sizeof(IDStorageFileX)) == 0u) {
+        const IDStorageFileX *f = (const IDStorageFileX *)fh_ptr;
+        if (__atomic_load_n(&f->in_use, __ATOMIC_ACQUIRE) != 0u &&
+            f->lpVtbl == &g_file_vtbl) {
+            return f->unix_file_handle;
+        }
+    }
+    return raw_handle;
+}
+
 static void SCARLETT_DSTORAGEXS_CALL queue_EnqueueRequest(
     IDStorageQueueX *self,
     const DSTORAGE_REQUEST *request) {
@@ -578,7 +1062,30 @@ static void SCARLETT_DSTORAGEXS_CALL queue_EnqueueRequest(
     scarlett_dstorage_enqueue_request_params_t params;
     dstorage_pe_zero(&params, sizeof(params));
     params.queue_handle = self->unix_queue_handle;
-    params.file_handle = request->FileHandle;
+
+#if defined(_WIN32) || defined(__MINGW32__)
+    const scarlett_xbox_dstorage_request_t *xreq =
+        (const scarlett_xbox_dstorage_request_t *)(const void *)request;
+    params.options.raw = xreq->Options.AsUInt64;
+    params.dst_addr = xreq->DestinationAddress;
+    params.dst_size = xreq->DestinationSize;
+    if (xreq->Options.SourceType == DSTORAGE_REQUEST_SOURCE_FILE) {
+        params.file_handle = dstorage_pe_unwrap_file_handle(xreq->Source);
+        params.file_offset = xreq->FileOffset;
+        params.src_addr = 0u;
+    } else {
+        params.file_handle = 0u;
+        params.file_offset = 0u;
+        params.src_addr = xreq->Source;
+    }
+    params.src_size = xreq->SourceSize;
+    params.swizzle_subresource_index = xreq->SwizzleSubresourceIndex;
+    params.cancellation_tag = xreq->CancellationTag;
+    params.name_utf8_addr = (uint64_t)(uintptr_t)xreq->Name;
+#else
+    params.file_handle = (request->Options.SourceType == DSTORAGE_REQUEST_SOURCE_FILE)
+                             ? dstorage_pe_unwrap_file_handle(request->FileHandle)
+                             : request->FileHandle;
     params.file_offset = request->FileOffset;
     params.src_addr = request->SourceAddress;
     params.dst_addr = request->DestinationAddress;
@@ -589,6 +1096,19 @@ static void SCARLETT_DSTORAGEXS_CALL queue_EnqueueRequest(
     params.dst_size = request->DestinationSize;
     params.swizzle_subresource_index = request->SwizzleSubresourceIndex;
     params.swizzle_reserved = request->SwizzleReserved;
+#endif
+    {
+        static uint32_t g_ds_req_seq = 0u;
+        uint32_t seq = __atomic_add_fetch(&g_ds_req_seq, 1u, __ATOMIC_RELAXED);
+        if (params.dst_size >= (1024u * 1024u) || seq <= 8u || (seq % 200u) == 0u) {
+            dstorage_pe_log_trace(
+                "EnqueueRequest",
+                params.dst_addr,
+                (uint64_t)params.dst_size,
+                params.file_offset,
+                (uint64_t)seq);
+        }
+    }
     (void)dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_ENQUEUE_REQUEST, &params);
 }
 
@@ -619,7 +1139,24 @@ static void SCARLETT_DSTORAGEXS_CALL queue_EnqueueSignal(
     params.queue_handle = self->unix_queue_handle;
     params.fence_or_event_addr = (uint64_t)(uintptr_t)fence;
     params.value = value;
-    params.is_event = 0u;
+#if defined(_WIN32) || defined(__MINGW32__)
+    dstorage_pe_ensure_signal_worker();
+    params.is_event = SCARLETT_DSTORAGE_SIGNAL_MODE_PE_FENCE;
+#else
+    params.is_event = SCARLETT_DSTORAGE_SIGNAL_MODE_HOST_FENCE;
+#endif
+    {
+        static uint32_t g_ds_sig_seq = 0u;
+        uint32_t seq = __atomic_add_fetch(&g_ds_sig_seq, 1u, __ATOMIC_RELAXED);
+        if (seq <= 12u || (seq % 100u) == 0u) {
+            dstorage_pe_log_trace(
+                "EnqueueSignal",
+                (uint64_t)(uintptr_t)fence,
+                value,
+                self->unix_queue_handle,
+                (uint64_t)seq);
+        }
+    }
     (void)dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_ENQUEUE_SIGNAL, &params);
 }
 
@@ -627,11 +1164,28 @@ static void SCARLETT_DSTORAGEXS_CALL queue_Submit(IDStorageQueueX *self) {
     if (self == NULL || self->unix_queue_handle == 0u) {
         return;
     }
+    {
+        static uint32_t g_ds_sub_seq = 0u;
+        uint32_t seq = __atomic_add_fetch(&g_ds_sub_seq, 1u, __ATOMIC_RELAXED);
+        if (seq <= 8u || (seq % 200u) == 0u) {
+            dstorage_pe_log_trace(
+                "Submit",
+                (uint64_t)(uintptr_t)self,
+                self->unix_queue_handle,
+                (uint64_t)seq,
+                0u);
+        }
+    }
     scarlett_dstorage_submit_queue_params_t params;
     dstorage_pe_zero(&params, sizeof(params));
     params.queue_handle = self->unix_queue_handle;
     params.wait_for_idle = 0u;
     (void)dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_SUBMIT_QUEUE, &params);
+#if defined(_WIN32) || defined(__MINGW32__)
+    if (__atomic_load_n(&g_pe_signal_thread_started, __ATOMIC_ACQUIRE) == 0u) {
+        dstorage_pe_drain_signals_nonblocking();
+    }
+#endif
 }
 
 static void SCARLETT_DSTORAGEXS_CALL queue_CancelRequestsWithTag(
@@ -668,11 +1222,13 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL queue_Query(
     if (scarlett_failed(params.out_status)) {
         return params.out_status;
     }
+    const IDStorageQueueX2 *q2 = (const IDStorageQueueX2 *)self;
     info->Desc.SourceType = params.out_source_type;
-    info->Desc.Capacity = params.out_capacity;
-    info->Desc.Priority = params.out_priority;
-    info->Desc.Name = NULL;
-    info->Desc.Device = NULL;
+    info->Desc.Capacity = (uint16_t)params.out_capacity;
+    info->Desc.Priority = (int8_t)params.out_priority;
+    dstorage_pe_zero(info->Desc.Reserved, sizeof(info->Desc.Reserved));
+    info->Desc.Name = (q2->name[0] != '\0') ? q2->name : NULL;
+    info->Desc.Device = q2->device;
     info->EmptySlotCount = params.out_empty_slots;
     info->RequestCountUntilAutoSubmit = params.out_until_auto_submit;
     info->PendingRequestCount = params.out_pending_count;
@@ -694,7 +1250,24 @@ static void SCARLETT_DSTORAGEXS_CALL queue_EnqueueSetEvent(
     params.queue_handle = self->unix_queue_handle;
     params.fence_or_event_addr = (uint64_t)(uintptr_t)eventHandle;
     params.value = 1u;
-    params.is_event = 1u;
+#if defined(_WIN32) || defined(__MINGW32__)
+    dstorage_pe_ensure_signal_worker();
+    params.is_event = SCARLETT_DSTORAGE_SIGNAL_MODE_PE_EVENT;
+#else
+    params.is_event = SCARLETT_DSTORAGE_SIGNAL_MODE_HOST_EVENT;
+#endif
+    {
+        static uint32_t g_ds_evt_seq = 0u;
+        uint32_t seq = __atomic_add_fetch(&g_ds_evt_seq, 1u, __ATOMIC_RELAXED);
+        if (seq <= 12u || (seq % 100u) == 0u) {
+            dstorage_pe_log_trace(
+                "EnqueueSetEvent",
+                (uint64_t)(uintptr_t)eventHandle,
+                self->unix_queue_handle,
+                (uint64_t)seq,
+                0u);
+        }
+    }
     (void)dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_ENQUEUE_SIGNAL, &params);
 }
 
@@ -756,25 +1329,32 @@ static const IDStorageQueueX2Vtbl g_queue_vtbl = {
 
 static const IDStorageFactoryX2Vtbl g_factory_vtbl;
 
+static bool dstorage_is_factory_iid(const scarlett_guid_t *riid) {
+    static const scarlett_guid_t kIUnknown = SCARLETT_IID_IUNKNOWN_INIT;
+    static const scarlett_guid_t kIFacXbox = SCARLETT_IID_IDSTORAGEFACTORY_XBOX_INIT;
+    static const scarlett_guid_t kIFacX = SCARLETT_IID_IDSTORAGEFACTORYX_INIT;
+    static const scarlett_guid_t kIFacX1 = SCARLETT_IID_IDSTORAGEFACTORYX1_INIT;
+    static const scarlett_guid_t kIFacX2 = SCARLETT_IID_IDSTORAGEFACTORYX2_INIT;
+    return dstorage_guid_eq(riid, &kIUnknown) ||
+           dstorage_guid_eq(riid, &kIFacXbox) ||
+           dstorage_guid_eq(riid, &kIFacX) ||
+           dstorage_guid_eq(riid, &kIFacX1) ||
+           dstorage_guid_eq(riid, &kIFacX2);
+}
+
 static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_QueryInterface(
     IDStorageFactoryX *self,
     const scarlett_guid_t *riid,
     void **ppvObject) {
-    static const scarlett_guid_t kIUnknown = SCARLETT_IID_IUNKNOWN_INIT;
-    static const scarlett_guid_t kIF0 = SCARLETT_IID_IDSTORAGEFACTORYX_INIT;
-    static const scarlett_guid_t kIF1 = SCARLETT_IID_IDSTORAGEFACTORYX1_INIT;
-    static const scarlett_guid_t kIF2 = SCARLETT_IID_IDSTORAGEFACTORYX2_INIT;
     if (self == NULL || riid == NULL || ppvObject == NULL) {
         return SCARLETT_E_POINTER;
     }
-    if (dstorage_guid_eq(riid, &kIUnknown) ||
-        dstorage_guid_eq(riid, &kIF0) ||
-        dstorage_guid_eq(riid, &kIF1) ||
-        dstorage_guid_eq(riid, &kIF2)) {
+    if (dstorage_is_factory_iid(riid)) {
         self->lpVtbl->AddRef(self);
         *ppvObject = self;
         return SCARLETT_OK;
     }
+    dstorage_pe_log_unknown_iid("IDStorageFactoryX::QueryInterface", riid);
     *ppvObject = NULL;
     return SCARLETT_E_NOINTERFACE;
 }
@@ -802,25 +1382,25 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_CreateQueue(
     const DSTORAGE_QUEUE_DESC *desc,
     const scarlett_guid_t *riid,
     void **ppv) {
-    static const scarlett_guid_t kIQ0 = SCARLETT_IID_IDSTORAGEQUEUEX_INIT;
-    static const scarlett_guid_t kIQ1 = SCARLETT_IID_IDSTORAGEQUEUEX1_INIT;
-    static const scarlett_guid_t kIQ2 = SCARLETT_IID_IDSTORAGEQUEUEX2_INIT;
     (void)self;
     if (desc == NULL || riid == NULL || ppv == NULL) {
         return SCARLETT_E_POINTER;
     }
     *ppv = NULL;
-
-    if (!dstorage_guid_eq(riid, &kIQ0) &&
-        !dstorage_guid_eq(riid, &kIQ1) &&
-        !dstorage_guid_eq(riid, &kIQ2)) {
+    if (!dstorage_is_queue_iid(riid)) {
+        dstorage_pe_log_unknown_iid("IDStorageFactoryX::CreateQueue", riid);
         return SCARLETT_E_NOINTERFACE;
     }
-    if (desc->Capacity < SCARLETT_DSTORAGE_MIN_QUEUE_CAPACITY ||
-        desc->Capacity > SCARLETT_DSTORAGE_MAX_QUEUE_CAPACITY) {
+
+    if ((uint32_t)desc->Capacity < SCARLETT_DSTORAGE_MIN_QUEUE_CAPACITY ||
+        (uint32_t)desc->Capacity > SCARLETT_DSTORAGE_MAX_QUEUE_CAPACITY) {
+        dstorage_pe_log_hr("CreateQueue", desc->Name, SCARLETT_E_DSTORAGE_INVALID_QUEUE_CAPACITY);
         return SCARLETT_E_DSTORAGE_INVALID_QUEUE_CAPACITY;
     }
-    if (desc->Priority >= SCARLETT_DSTORAGE_PRIORITY_COUNT) {
+    int32_t raw_prio = (int32_t)desc->Priority;
+    uint32_t prio = (raw_prio == -1) ? (uint32_t)DSTORAGE_PRIORITY_LOW : (uint32_t)raw_prio;
+    if (raw_prio < -1 || prio >= SCARLETT_DSTORAGE_PRIORITY_COUNT) {
+        dstorage_pe_log_hr("CreateQueue", desc->Name, SCARLETT_E_DSTORAGE_INVALID_MEMORY_QUEUE_PRIORITY);
         return SCARLETT_E_DSTORAGE_INVALID_MEMORY_QUEUE_PRIORITY;
     }
 
@@ -832,8 +1412,8 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_CreateQueue(
     scarlett_dstorage_create_queue_params_t params;
     dstorage_pe_zero(&params, sizeof(params));
     params.source_type = desc->SourceType;
-    params.capacity = desc->Capacity;
-    params.priority = desc->Priority;
+    params.capacity = (uint32_t)desc->Capacity;
+    params.priority = prio;
     params.name_utf8_addr = (uint64_t)(uintptr_t)desc->Name;
     params.name_utf8_len = dstorage_pe_strlen_bounded(desc->Name, 256u);
 
@@ -844,10 +1424,13 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_CreateQueue(
     }
 
     queue->unix_queue_handle = params.out_queue_handle;
-    queue->capacity = desc->Capacity;
-    queue->priority = desc->Priority;
+    queue->capacity = (uint32_t)desc->Capacity;
+    queue->priority = prio;
     queue->source_type = desc->SourceType;
+    queue->device = desc->Device;
+    dstorage_pe_copy_cstr(queue->name, sizeof(queue->name), desc->Name);
     *ppv = queue;
+    dstorage_pe_log_hr("CreateQueue", desc->Name, SCARLETT_OK);
     return SCARLETT_OK;
 }
 
@@ -856,12 +1439,12 @@ static scarlett_hresult_t factory_open_file_common(
     uint32_t utf8_len,
     const scarlett_guid_t *riid,
     void **ppv) {
-    static const scarlett_guid_t kIFile = SCARLETT_IID_IDSTORAGEFILEX_INIT;
     if (utf8_path == NULL || riid == NULL || ppv == NULL) {
         return SCARLETT_E_POINTER;
     }
     *ppv = NULL;
-    if (!dstorage_guid_eq(riid, &kIFile)) {
+    if (!dstorage_is_file_iid(riid)) {
+        dstorage_pe_log_unknown_iid("IDStorageFactoryX::OpenFile", riid);
         return SCARLETT_E_NOINTERFACE;
     }
     if (utf8_len == 0u) {
@@ -881,13 +1464,16 @@ static scarlett_hresult_t factory_open_file_common(
 
     int32_t rc = dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_OPEN_FILE, &params);
     if (scarlett_failed(rc) || scarlett_failed(params.out_status)) {
+        scarlett_hresult_t err = scarlett_failed(rc) ? rc : params.out_status;
         __atomic_store_n(&file->in_use, 0u, __ATOMIC_RELEASE);
-        return scarlett_failed(rc) ? rc : params.out_status;
+        dstorage_pe_log_hr("OpenFile", utf8_path, err);
+        return err;
     }
 
     file->unix_file_handle = params.out_file_handle;
     file->file_size_bytes = params.out_file_size;
     *ppv = file;
+    dstorage_pe_log_hr("OpenFile", utf8_path, SCARLETT_OK);
     return SCARLETT_OK;
 }
 
@@ -900,18 +1486,18 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_OpenFile(
     if (path == NULL || riid == NULL || ppv == NULL) {
         return SCARLETT_E_POINTER;
     }
-    char utf8[1024];
+    char utf8[2048];
     uint32_t len = dstorage_pe_utf16_to_utf8(path, utf8, (uint32_t)sizeof(utf8));
     return factory_open_file_common(utf8, len, riid, ppv);
 }
 
 static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_OpenFileUtf8(
-    IDStorageFactoryX1 *self,
+    IDStorageFactoryX *self,
     const char *path_utf8,
     const scarlett_guid_t *riid,
     void **ppv) {
     (void)self;
-    if (path_utf8 == NULL) {
+    if (path_utf8 == NULL || riid == NULL || ppv == NULL) {
         return SCARLETT_E_POINTER;
     }
     uint32_t len = dstorage_pe_strlen_bounded(path_utf8, 4096u);
@@ -924,14 +1510,13 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_CreateStatusArray(
     const char *name,
     const scarlett_guid_t *riid,
     void **ppv) {
-    static const scarlett_guid_t kIStatus = SCARLETT_IID_IDSTORAGESTATUSARRAYX_INIT;
     (void)self;
-    (void)name;
     if (riid == NULL || ppv == NULL) {
         return SCARLETT_E_POINTER;
     }
     *ppv = NULL;
-    if (!dstorage_guid_eq(riid, &kIStatus)) {
+    if (!dstorage_is_status_iid(riid)) {
+        dstorage_pe_log_unknown_iid("IDStorageFactoryX::CreateStatusArray", riid);
         return SCARLETT_E_NOINTERFACE;
     }
     if (capacity == 0u || capacity > SCARLETT_DSTORAGE_MAX_QUEUE_CAPACITY) {
@@ -948,13 +1533,16 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_CreateStatusArray(
     params.capacity = capacity;
     int32_t rc = dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_CREATE_STATUS_ARRAY, &params);
     if (scarlett_failed(rc) || scarlett_failed(params.out_status)) {
+        scarlett_hresult_t err = scarlett_failed(rc) ? rc : params.out_status;
         __atomic_store_n(&status->in_use, 0u, __ATOMIC_RELEASE);
-        return scarlett_failed(rc) ? rc : params.out_status;
+        dstorage_pe_log_hr("CreateStatusArray", name, err);
+        return err;
     }
 
     status->unix_status_handle = params.out_status_array_handle;
     status->capacity = capacity;
     *ppv = status;
+    dstorage_pe_log_hr("CreateStatusArray", name, SCARLETT_OK);
     return SCARLETT_OK;
 }
 
@@ -966,14 +1554,13 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_SetStagingBufferSize(
     dstorage_pe_zero(&params, sizeof(params));
     params.size_bytes = (uint64_t)size;
     int32_t rc = dstorage_pe_unix_call(SCARLETT_DSTORAGE_UNIX_SET_STAGING_SIZE, &params);
-    if (scarlett_failed(rc)) {
-        return rc;
-    }
-    return params.out_status;
+    scarlett_hresult_t hr = scarlett_failed(rc) ? rc : params.out_status;
+    dstorage_pe_log_hr("SetStagingBufferSize", NULL, hr);
+    return hr;
 }
 
 static uint64_t SCARLETT_DSTORAGEXS_CALL factory_GetStagingBufferSize(
-    IDStorageFactoryX1 *self) {
+    IDStorageFactoryX *self) {
     (void)self;
     scarlett_dstorage_caps_params_t caps;
     dstorage_pe_zero(&caps, sizeof(caps));
@@ -985,7 +1572,7 @@ static uint64_t SCARLETT_DSTORAGEXS_CALL factory_GetStagingBufferSize(
 }
 
 static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_QueryCapabilities(
-    IDStorageFactoryX2 *self,
+    IDStorageFactoryX *self,
     scarlett_dstorage_caps_params_t *out_caps) {
     (void)self;
     if (out_caps == NULL) {
@@ -1000,7 +1587,7 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_QueryCapabilities(
 }
 
 static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_LoadBcpackPlugin(
-    IDStorageFactoryX2 *self,
+    IDStorageFactoryX *self,
     const char *plugin_path_utf8,
     uint32_t *out_plugin_abi_version) {
     (void)self;
@@ -1019,17 +1606,18 @@ static scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL factory_LoadBcpackPlugin(
 }
 
 static const IDStorageFactoryX2Vtbl g_factory_vtbl = {
-    factory_QueryInterface,
-    factory_AddRef,
-    factory_Release,
-    factory_CreateQueue,
-    factory_OpenFile,
-    factory_CreateStatusArray,
-    factory_SetStagingBufferSize,
-    factory_OpenFileUtf8,
-    factory_GetStagingBufferSize,
-    factory_QueryCapabilities,
-    factory_LoadBcpackPlugin
+    factory_QueryInterface,           /* 0 (0x00) */
+    factory_AddRef,                   /* 1 (0x08) */
+    factory_Release,                  /* 2 (0x10) */
+    factory_CreateQueue,              /* 3 (0x18) */
+    factory_OpenFile,                 /* 4 (0x20) */
+    factory_CreateStatusArray,        /* 5 (0x28) */
+    factory_OpenFileUtf8,             /* 6 (0x30) */
+    factory_GetStagingBufferSize,     /* 7 (0x38) */
+    factory_SetStagingBufferSize,     /* 8 (0x40) - matches Xbox Scarlett IDStorageFactoryX slot 8 */
+    factory_QueryCapabilities,        /* 9 (0x48) */
+    factory_CreateQueue,              /* 10 (0x50) - matches Xbox Scarlett CreateQueueX */
+    factory_LoadBcpackPlugin          /* 11 (0x58) */
 };
 
 /* ============================================================================
@@ -1039,35 +1627,35 @@ static const IDStorageFactoryX2Vtbl g_factory_vtbl = {
 SCARLETT_DSTORAGEXS_API scarlett_hresult_t SCARLETT_DSTORAGEXS_CALL DStorageGetFactory(
     const scarlett_guid_t *riid,
     void **ppv) {
-    static const scarlett_guid_t kIF0 = SCARLETT_IID_IDSTORAGEFACTORYX_INIT;
-    static const scarlett_guid_t kIF1 = SCARLETT_IID_IDSTORAGEFACTORYX1_INIT;
-    static const scarlett_guid_t kIF2 = SCARLETT_IID_IDSTORAGEFACTORYX2_INIT;
-    static const scarlett_guid_t kIUnknown = SCARLETT_IID_IUNKNOWN_INIT;
-
     if (riid == NULL || ppv == NULL) {
         return SCARLETT_E_POINTER;
     }
     *ppv = NULL;
-
-    scarlett_hresult_t init_hr = dstorage_pe_ensure_unix_init();
-    if (scarlett_failed(init_hr)) {
-        return init_hr;
-    }
-
-    if (!dstorage_guid_eq(riid, &kIUnknown) &&
-        !dstorage_guid_eq(riid, &kIF0) &&
-        !dstorage_guid_eq(riid, &kIF1) &&
-        !dstorage_guid_eq(riid, &kIF2)) {
+    if (!dstorage_is_factory_iid(riid)) {
+        dstorage_pe_log_unknown_iid("DStorageGetFactory", riid);
         return SCARLETT_E_NOINTERFACE;
     }
 
-    g_factory_singleton.lpVtbl = &g_factory_vtbl;
-    if (__atomic_load_n(&g_factory_singleton.initialized, __ATOMIC_RELAXED) == 0u) {
+    scarlett_hresult_t init_hr = dstorage_pe_ensure_unix_init();
+    if (scarlett_failed(init_hr)) {
+        dstorage_pe_log_hr("DStorageGetFactory", "unix_init", init_hr);
+        return init_hr;
+    }
+
+    uint32_t expected = 0u;
+    if (__atomic_compare_exchange_n(&g_factory_singleton.initialized, &expected, 1u,
+                                      false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        g_factory_singleton.lpVtbl = &g_factory_vtbl;
         __atomic_store_n(&g_factory_singleton.ref_count, 1u, __ATOMIC_RELEASE);
-        __atomic_store_n(&g_factory_singleton.initialized, 1u, __ATOMIC_RELEASE);
+        __atomic_store_n(&g_factory_singleton.initialized, 2u, __ATOMIC_RELEASE);
+    } else {
+        while (__atomic_load_n(&g_factory_singleton.initialized, __ATOMIC_ACQUIRE) != 2u) {
+            /* spin until singleton initialization completes */
+        }
     }
     __atomic_add_fetch(&g_factory_singleton.ref_count, 1u, __ATOMIC_RELAXED);
     *ppv = &g_factory_singleton;
+    dstorage_pe_log_hr("DStorageGetFactory", NULL, SCARLETT_OK);
     return SCARLETT_OK;
 }
 

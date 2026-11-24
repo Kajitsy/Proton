@@ -693,12 +693,28 @@ void test_vfs_cow_overlay() {
           "Writing to read-only handle must fail with READONLY_VIOLATION");
     check(vfs.close_file(fh) == SCARLETT_OK, "Close read handle failed");
 
-    // Read via D:\ synonym
+    // Read via D:\ and G:\ synonyms (including extended \\?\G:\ prefix)
     check(vfs.open_file("d:/CONTENT/sub/CONFIG.INI", SCARLETT_VFS_ACCESS_READ, fh, fsz, layer) ==
                   SCARLETT_OK &&
               fsz == orig_ini.size(),
           "Case-insensitive read via D:\\ synonym failed");
     check(vfs.close_file(fh) == SCARLETT_OK, "Close D:\\ handle failed");
+
+    check(vfs.open_file("G:\\content\\DATA.PAK", SCARLETT_VFS_ACCESS_READ, fh, fsz, layer) ==
+                  SCARLETT_OK &&
+              layer == SCARLETT_VFS_LAYER_BASE_DIR && fsz == orig_pak.size(),
+          "Case-insensitive read via G:\\ synonym failed");
+    check(vfs.close_file(fh) == SCARLETT_OK, "Close G:\\ handle failed");
+
+    check(vfs.open_file("\\\\?\\g:/CONTENT/sub/CONFIG.INI", SCARLETT_VFS_ACCESS_READ, fh, fsz, layer) ==
+                  SCARLETT_OK &&
+              fsz == orig_ini.size(),
+          "Case-insensitive read via \\\\?\\g:/ synonym failed");
+    check(vfs.close_file(fh) == SCARLETT_OK, "Close \\\\?\\g:/ handle failed");
+
+    check(vfs.open_file("C:\\content\\data.pak", SCARLETT_VFS_ACCESS_READ, fh, fsz, layer) ==
+              SCARLETT_E_INVALIDARG,
+          "Unsupported drive letter C:\\ must return SCARLETT_E_INVALIDARG");
 
     // CoW overwrite of existing file (case-mismatched path!)
     check(vfs.open_file("GAME:\\content\\data.pak",

@@ -38,6 +38,17 @@ if is_windows_pe
     install: true,
     install_dir: scarlett_install_dir,
   )
+
+  xcrdapi_dll = shared_module('XCRDAPI',
+    ['xcrdapi_pe.c', scarlett_pe_unixlib_src],
+    vs_module_defs: 'XCRDAPI.def',
+    name_prefix: '',
+    name_suffix: 'dll',
+    include_directories: [scarlett_inc, include_directories('.')],
+    c_args: ['-Wall', '-Wextra', '-Werror'],
+    install: true,
+    install_dir: scarlett_install_dir,
+  )
 else
   xgr_threads_dep = dependency('threads')
   xgr_dl_dep = meson.get_compiler('cpp').find_library('dl', required: false)
@@ -63,6 +74,7 @@ else
       'xgameruntime_pe.c',
       'libHttpClient_pe.c',
       'XCurl_pe.c',
+      'xcrdapi_pe.c',
     ],
     include_directories: [scarlett_inc, include_directories('.')],
     c_args: ['-Wall', '-Wextra', '-Werror'],

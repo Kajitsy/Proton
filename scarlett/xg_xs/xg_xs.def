@@ -5,6 +5,8 @@ EXPORTS
     XGCreateTexture3DComputer
     XGComputeOptimalSwizzleMode
     XGComputeOptimalTileMode
+    XGSuggestSwizzleMode
+    XGCreateTextureComputer
     XGTextureAddressComputer_GetResourceLayout
     XGTextureAddressComputer_GetSubresourceLayout
     XGTextureAddressComputer_GetTexelElementOffsetBytes

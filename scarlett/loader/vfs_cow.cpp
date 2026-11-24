@@ -326,12 +326,17 @@ scarlett_hresult_t GameCowVfs::normalize_game_path(
     }
 
     std::string_view rest = input_path;
+    if (rest.size() >= 4 &&
+        (rest.substr(0, 4) == "\\\\?\\" || rest.substr(0, 4) == "\\\\.\\")) {
+        rest.remove_prefix(4);
+    }
     if (rest.size() >= 5 && iequals_str(rest.substr(0, 5), "GAME:")) {
         rest.remove_prefix(5);
     } else if (rest.size() >= 2 &&
                std::isalpha(static_cast<unsigned char>(rest[0])) &&
                rest[1] == ':') {
-        if (rest[0] != 'D' && rest[0] != 'd') {
+        if (rest[0] != 'D' && rest[0] != 'd' &&
+            rest[0] != 'G' && rest[0] != 'g') {
             return SCARLETT_E_INVALIDARG;
         }
         rest.remove_prefix(2);

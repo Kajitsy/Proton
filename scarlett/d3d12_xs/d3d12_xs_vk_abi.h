@@ -44,6 +44,7 @@ typedef uint64_t ScarVkDeviceMemory;
 typedef uint64_t ScarVkFence;
 typedef uint64_t ScarVkSemaphore;
 typedef uint64_t ScarVkDebugUtilsMessengerEXT;
+typedef uint64_t ScarVkSurfaceKHR;
 typedef uint64_t ScarVkSwapchainKHR;
 
 typedef void (*ScarPFN_vkVoidFunction)(void);
@@ -93,6 +94,8 @@ typedef int32_t ScarVkResult;
 #define SCAR_VK_ERROR_LAYER_NOT_PRESENT       INT32_C(-6)
 #define SCAR_VK_ERROR_EXTENSION_NOT_PRESENT   INT32_C(-7)
 #define SCAR_VK_ERROR_INCOMPATIBLE_DRIVER     INT32_C(-9)
+#define SCAR_VK_SUBOPTIMAL_KHR                INT32_C(1000001003)
+#define SCAR_VK_ERROR_OUT_OF_DATE_KHR         INT32_C(-1000001004)
 
 /* ============================================================================
  * VkStructureType Constants (Exact Khronos Values)
@@ -107,10 +110,16 @@ typedef int32_t ScarVkResult;
 #define SCAR_VK_STRUCTURE_TYPE_FENCE_CREATE_INFO                         UINT32_C(8)
 #define SCAR_VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO                     UINT32_C(9)
 #define SCAR_VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO                        UINT32_C(12)
+#define SCAR_VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO                         UINT32_C(14)
 #define SCAR_VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO                  UINT32_C(39)
 #define SCAR_VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO              UINT32_C(40)
 #define SCAR_VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO                 UINT32_C(42)
+#define SCAR_VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER                      UINT32_C(45)
 #define SCAR_VK_STRUCTURE_TYPE_MEMORY_BARRIER                            UINT32_C(46)
+
+#define SCAR_VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR                 UINT32_C(1000001000)
+#define SCAR_VK_STRUCTURE_TYPE_PRESENT_INFO_KHR                          UINT32_C(1000001001)
+#define SCAR_VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR              UINT32_C(1000004000)
 
 #define SCAR_VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2              UINT32_C(1000059001)
 #define SCAR_VK_STRUCTURE_TYPE_HDR_METADATA_EXT                          UINT32_C(1000105000)
@@ -212,7 +221,34 @@ typedef int32_t ScarVkResult;
 
 #define SCAR_VK_IMAGE_ASPECT_COLOR_BIT                       UINT32_C(0x00000001)
 
+#define SCAR_VK_FORMAT_B8G8R8A8_UNORM                        UINT32_C(44)
+#define SCAR_VK_FORMAT_B8G8R8A8_SRGB                         UINT32_C(50)
+
+#define SCAR_VK_IMAGE_USAGE_TRANSFER_SRC_BIT                 UINT32_C(0x00000001)
+#define SCAR_VK_IMAGE_USAGE_TRANSFER_DST_BIT                 UINT32_C(0x00000002)
+#define SCAR_VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT             UINT32_C(0x00000010)
+#define SCAR_VK_IMAGE_TYPE_2D                                UINT32_C(1)
+#define SCAR_VK_SAMPLE_COUNT_1_BIT                           UINT32_C(1)
+#define SCAR_VK_IMAGE_TILING_OPTIMAL                         UINT32_C(0)
+#define SCAR_VK_FILTER_LINEAR                                UINT32_C(1)
+
+#define SCAR_VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR           UINT32_C(0x00000001)
+#define SCAR_VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR               UINT32_C(0x00000001)
+#define SCAR_VK_PRESENT_MODE_IMMEDIATE_KHR                   UINT32_C(0)
+#define SCAR_VK_PRESENT_MODE_FIFO_KHR                        UINT32_C(2)
+
+#define SCAR_VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT               UINT32_C(0x00000001)
+#define SCAR_VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT   UINT32_C(0x00000400)
+#define SCAR_VK_PIPELINE_STAGE_TRANSFER_BIT                  UINT32_C(0x00001000)
+#define SCAR_VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT            UINT32_C(0x00002000)
+
+#define SCAR_VK_ACCESS_TRANSFER_READ_BIT                     UINT32_C(0x00000800)
+#define SCAR_VK_ACCESS_TRANSFER_WRITE_BIT                    UINT32_C(0x00001000)
+
 /* Official Extension Names */
+#define SCAR_VK_KHR_SURFACE_NAME                             "VK_KHR_surface"
+#define SCAR_VK_KHR_XLIB_SURFACE_NAME                        "VK_KHR_xlib_surface"
+#define SCAR_VK_KHR_SWAPCHAIN_NAME                           "VK_KHR_swapchain"
 #define SCAR_VK_EXT_MESH_SHADER_NAME                         "VK_EXT_mesh_shader"
 #define SCAR_VK_KHR_FRAGMENT_SHADING_RATE_NAME               "VK_KHR_fragment_shading_rate"
 #define SCAR_VK_EXT_SHADER_IMAGE_ATOMIC_INT64_NAME           "VK_EXT_shader_image_atomic_int64"
@@ -537,6 +573,81 @@ typedef struct ScarVkFenceCreateInfo {
     ScarVkFlags flags;
 } ScarVkFenceCreateInfo;
 
+typedef struct ScarVkSemaphoreCreateInfo {
+    uint32_t sType;
+    const void *pNext;
+    ScarVkFlags flags;
+} ScarVkSemaphoreCreateInfo;
+
+typedef struct ScarVkExtent2D {
+    uint32_t width;
+    uint32_t height;
+} ScarVkExtent2D;
+
+typedef struct ScarVkXlibSurfaceCreateInfoKHR {
+    uint32_t sType;
+    const void *pNext;
+    ScarVkFlags flags;
+    void *dpy;
+    unsigned long window;
+} ScarVkXlibSurfaceCreateInfoKHR;
+
+typedef struct ScarVkSurfaceCapabilitiesKHR {
+    uint32_t minImageCount;
+    uint32_t maxImageCount;
+    ScarVkExtent2D currentExtent;
+    ScarVkExtent2D minImageExtent;
+    ScarVkExtent2D maxImageExtent;
+    uint32_t maxImageArrayLayers;
+    ScarVkFlags supportedTransforms;
+    uint32_t currentTransform;
+    ScarVkFlags supportedCompositeAlpha;
+    ScarVkFlags supportedUsageFlags;
+} ScarVkSurfaceCapabilitiesKHR;
+
+typedef struct ScarVkSurfaceFormatKHR {
+    uint32_t format;
+    uint32_t colorSpace;
+} ScarVkSurfaceFormatKHR;
+
+typedef struct ScarVkSwapchainCreateInfoKHR {
+    uint32_t sType;
+    const void *pNext;
+    ScarVkFlags flags;
+    ScarVkSurfaceKHR surface;
+    uint32_t minImageCount;
+    uint32_t imageFormat;
+    uint32_t imageColorSpace;
+    ScarVkExtent2D imageExtent;
+    uint32_t imageArrayLayers;
+    ScarVkFlags imageUsage;
+    uint32_t imageSharingMode;
+    uint32_t queueFamilyIndexCount;
+    const uint32_t *pQueueFamilyIndices;
+    uint32_t preTransform;
+    ScarVkFlags compositeAlpha;
+    uint32_t presentMode;
+    ScarVkBool32 clipped;
+    ScarVkSwapchainKHR oldSwapchain;
+} ScarVkSwapchainCreateInfoKHR;
+
+typedef struct ScarVkPresentInfoKHR {
+    uint32_t sType;
+    const void *pNext;
+    uint32_t waitSemaphoreCount;
+    const ScarVkSemaphore *pWaitSemaphores;
+    uint32_t swapchainCount;
+    const ScarVkSwapchainKHR *pSwapchains;
+    const uint32_t *pImageIndices;
+    ScarVkResult *pResults;
+} ScarVkPresentInfoKHR;
+
+typedef union ScarVkClearColorValue {
+    float float32[4];
+    int32_t int32[4];
+    uint32_t uint32[4];
+} ScarVkClearColorValue;
+
 typedef struct ScarVkBufferCreateInfo {
     uint32_t sType;
     const void *pNext;
@@ -632,6 +743,19 @@ typedef struct ScarVkMemoryBarrier {
     ScarVkFlags srcAccessMask;
     ScarVkFlags dstAccessMask;
 } ScarVkMemoryBarrier;
+
+typedef struct ScarVkImageMemoryBarrier {
+    uint32_t sType;
+    const void *pNext;
+    ScarVkFlags srcAccessMask;
+    ScarVkFlags dstAccessMask;
+    uint32_t oldLayout;
+    uint32_t newLayout;
+    uint32_t srcQueueFamilyIndex;
+    uint32_t dstQueueFamilyIndex;
+    ScarVkImage image;
+    ScarVkImageSubresourceRange subresourceRange;
+} ScarVkImageMemoryBarrier;
 
 /* VK_EXT_hdr_metadata (SMPTE ST.2086 HDR10 PQ) */
 typedef struct ScarVkXYColorEXT {
@@ -831,6 +955,111 @@ typedef void (*ScarPFN_vkDestroyDebugUtilsMessengerEXT)(
 typedef ScarVkResult (*ScarPFN_vkGetDeviceFaultInfoEXT)(
     ScarVkDevice device, ScarVkDeviceFaultCountsEXT *pFaultCounts,
     ScarVkDeviceFaultInfoEXT *pFaultInfo);
+
+/* WSI / X11 / Swapchain / Semaphores / Clear */
+typedef ScarVkResult (*ScarPFN_vkCreateXlibSurfaceKHR)(
+    ScarVkInstance instance, const ScarVkXlibSurfaceCreateInfoKHR *pCreateInfo,
+    const void *pAllocator, ScarVkSurfaceKHR *pSurface);
+typedef void (*ScarPFN_vkDestroySurfaceKHR)(
+    ScarVkInstance instance, ScarVkSurfaceKHR surface, const void *pAllocator);
+typedef ScarVkResult (*ScarPFN_vkGetPhysicalDeviceSurfaceSupportKHR)(
+    ScarVkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
+    ScarVkSurfaceKHR surface, ScarVkBool32 *pSupported);
+typedef ScarVkResult (*ScarPFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)(
+    ScarVkPhysicalDevice physicalDevice, ScarVkSurfaceKHR surface,
+    ScarVkSurfaceCapabilitiesKHR *pSurfaceCapabilities);
+typedef ScarVkResult (*ScarPFN_vkGetPhysicalDeviceSurfaceFormatsKHR)(
+    ScarVkPhysicalDevice physicalDevice, ScarVkSurfaceKHR surface,
+    uint32_t *pSurfaceFormatCount, ScarVkSurfaceFormatKHR *pSurfaceFormats);
+
+typedef ScarVkResult (*ScarPFN_vkCreateSwapchainKHR)(
+    ScarVkDevice device, const ScarVkSwapchainCreateInfoKHR *pCreateInfo,
+    const void *pAllocator, ScarVkSwapchainKHR *pSwapchain);
+typedef void (*ScarPFN_vkDestroySwapchainKHR)(
+    ScarVkDevice device, ScarVkSwapchainKHR swapchain, const void *pAllocator);
+typedef ScarVkResult (*ScarPFN_vkGetSwapchainImagesKHR)(
+    ScarVkDevice device, ScarVkSwapchainKHR swapchain,
+    uint32_t *pSwapchainImageCount, ScarVkImage *pSwapchainImages);
+typedef ScarVkResult (*ScarPFN_vkAcquireNextImageKHR)(
+    ScarVkDevice device, ScarVkSwapchainKHR swapchain, uint64_t timeout,
+    ScarVkSemaphore semaphore, ScarVkFence fence, uint32_t *pImageIndex);
+typedef ScarVkResult (*ScarPFN_vkQueuePresentKHR)(
+    ScarVkQueue queue, const ScarVkPresentInfoKHR *pPresentInfo);
+
+typedef ScarVkResult (*ScarPFN_vkCreateSemaphore)(
+    ScarVkDevice device, const ScarVkSemaphoreCreateInfo *pCreateInfo,
+    const void *pAllocator, ScarVkSemaphore *pSemaphore);
+typedef void (*ScarPFN_vkDestroySemaphore)(
+    ScarVkDevice device, ScarVkSemaphore semaphore, const void *pAllocator);
+typedef void (*ScarPFN_vkCmdClearColorImage)(
+    ScarVkCommandBuffer commandBuffer, ScarVkImage image, uint32_t imageLayout,
+    const ScarVkClearColorValue *pColor, uint32_t rangeCount,
+    const ScarVkImageSubresourceRange *pRanges);
+
+typedef struct ScarVkOffset3D {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+} ScarVkOffset3D;
+
+typedef struct ScarVkImageCreateInfo {
+    uint32_t sType;
+    const void *pNext;
+    ScarVkFlags flags;
+    uint32_t imageType;
+    uint32_t format;
+    ScarVkExtent3D extent;
+    uint32_t mipLevels;
+    uint32_t arrayLayers;
+    uint32_t samples;
+    uint32_t tiling;
+    ScarVkFlags usage;
+    uint32_t sharingMode;
+    uint32_t queueFamilyIndexCount;
+    const uint32_t *pQueueFamilyIndices;
+    uint32_t initialLayout;
+} ScarVkImageCreateInfo;
+
+typedef struct ScarVkImageSubresourceLayers {
+    ScarVkFlags aspectMask;
+    uint32_t mipLevel;
+    uint32_t baseArrayLayer;
+    uint32_t layerCount;
+} ScarVkImageSubresourceLayers;
+
+typedef struct ScarVkBufferImageCopy {
+    ScarVkDeviceSize bufferOffset;
+    uint32_t bufferRowLength;
+    uint32_t bufferImageHeight;
+    ScarVkImageSubresourceLayers imageSubresource;
+    ScarVkOffset3D imageOffset;
+    ScarVkExtent3D imageExtent;
+} ScarVkBufferImageCopy;
+
+typedef struct ScarVkImageBlit {
+    ScarVkImageSubresourceLayers srcSubresource;
+    ScarVkOffset3D srcOffsets[2];
+    ScarVkImageSubresourceLayers dstSubresource;
+    ScarVkOffset3D dstOffsets[2];
+} ScarVkImageBlit;
+
+typedef ScarVkResult (*ScarPFN_vkCreateImage)(
+    ScarVkDevice device, const ScarVkImageCreateInfo *pCreateInfo,
+    const void *pAllocator, ScarVkImage *pImage);
+typedef void (*ScarPFN_vkDestroyImage)(
+    ScarVkDevice device, ScarVkImage image, const void *pAllocator);
+typedef void (*ScarPFN_vkGetImageMemoryRequirements)(
+    ScarVkDevice device, ScarVkImage image, ScarVkMemoryRequirements *pMemoryRequirements);
+typedef ScarVkResult (*ScarPFN_vkBindImageMemory)(
+    ScarVkDevice device, ScarVkImage image, ScarVkDeviceMemory memory,
+    ScarVkDeviceSize memoryOffset);
+typedef void (*ScarPFN_vkCmdCopyBufferToImage)(
+    ScarVkCommandBuffer commandBuffer, ScarVkBuffer srcBuffer, ScarVkImage dstImage,
+    uint32_t dstImageLayout, uint32_t regionCount, const ScarVkBufferImageCopy *pRegions);
+typedef void (*ScarPFN_vkCmdBlitImage)(
+    ScarVkCommandBuffer commandBuffer, ScarVkImage srcImage, uint32_t srcImageLayout,
+    ScarVkImage dstImage, uint32_t dstImageLayout, uint32_t regionCount,
+    const ScarVkImageBlit *pRegions, uint32_t filter);
 
 #ifdef __cplusplus
 } /* extern "C" */

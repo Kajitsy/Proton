@@ -13,3 +13,19 @@ EXPORTS
     BinkGoto
     BinkGetSummary
     BinkSetIOSize
+    BinkSetOSFileCallbacks
+    BinkSetMemory
+    BinkSetSoundSystem
+    BinkOpenWithOptions
+    BinkGetPlatformInfo
+    BinkGetFrameBuffersInfo
+    BinkRegisterFrameBuffers
+    BinkDoFrameAsyncMulti
+    BinkDoFrameAsyncWait
+    BinkRequestStopAsyncThreadsMulti
+    BinkWaitStopAsyncThreadsMulti
+    BinkStartAsyncThread
+    BinkGetKeyFrame
+    BinkSetWillLoop
+    BinkShouldSkip
+    BinkFreeGlobals

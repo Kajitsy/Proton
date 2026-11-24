@@ -122,8 +122,10 @@ typedef enum scarlett_d3d12xs_color_space_e {
 
 /* Frame event types for ScheduleFrameEventX / WaitFrameEventX */
 typedef enum scarlett_d3d12xs_frame_event_e {
-    SCARLETT_FRAME_EVENT_ORIGIN  = 0,
-    SCARLETT_FRAME_EVENT_PRESENT = 1
+    SCARLETT_FRAME_EVENT_ORIGIN         = 0,
+    SCARLETT_FRAME_EVENT_PRESENT        = 1,
+    SCARLETT_FRAME_EVENT_BEFORE_PRESENT = 2,
+    SCARLETT_FRAME_EVENT_AFTER_PRESENT  = 3
 } scarlett_d3d12xs_frame_event_t;
 
 /* Enhanced Barrier kinds */
@@ -475,6 +477,7 @@ SCARLETT_STATIC_ASSERT(sizeof(scarlett_d3d12xs_wait_frame_params_t) == 72,
 
 typedef struct scarlett_d3d12xs_present_plane_s {
     uint64_t resource_handle;
+    uint64_t gpu_va;
     uint32_t subresource_index;
     uint32_t flags;
     uint32_t src_left;
@@ -482,16 +485,21 @@ typedef struct scarlett_d3d12xs_present_plane_s {
     uint32_t src_right;
     uint32_t src_bottom;
     uint32_t color_space;       /* scarlett_d3d12xs_color_space_t */
+    uint32_t width;
+    uint32_t height;
+    uint32_t row_pitch;
+    uint32_t dxgi_format;
     uint32_t reserved;
 } scarlett_d3d12xs_present_plane_t;
 
-SCARLETT_STATIC_ASSERT(sizeof(scarlett_d3d12xs_present_plane_t) == 40,
-                       "scarlett_d3d12xs_present_plane_t must be 40 bytes");
+SCARLETT_STATIC_ASSERT(sizeof(scarlett_d3d12xs_present_plane_t) == 64,
+                       "scarlett_d3d12xs_present_plane_t must be 64 bytes");
 
 typedef struct scarlett_d3d12xs_presentx_params_s {
     uint64_t device_handle;
     uint64_t frame_token;
-    uint32_t plane_count;       /* 1 or 2 */
+    uint64_t host_x11_window;
+    uint32_t plane_count;       /* 0, 1, or 2 */
     uint32_t flags;
     scarlett_d3d12xs_present_plane_t planes[2];
     float hdr_max_luminance;    /* SMPTE ST.2086 nits (e.g. 1000.0f) */
@@ -507,8 +515,8 @@ typedef struct scarlett_d3d12xs_presentx_params_s {
     uint32_t reserved;
 } scarlett_d3d12xs_presentx_params_t;
 
-SCARLETT_STATIC_ASSERT(sizeof(scarlett_d3d12xs_presentx_params_t) == 152,
-                       "scarlett_d3d12xs_presentx_params_t must be 152 bytes");
+SCARLETT_STATIC_ASSERT(sizeof(scarlett_d3d12xs_presentx_params_t) == 208,
+                       "scarlett_d3d12xs_presentx_params_t must be 208 bytes");
 
 typedef struct scarlett_d3d12xs_resize_swapchain_params_s {
     uint64_t device_handle;

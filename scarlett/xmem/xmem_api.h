@@ -210,12 +210,28 @@ SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemFreePhysicalPages(
     uint64_t page_size_bytes,
     const uint64_t *pfn_array);
 
-SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemVirtualAlloc(
-    uint64_t requested_base,
+SCARLETT_XMEM_API void * SCARLETT_XMEM_CALL XMemVirtualAlloc(
+    void *requested_base,
     uint64_t size_bytes,
     uint32_t alloc_type,
     uint32_t protect,
-    uint64_t *out_base);
+    uint64_t flags);
+
+SCARLETT_XMEM_API void * SCARLETT_XMEM_CALL XMemAlloc(
+    uint64_t size_bytes,
+    uint64_t attributes);
+
+SCARLETT_XMEM_API void SCARLETT_XMEM_CALL XMemFree(
+    void *ptr,
+    uint64_t attributes);
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL XMemIsToolsMemAvailable(void);
+
+SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemTransferMemory(
+    void *dst,
+    const void *src,
+    uint64_t size_bytes,
+    uint32_t flags);
 
 SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemVirtualFree(
     uint64_t base_addr,

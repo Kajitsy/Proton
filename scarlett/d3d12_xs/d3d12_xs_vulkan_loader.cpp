@@ -177,6 +177,8 @@ bool VulkanRuntimeContext::initialize(bool request_validation) {
     /* Probe instance extensions */
     bool has_debug_utils = false;
     bool has_swapchain_colorspace = false;
+    bool has_surface = false;
+    bool has_xlib_surface = false;
     if (vkEnumerateInstanceExtensionProperties != nullptr) {
         uint32_t ext_count = 0;
         if (vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, nullptr) == SCAR_VK_SUCCESS &&
@@ -190,11 +192,16 @@ bool VulkanRuntimeContext::initialize(bool request_validation) {
                     } else if (std::strcmp(exts[i].extensionName,
                                            SCAR_VK_EXT_SWAPCHAIN_COLOR_SPACE_NAME) == 0) {
                         has_swapchain_colorspace = true;
+                    } else if (std::strcmp(exts[i].extensionName, SCAR_VK_KHR_SURFACE_NAME) == 0) {
+                        has_surface = true;
+                    } else if (std::strcmp(exts[i].extensionName, SCAR_VK_KHR_XLIB_SURFACE_NAME) == 0) {
+                        has_xlib_surface = true;
                     }
                 }
             }
         }
     }
+    has_xlib_surface_ext = (has_surface && has_xlib_surface);
 
     if (has_swapchain_colorspace) {
         caps_mask |= SCARLETT_D3D12XS_CAP_HDR10_PQ;
@@ -210,6 +217,10 @@ bool VulkanRuntimeContext::initialize(bool request_validation) {
     std::vector<const char *> enabled_inst_exts;
     if (has_debug_utils && has_validation_layer) {
         enabled_inst_exts.push_back(SCAR_VK_EXT_DEBUG_UTILS_NAME);
+    }
+    if (has_xlib_surface_ext) {
+        enabled_inst_exts.push_back(SCAR_VK_KHR_SURFACE_NAME);
+        enabled_inst_exts.push_back(SCAR_VK_KHR_XLIB_SURFACE_NAME);
     }
 
     uint32_t target_api = SCAR_VK_API_VERSION_1_4;
@@ -255,6 +266,7 @@ bool VulkanRuntimeContext::initialize(bool request_validation) {
         inst_ci.ppEnabledLayerNames = nullptr;
         inst_ci.enabledExtensionCount = 0u;
         inst_ci.ppEnabledExtensionNames = nullptr;
+        has_xlib_surface_ext = false;
         if (vkCreateInstance(&inst_ci, nullptr, &instance) != SCAR_VK_SUCCESS || instance == nullptr) {
             shutdown();
             return false;
@@ -284,6 +296,22 @@ bool VulkanRuntimeContext::initialize(bool request_validation) {
         vkGetInstanceProcAddr, instance, "vkCreateDevice");
     vkGetDeviceProcAddr = load_instance_proc<ScarPFN_vkGetDeviceProcAddr>(
         vkGetInstanceProcAddr, instance, "vkGetDeviceProcAddr");
+
+    if (has_xlib_surface_ext) {
+        vkCreateXlibSurfaceKHR = load_instance_proc<ScarPFN_vkCreateXlibSurfaceKHR>(
+            vkGetInstanceProcAddr, instance, "vkCreateXlibSurfaceKHR");
+        vkDestroySurfaceKHR = load_instance_proc<ScarPFN_vkDestroySurfaceKHR>(
+            vkGetInstanceProcAddr, instance, "vkDestroySurfaceKHR");
+        vkGetPhysicalDeviceSurfaceSupportKHR =
+            load_instance_proc<ScarPFN_vkGetPhysicalDeviceSurfaceSupportKHR>(
+                vkGetInstanceProcAddr, instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR =
+            load_instance_proc<ScarPFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(
+                vkGetInstanceProcAddr, instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+        vkGetPhysicalDeviceSurfaceFormatsKHR =
+            load_instance_proc<ScarPFN_vkGetPhysicalDeviceSurfaceFormatsKHR>(
+                vkGetInstanceProcAddr, instance, "vkGetPhysicalDeviceSurfaceFormatsKHR");
+    }
 
     if (validation_layer_enabled && has_debug_utils) {
         vkCreateDebugUtilsMessengerEXT = load_instance_proc<ScarPFN_vkCreateDebugUtilsMessengerEXT>(
@@ -531,12 +559,17 @@ bool VulkanRuntimeContext::initialize(bool request_validation) {
         queue_cis.push_back(qci);
     }
 
+    has_swapchain_ext = has_ext(SCAR_VK_KHR_SWAPCHAIN_NAME);
+
     std::vector<const char *> enabled_dev_exts;
     if (ext_sync2 && device_api_version < SCAR_VK_API_VERSION_1_3) {
         enabled_dev_exts.push_back(SCAR_VK_KHR_SYNCHRONIZATION_2_NAME);
     }
     if (ext_device_fault) {
         enabled_dev_exts.push_back(SCAR_VK_EXT_DEVICE_FAULT_NAME);
+    }
+    if (has_swapchain_ext) {
+        enabled_dev_exts.push_back(SCAR_VK_KHR_SWAPCHAIN_NAME);
     }
 
     ScarVkPhysicalDeviceSynchronization2Features sync2_feat{};
@@ -623,6 +656,37 @@ bool VulkanRuntimeContext::initialize(bool request_validation) {
         vkGetDeviceProcAddr, device, "vkCmdDispatchIndirect");
     vkGetDeviceFaultInfoEXT = load_device_proc<ScarPFN_vkGetDeviceFaultInfoEXT>(
         vkGetDeviceProcAddr, device, "vkGetDeviceFaultInfoEXT");
+
+    vkCreateSemaphore = load_device_proc<ScarPFN_vkCreateSemaphore>(
+        vkGetDeviceProcAddr, device, "vkCreateSemaphore");
+    vkDestroySemaphore = load_device_proc<ScarPFN_vkDestroySemaphore>(
+        vkGetDeviceProcAddr, device, "vkDestroySemaphore");
+    vkCmdClearColorImage = load_device_proc<ScarPFN_vkCmdClearColorImage>(
+        vkGetDeviceProcAddr, device, "vkCmdClearColorImage");
+    vkCreateImage = load_device_proc<ScarPFN_vkCreateImage>(
+        vkGetDeviceProcAddr, device, "vkCreateImage");
+    vkDestroyImage = load_device_proc<ScarPFN_vkDestroyImage>(
+        vkGetDeviceProcAddr, device, "vkDestroyImage");
+    vkGetImageMemoryRequirements = load_device_proc<ScarPFN_vkGetImageMemoryRequirements>(
+        vkGetDeviceProcAddr, device, "vkGetImageMemoryRequirements");
+    vkBindImageMemory = load_device_proc<ScarPFN_vkBindImageMemory>(
+        vkGetDeviceProcAddr, device, "vkBindImageMemory");
+    vkCmdCopyBufferToImage = load_device_proc<ScarPFN_vkCmdCopyBufferToImage>(
+        vkGetDeviceProcAddr, device, "vkCmdCopyBufferToImage");
+    vkCmdBlitImage = load_device_proc<ScarPFN_vkCmdBlitImage>(
+        vkGetDeviceProcAddr, device, "vkCmdBlitImage");
+    if (has_swapchain_ext) {
+        vkCreateSwapchainKHR = load_device_proc<ScarPFN_vkCreateSwapchainKHR>(
+            vkGetDeviceProcAddr, device, "vkCreateSwapchainKHR");
+        vkDestroySwapchainKHR = load_device_proc<ScarPFN_vkDestroySwapchainKHR>(
+            vkGetDeviceProcAddr, device, "vkDestroySwapchainKHR");
+        vkGetSwapchainImagesKHR = load_device_proc<ScarPFN_vkGetSwapchainImagesKHR>(
+            vkGetDeviceProcAddr, device, "vkGetSwapchainImagesKHR");
+        vkAcquireNextImageKHR = load_device_proc<ScarPFN_vkAcquireNextImageKHR>(
+            vkGetDeviceProcAddr, device, "vkAcquireNextImageKHR");
+        vkQueuePresentKHR = load_device_proc<ScarPFN_vkQueuePresentKHR>(
+            vkGetDeviceProcAddr, device, "vkQueuePresentKHR");
+    }
 
     if (vkGetDeviceQueue != nullptr) {
         vkGetDeviceQueue(device, direct_queue_family, 0u, &direct_queue);

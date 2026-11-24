@@ -5,11 +5,13 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <unistd.h>
 
 #include "dstorage_xs_decomp.hpp"
 #include "dstorage_xs_io.hpp"
@@ -61,6 +63,7 @@ public:
     scarlett_hresult_t submit_batch(scarlett_dstorage_submit_batch_params_t &params);
 
     scarlett_hresult_t report_stub(scarlett_dstorage_report_stub_params_t &params);
+    scarlett_hresult_t wait_signals(scarlett_dstorage_wait_signals_params_t &params);
     void set_stub_sink(scarlett_stub_sink_fn_t sink, void *user_data);
 
 private:
@@ -72,6 +75,12 @@ private:
         int fd = -1;
         uint64_t size_bytes = 0;
         uint32_t open_flags = 0;
+        ~OpenFile() {
+            if (fd >= 0) {
+                ::close(fd);
+                fd = -1;
+            }
+        }
     };
 
     struct StatusEntry {
@@ -92,7 +101,7 @@ private:
         uint32_t status_index = 0;
         uint64_t signal_addr = 0;
         uint64_t signal_value = 0;
-        bool signal_is_event = false;
+        uint32_t signal_mode = SCARLETT_DSTORAGE_SIGNAL_MODE_HOST_FENCE;
         bool cancelled = false;
     };
 
@@ -143,18 +152,22 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_sched_;
     std::condition_variable cv_idle_;
+    std::condition_variable cv_pe_signal_;
     std::thread sched_thread_;
     bool sched_running_ = false;
     bool sched_stop_ = false;
+    bool pe_signals_stop_ = false;
 
     uint32_t strict_mode_ = 0;
+    uint32_t seen_opt_combos_mask_ = 0u;
     uint64_t staging_buffer_bytes_ = SCARLETT_DSTORAGE_DEFAULT_STAGING_BYTES;
     uint64_t next_handle_ = 1;
 
-    std::unordered_map<uint64_t, OpenFile> files_;
+    std::unordered_map<uint64_t, std::shared_ptr<OpenFile>> files_;
     std::unordered_map<uint64_t, StatusArray *> status_arrays_;
     std::unordered_map<uint64_t, QueueState *> queues_;
     std::deque<ScheduledItem> priority_queues_[SCARLETT_DSTORAGE_PRIORITY_COUNT];
+    std::deque<scarlett_dstorage_pe_signal_item_t> pending_pe_signals_;
     uint32_t drr_deficit_[SCARLETT_DSTORAGE_PRIORITY_COUNT] = {0, 0, 0, 0};
 
     IoUringEngine io_engine_;

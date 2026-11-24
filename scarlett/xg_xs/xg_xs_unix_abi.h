@@ -231,7 +231,11 @@ typedef struct IXGTextureAddressComputerVtbl {
         IXGTextureAddressComputer *self,
         uint32_t subresource,
         XG_SUBRESOURCE_LAYOUT *pSubLayout);
+    void *ReservedSlots[24];
 } IXGTextureAddressComputerVtbl;
+
+SCARLETT_STATIC_ASSERT(sizeof(IXGTextureAddressComputerVtbl) == 256,
+                       "IXGTextureAddressComputerVtbl must be 32 slots (256 bytes)");
 
 struct IXGTextureAddressComputer {
     const IXGTextureAddressComputerVtbl *lpVtbl;

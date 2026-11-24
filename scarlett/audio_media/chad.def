@@ -1,0 +1,10 @@
+LIBRARY chad.dll
+EXPORTS
+    XDspActivate
+    XDspConnectWithMaximumStreamLimit
+    XDspDeactivate
+    XDspDisconnect
+    XDspSubmitCommand
+    ChadGetConsoleModel
+    ChadGetHardwareState
+    ChadQueryCapabilities

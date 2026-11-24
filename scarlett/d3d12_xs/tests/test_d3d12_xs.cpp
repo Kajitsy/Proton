@@ -196,8 +196,9 @@ bool test_1_unix_handshake_and_vulkan_probe() {
     params.DevKitDiagnosticBufferSize = 64u * 1024u * 1024u;
 
     const scarlett_guid_t iid_dev = SCARLETT_IID_ID3D12DEVICEX_INIT;
+    const scarlett_guid_t iid_dev_gdk = SCARLETT_IID_ID3D12DEVICEX_GDK_INIT;
     void *dev_raw = nullptr;
-    CHECK_HR(D3D12XboxCreateDevice(&params, &iid_dev, &dev_raw), SCARLETT_OK);
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, &params, &iid_dev_gdk, &dev_raw), SCARLETT_OK);
     CHECK(dev_raw != nullptr);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
     CHECK(dev->unix_device_handle != 0u);
@@ -342,7 +343,7 @@ bool test_2_descriptor_heap_policy_matrix_and_tvs() {
 
     /* 2i. Live T# / V# / S# descriptor heap creation & writes */
     void *dev_raw = nullptr;
-    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
 
     scarlett_d3d12xs_create_desc_heap_params_t cbv_heap{};
@@ -439,9 +440,10 @@ bool test_3_uma_placed_resource_zero_frame_lag() {
     CHECK_HR(XMemAllocatePhysicalPages(kPages, XMEM_PAGE_SIZE_64KB, SCARLETT_MEM_CACHE_WRITEBACK,
                                        XMEM_PHYS_FLAG_GRAPHICS, pfns.data(), &alloc_id),
              SCARLETT_OK);
-    CHECK_HR(XMemVirtualAlloc(0u, kSize, XMEM_MEM_RESERVE | XMEM_MEM_GRAPHICS,
-                              XMEM_PAGE_READWRITE, &gpu_va),
-             SCARLETT_OK);
+    void *va_ptr = XMemVirtualAlloc(nullptr, kSize, XMEM_MEM_RESERVE | XMEM_MEM_GRAPHICS,
+                                    XMEM_PAGE_READWRITE, 0u);
+    CHECK(va_ptr != nullptr);
+    gpu_va = reinterpret_cast<uint64_t>(va_ptr);
     CHECK_HR(XMemMapPhysicalPages(gpu_va, kPages, XMEM_PAGE_SIZE_64KB, pfns.data(),
                                   SCARLETT_MEM_ACCESS_READWRITE, SCARLETT_MEM_CACHE_WRITEBACK),
              SCARLETT_OK);
@@ -463,7 +465,7 @@ bool test_3_uma_placed_resource_zero_frame_lag() {
     }
 
     void *dev_raw = nullptr;
-    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
 
     /* Reject non-MEM_GRAPHICS address */
@@ -567,7 +569,7 @@ bool test_3_uma_placed_resource_zero_frame_lag() {
  * ============================================================================ */
 bool test_4_queues_enhanced_barriers_and_indirect() {
     void *dev_raw = nullptr;
-    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
 
     scarlett_d3d12xs_create_queue_params_t q_direct{};
@@ -786,7 +788,7 @@ bool test_5_dxil_strip_xbox_xs2m() {
  * ============================================================================ */
 bool test_6_frame_pacing_and_dual_plane_hdr10_presentx() {
     void *dev_raw = nullptr;
-    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
 
     /* Let OS scheduler settle after preceding Vulkan/CPU test bursts before measuring pacing. */
@@ -824,13 +826,16 @@ bool test_6_frame_pacing_and_dual_plane_hdr10_presentx() {
         }
 
         /* Dual-Plane HDR10 PQ (G2084_P2020) + GameDVR (G22_P709) PresentX */
+        D3D12XBOX_RECT rects[2]{};
+        rects[0] = {0, 0, 3840, 2160};
+        rects[1] = {0, 0, 1920, 1080};
         D3D12XBOX_PRESENT_PLANE_PARAMETERS planes[2]{};
+        planes[0].Token = token;
         planes[0].ColorSpace = SCARLETT_COLOR_SPACE_G2084_P2020;
-        planes[0].SourceRectRight = 3840u;
-        planes[0].SourceRectBottom = 2160u;
+        planes[0].pSrcViewRects = &rects[0];
+        planes[1].Token = token;
         planes[1].ColorSpace = SCARLETT_COLOR_SPACE_G22_P709;
-        planes[1].SourceRectRight = 1920u;
-        planes[1].SourceRectBottom = 1080u;
+        planes[1].pSrcViewRects = &rects[1];
 
         D3D12XBOX_PRESENT_PARAMETERS pparams{};
         pparams.Token = token;
@@ -897,7 +902,7 @@ bool test_6_frame_pacing_and_dual_plane_hdr10_presentx() {
  * ============================================================================ */
 bool test_7_resize_alt_enter_and_suspend_resume_cycles() {
     void *dev_raw = nullptr;
-    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
 
     /* Place 4 persistent resources across MEM_GRAPHICS */
@@ -959,8 +964,10 @@ bool test_7_resize_alt_enter_and_suspend_resume_cycles() {
         CHECK(pw.out_is_suspended == 1u);
         CHECK(pw.out_preserved_resources == 4u);
 
+        void *res_ptr = reinterpret_cast<void *>(static_cast<uintptr_t>(res_handles[0]));
         D3D12XBOX_PRESENT_PLANE_PARAMETERS plane{};
-        plane.pResource = reinterpret_cast<void *>(static_cast<uintptr_t>(res_handles[0]));
+        plane.ResourceCount = 1u;
+        plane.ppResources = &res_ptr;
         plane.ColorSpace = SCARLETT_COLOR_SPACE_G2084_P2020;
         CHECK_HR(D3D12XboxPresentX(dev->unix_device_handle, 1u, &plane, nullptr, nullptr),
                  SCARLETT_E_PENDING);
@@ -1007,7 +1014,7 @@ bool test_8_dred_and_device_fault_proton_log() {
     } cleanup{log_path};
 
     void *dev_raw = nullptr;
-    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
 
     std::array<char, 8192> buf{};
@@ -1085,7 +1092,7 @@ bool test_9_diagnostic_auto_stub_trampoline() {
 
     /* Removed & unimplemented COM vtable slots on ID3D12DeviceX */
     void *dev_raw = nullptr;
-    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
     auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
 
     scarlett_hresult_t hr_legacy = dev->lpVtbl->LegacyPresentSyncX(dev, 42u, 100u);

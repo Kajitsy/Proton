@@ -812,4 +812,183 @@ scarlett_hresult_t ApuAndShapeManager::acphal_decode_xma2(uint64_t ctx_handle,
     return SCARLETT_OK;
 }
 
+scarlett_hresult_t ApuAndShapeManager::xapu_connect(uint64_t& out_session_handle) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const uint64_t handle = next_session_handle_++;
+    XapuSession s;
+    s.handle = handle;
+    xapu_sessions_.emplace(handle, std::move(s));
+    out_session_handle = handle;
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t ApuAndShapeManager::xapu_disconnect(uint64_t session_handle) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = xapu_sessions_.find(session_handle);
+    if (it == xapu_sessions_.end()) {
+        return SCARLETT_E_HANDLE;
+    }
+    xapu_sessions_.erase(it);
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t ApuAndShapeManager::xapu_enqueue(uint64_t session_handle,
+                                                    const void* cmd_data,
+                                                    uint32_t cmd_size,
+                                                    uint32_t flags) noexcept {
+    (void)flags;
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = xapu_sessions_.find(session_handle);
+    if (it == xapu_sessions_.end()) {
+        /* If session handle was not tracked or 0, accept and auto-register fallback */
+        XapuSession s;
+        s.handle = session_handle != 0 ? session_handle : 0xAP0001;
+        it = xapu_sessions_.emplace(s.handle, std::move(s)).first;
+    }
+
+    const size_t rec_size = std::max<size_t>(cmd_size, 64u);
+    std::vector<uint8_t> rec(rec_size, 0u);
+    if (cmd_data != nullptr && cmd_size > 0u) {
+        std::memcpy(rec.data(), cmd_data, std::min<size_t>(cmd_size, rec_size));
+    }
+    it->second.completed_results.push_back(std::move(rec));
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t ApuAndShapeManager::xapu_get_result_count(uint64_t session_handle,
+                                                             uint32_t queue_idx,
+                                                             uint32_t& out_count) noexcept {
+    (void)queue_idx;
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = xapu_sessions_.find(session_handle);
+    if (it == xapu_sessions_.end()) {
+        out_count = 0u;
+        return SCARLETT_OK;
+    }
+    out_count = static_cast<uint32_t>(it->second.completed_results.size());
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t ApuAndShapeManager::xapu_dequeue_result(uint64_t session_handle,
+                                                           void* out_result_data,
+                                                           uint32_t result_cap) noexcept {
+    if (out_result_data == nullptr) {
+        return SCARLETT_E_POINTER;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = xapu_sessions_.find(session_handle);
+    if (it == xapu_sessions_.end() || it->second.completed_results.empty()) {
+        std::memset(out_result_data, 0, result_cap > 0 ? result_cap : 64);
+        return SCARLETT_E_FAIL;
+    }
+
+    auto& front = it->second.completed_results.front();
+    const size_t copy_bytes = std::min<size_t>(result_cap > 0 ? result_cap : 64, front.size());
+    std::memcpy(out_result_data, front.data(), copy_bytes);
+    it->second.completed_results.erase(it->second.completed_results.begin());
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t ApuAndShapeManager::xapu_create_decoder(uint32_t codec_id,
+                                                           uint32_t sample_rate,
+                                                           uint32_t channels,
+                                                           const void* extradata,
+                                                           uint32_t extra_size,
+                                                           uint64_t& out_dec_handle) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const uint64_t dec_handle = next_decoder_handle_++;
+    XapuDecoderEntry entry;
+    entry.codec_id = codec_id != 0u ? codec_id : 0x704Fu;
+    entry.sample_rate = sample_rate != 0u ? sample_rate : 48000u;
+    entry.channels = channels != 0u ? channels : 2u;
+
+    if (entry.codec_id == 0x704Fu || entry.codec_id == SCARLETT_AUDIO_FORMAT_ADAT_OPUS) {
+        entry.opus = std::make_unique<OpusStreamDecoder>();
+        if (!entry.opus->init(entry.sample_rate, entry.channels)) {
+            return SCARLETT_E_FAIL;
+        }
+    } else if (entry.codec_id == SCARLETT_AUDIO_FORMAT_XMA2) {
+        entry.xma2 = std::make_unique<Xma2StreamDecoder>();
+        if (!entry.xma2->init(entry.sample_rate, entry.channels,
+                              static_cast<const uint8_t*>(extradata), extra_size)) {
+            return SCARLETT_E_FAIL;
+        }
+    } else {
+        /* Default to Opus for console audio streams */
+        entry.opus = std::make_unique<OpusStreamDecoder>();
+        if (!entry.opus->init(entry.sample_rate, entry.channels)) {
+            return SCARLETT_E_FAIL;
+        }
+    }
+
+    xapu_decoders_.emplace(dec_handle, std::move(entry));
+    out_dec_handle = dec_handle;
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t ApuAndShapeManager::xapu_destroy_decoder(uint64_t dec_handle) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = xapu_decoders_.find(dec_handle);
+    if (it == xapu_decoders_.end()) {
+        return SCARLETT_E_HANDLE;
+    }
+    xapu_decoders_.erase(it);
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t ApuAndShapeManager::xapu_process(uint64_t dec_handle,
+                                                    const uint8_t* in_data,
+                                                    uint32_t in_size,
+                                                    uint8_t* out_pcm,
+                                                    uint32_t out_cap,
+                                                    uint32_t& out_written) noexcept {
+    out_written = 0u;
+    if (in_data == nullptr || in_size == 0u || out_pcm == nullptr) {
+        return SCARLETT_E_INVALIDARG;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = xapu_decoders_.find(dec_handle);
+    if (it == xapu_decoders_.end()) {
+        return SCARLETT_E_HANDLE;
+    }
+
+    std::vector<float> pcm;
+    if (it->second.opus) {
+        if (!it->second.opus->decode(in_data, in_size, 1u, pcm)) {
+            return SCARLETT_E_FAIL;
+        }
+    } else if (it->second.xma2) {
+        const scarlett_hresult_t hr = it->second.xma2->decode_packet(in_data, in_size, pcm);
+        if (scarlett_failed(hr)) {
+            return hr;
+        }
+    } else {
+        return SCARLETT_E_FAIL;
+    }
+
+    const uint32_t bytes_produced = static_cast<uint32_t>(pcm.size() * sizeof(float));
+    const uint32_t to_copy = std::min(bytes_produced, out_cap);
+    if (to_copy > 0u) {
+        std::memcpy(out_pcm, pcm.data(), to_copy);
+    }
+    out_written = to_copy;
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t ApuAndShapeManager::xapu_flush(uint64_t dec_handle) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = xapu_decoders_.find(dec_handle);
+    if (it == xapu_decoders_.end()) {
+        return SCARLETT_E_HANDLE;
+    }
+    if (it->second.opus) {
+        it->second.opus->reset();
+    }
+    if (it->second.xma2) {
+        it->second.xma2->flush();
+    }
+    return SCARLETT_OK;
+}
+
 } // namespace scarlett::audio_media

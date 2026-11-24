@@ -287,6 +287,256 @@ scarlett_hresult_t SCARLETT_WIN64_API BinkSetIOSize(uint64_t size) {
         &g_stub_bink_set_iosize, ret, size, 0u, 0u, 0u);
 }
 
+void SCARLETT_WIN64_API BinkSetOSFileCallbacks(
+    void *open_fn,
+    void *read_fn,
+    void *seek_fn,
+    void *close_fn) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkSetOSFileCallbacks",
+        ret,
+        (uint64_t)(uintptr_t)open_fn,
+        (uint64_t)(uintptr_t)read_fn,
+        (uint64_t)(uintptr_t)seek_fn,
+        (uint64_t)(uintptr_t)close_fn);
+}
+
+void SCARLETT_WIN64_API BinkSetMemory(void *alloc_fn, void *free_fn) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkSetMemory",
+        ret,
+        (uint64_t)(uintptr_t)alloc_fn,
+        (uint64_t)(uintptr_t)free_fn,
+        0u,
+        0u);
+}
+
+int32_t SCARLETT_WIN64_API BinkSetSoundSystem(void *open_fn, uint64_t param) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkSetSoundSystem",
+        ret,
+        (uint64_t)(uintptr_t)open_fn,
+        param,
+        0u,
+        0u);
+    return 1;
+}
+
+void * SCARLETT_WIN64_API BinkOpenWithOptions(
+    const void *name_or_mem,
+    const void *options,
+    uint32_t flags) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkOpenWithOptions",
+        ret,
+        (uint64_t)(uintptr_t)name_or_mem,
+        (uint64_t)(uintptr_t)options,
+        (uint64_t)flags,
+        0u);
+    return BinkOpen(name_or_mem, flags);
+}
+
+void SCARLETT_WIN64_API BinkGetPlatformInfo(
+    int32_t bink_cpu_feature_flags,
+    void *platform_info) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkGetPlatformInfo",
+        ret,
+        (uint64_t)(uint32_t)bink_cpu_feature_flags,
+        (uint64_t)(uintptr_t)platform_info,
+        0u,
+        0u);
+}
+
+typedef struct scarlett_bink_framebuffers_hdr_s {
+    int32_t TotalFrames;
+    uint32_t YABufferWidth;
+    uint32_t YABufferHeight;
+    uint32_t cRcBBufferWidth;
+    uint32_t cRcBBufferHeight;
+    uint32_t FrameNum;
+} scarlett_bink_framebuffers_hdr_t;
+
+void SCARLETT_WIN64_API BinkGetFrameBuffersInfo(void *bink_ptr, void *fbset) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkGetFrameBuffersInfo",
+        ret,
+        (uint64_t)(uintptr_t)bink_ptr,
+        (uint64_t)(uintptr_t)fbset,
+        0u,
+        0u);
+    if (fbset == NULL) {
+        return;
+    }
+    scarlett_bink_framebuffers_hdr_t *hdr = (scarlett_bink_framebuffers_hdr_t *)fbset;
+    scarlett_bink_handle_t *bink = (scarlett_bink_handle_t *)bink_ptr;
+    if (bink != NULL && bink->in_use != 0u && bink->Width > 0u && bink->Height > 0u) {
+        hdr->TotalFrames = 1;
+        hdr->YABufferWidth = bink->Width;
+        hdr->YABufferHeight = bink->Height;
+        hdr->cRcBBufferWidth = bink->Width / 2u;
+        hdr->cRcBBufferHeight = bink->Height / 2u;
+        hdr->FrameNum = bink->FrameNum;
+    } else {
+        audio_pe_zero_mem(hdr, sizeof(*hdr));
+    }
+}
+
+void SCARLETT_WIN64_API BinkRegisterFrameBuffers(void *bink_ptr, void *fbset) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkRegisterFrameBuffers",
+        ret,
+        (uint64_t)(uintptr_t)bink_ptr,
+        (uint64_t)(uintptr_t)fbset,
+        0u,
+        0u);
+}
+
+int32_t SCARLETT_WIN64_API BinkDoFrameAsyncMulti(
+    void *bink_ptr,
+    uint32_t *threads,
+    int32_t thread_count) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkDoFrameAsyncMulti",
+        ret,
+        (uint64_t)(uintptr_t)bink_ptr,
+        (uint64_t)(uintptr_t)threads,
+        (uint64_t)(uint32_t)thread_count,
+        0u);
+    (void)BinkDoFrame(bink_ptr);
+    return 1;
+}
+
+int32_t SCARLETT_WIN64_API BinkDoFrameAsyncWait(void *bink_ptr, int32_t us) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkDoFrameAsyncWait",
+        ret,
+        (uint64_t)(uintptr_t)bink_ptr,
+        (uint64_t)(uint32_t)us,
+        0u,
+        0u);
+    return 1;
+}
+
+int32_t SCARLETT_WIN64_API BinkRequestStopAsyncThreadsMulti(
+    uint32_t *threads,
+    int32_t thread_count) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkRequestStopAsyncThreadsMulti",
+        ret,
+        (uint64_t)(uintptr_t)threads,
+        (uint64_t)(uint32_t)thread_count,
+        0u,
+        0u);
+    return 1;
+}
+
+int32_t SCARLETT_WIN64_API BinkWaitStopAsyncThreadsMulti(
+    uint32_t *threads,
+    int32_t thread_count) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkWaitStopAsyncThreadsMulti",
+        ret,
+        (uint64_t)(uintptr_t)threads,
+        (uint64_t)(uint32_t)thread_count,
+        0u,
+        0u);
+    return 1;
+}
+
+int32_t SCARLETT_WIN64_API BinkStartAsyncThread(int32_t thread_num, const void *param) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkStartAsyncThread",
+        ret,
+        (uint64_t)(uint32_t)thread_num,
+        (uint64_t)(uintptr_t)param,
+        0u,
+        0u);
+    return 1;
+}
+
+uint32_t SCARLETT_WIN64_API BinkGetKeyFrame(
+    void *bink_ptr,
+    uint32_t frame,
+    int32_t flags) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkGetKeyFrame",
+        ret,
+        (uint64_t)(uintptr_t)bink_ptr,
+        (uint64_t)frame,
+        (uint64_t)(uint32_t)flags,
+        0u);
+    scarlett_bink_handle_t *bink = (scarlett_bink_handle_t *)bink_ptr;
+    uint32_t kf = frame > 0u ? frame : 1u;
+    if (bink != NULL && bink->in_use != 0u && bink->Frames > 0u && kf > bink->Frames) {
+        kf = bink->Frames;
+    }
+    return kf;
+}
+
+void SCARLETT_WIN64_API BinkSetWillLoop(void *bink_ptr, int32_t onoff) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkSetWillLoop",
+        ret,
+        (uint64_t)(uintptr_t)bink_ptr,
+        (uint64_t)(uint32_t)onoff,
+        0u,
+        0u);
+}
+
+int32_t SCARLETT_WIN64_API BinkShouldSkip(void *bink_ptr) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkShouldSkip",
+        ret,
+        (uint64_t)(uintptr_t)bink_ptr,
+        0u,
+        0u,
+        0u);
+    return 0;
+}
+
+void SCARLETT_WIN64_API BinkFreeGlobals(void) {
+    uint64_t ret = (uint64_t)(uintptr_t)__builtin_return_address(0);
+    audio_pe_log_stub_call(
+        "Bink2Scarlett.dll",
+        "BinkFreeGlobals",
+        ret,
+        0u,
+        0u,
+        0u,
+        0u);
+}
+
 #if defined(_WIN32) || defined(__MINGW32__)
 uint32_t SCARLETT_WIN64_API DllMain(void *inst, uint32_t reason, void *reserved) {
     (void)inst;

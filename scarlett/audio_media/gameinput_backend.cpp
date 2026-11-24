@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstring>
 #include <dirent.h>
+#include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <linux/hidraw.h>
 #include <linux/input.h>
@@ -385,6 +387,271 @@ scarlett_hresult_t GameInputBackend::set_transport_mode(uint32_t mode) noexcept 
     }
     transport_mode_.store(mode, std::memory_order_release);
     return SCARLETT_OK;
+}
+
+namespace {
+
+struct LiveInputState {
+    std::mutex mutex;
+    uint64_t last_poll_us = 0;
+
+    // Evdev gamepad
+    int evdev_fd = -1;
+    uint64_t last_evdev_scan_us = 0;
+    scarlett_gamepad_state_t evdev_gp{};
+    int abs_x_min = -32768, abs_x_max = 32767;
+    int abs_y_min = -32768, abs_y_max = 32767;
+    int abs_rx_min = -32768, abs_rx_max = 32767;
+    int abs_ry_min = -32768, abs_ry_max = 32767;
+    int abs_lt_max = 255, abs_rt_max = 255;
+
+    // X11 dlopen
+    bool x11_tried = false;
+    void* x11_lib = nullptr;
+    void* x11_dpy = nullptr;
+    unsigned long x11_root = 0;
+    int (*fn_XQueryKeymap)(void*, char[32]) = nullptr;
+    int (*fn_XQueryPointer)(void*, unsigned long, unsigned long*, unsigned long*,
+                            int*, int*, int*, int*, unsigned int*) = nullptr;
+    unsigned long (*fn_XKeycodeToKeysym)(void*, unsigned int, int) = nullptr;
+    unsigned int (*fn_XKeysymToKeycode)(void*, unsigned long) = nullptr;
+};
+
+LiveInputState& live_state() noexcept {
+    static LiveInputState* s = new LiveInputState();
+    return *s;
+}
+
+float normalize_axis(int val, int mn, int mx) noexcept {
+    if (mx <= mn) {
+        return 0.0f;
+    }
+    const double mid = 0.5 * (static_cast<double>(mn) + static_cast<double>(mx));
+    const double half = 0.5 * (static_cast<double>(mx) - static_cast<double>(mn));
+    float f = static_cast<float>((static_cast<double>(val) - mid) / half);
+    if (std::fabs(f) < 0.08f) {
+        return 0.0f;
+    }
+    return std::clamp(f, -1.0f, 1.0f);
+}
+
+void try_open_evdev_gamepad(LiveInputState& st, uint64_t now_us) noexcept {
+    if (st.evdev_fd >= 0 || (now_us - st.last_evdev_scan_us) < 2000000u) {
+        return;
+    }
+    st.last_evdev_scan_us = now_us;
+    DIR* dir = opendir("/dev/input");
+    if (dir == nullptr) {
+        return;
+    }
+    while (struct dirent* ent = readdir(dir)) {
+        if (std::strncmp(ent->d_name, "event", 5) != 0) {
+            continue;
+        }
+        char path[300];
+        std::snprintf(path, sizeof(path), "/dev/input/%s", ent->d_name);
+        const int fd = open(path, O_RDONLY | O_NONBLOCK);
+        if (fd < 0) {
+            continue;
+        }
+        unsigned long keybits[(KEY_MAX + 8 * sizeof(unsigned long)) / (8 * sizeof(unsigned long))]{};
+        if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keybits)), keybits) >= 0) {
+            const auto has_key = [&](int code) {
+                return (keybits[code / (8 * sizeof(unsigned long))] >>
+                        (code % (8 * sizeof(unsigned long)))) & 1UL;
+            };
+            if (has_key(BTN_SOUTH) || has_key(BTN_GAMEPAD)) {
+                input_absinfo ai{};
+                if (ioctl(fd, EVIOCGABS(ABS_X), &ai) >= 0) { st.abs_x_min = ai.minimum; st.abs_x_max = ai.maximum; }
+                if (ioctl(fd, EVIOCGABS(ABS_Y), &ai) >= 0) { st.abs_y_min = ai.minimum; st.abs_y_max = ai.maximum; }
+                if (ioctl(fd, EVIOCGABS(ABS_RX), &ai) >= 0) { st.abs_rx_min = ai.minimum; st.abs_rx_max = ai.maximum; }
+                if (ioctl(fd, EVIOCGABS(ABS_RY), &ai) >= 0) { st.abs_ry_min = ai.minimum; st.abs_ry_max = ai.maximum; }
+                if (ioctl(fd, EVIOCGABS(ABS_Z), &ai) >= 0 && ai.maximum > 0) { st.abs_lt_max = ai.maximum; }
+                if (ioctl(fd, EVIOCGABS(ABS_RZ), &ai) >= 0 && ai.maximum > 0) { st.abs_rt_max = ai.maximum; }
+                st.evdev_fd = fd;
+                st.evdev_gp = {};
+                break;
+            }
+        }
+        close(fd);
+    }
+    closedir(dir);
+}
+
+void poll_evdev_gamepad(LiveInputState& st) noexcept {
+    if (st.evdev_fd < 0) {
+        return;
+    }
+    input_event ev{};
+    while (true) {
+        const ssize_t rd = read(st.evdev_fd, &ev, sizeof(ev));
+        if (rd < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                close(st.evdev_fd);
+                st.evdev_fd = -1;
+                st.evdev_gp = {};
+            }
+            break;
+        }
+        if (rd != static_cast<ssize_t>(sizeof(ev))) {
+            break;
+        }
+        if (ev.type == EV_KEY) {
+            uint32_t bit = 0;
+            switch (ev.code) {
+                case BTN_SOUTH:  bit = 0x0004u; break; /* A */
+                case BTN_EAST:   bit = 0x0008u; break; /* B */
+                case BTN_WEST:   bit = 0x0010u; break; /* X */
+                case BTN_NORTH:  bit = 0x0020u; break; /* Y */
+                case BTN_TL:     bit = 0x0400u; break; /* LeftShoulder */
+                case BTN_TR:     bit = 0x0800u; break; /* RightShoulder */
+                case BTN_SELECT: bit = 0x0002u; break; /* View */
+                case BTN_START:  bit = 0x0001u; break; /* Menu */
+                case BTN_THUMBL: bit = 0x1000u; break; /* LeftThumbstick */
+                case BTN_THUMBR: bit = 0x2000u; break; /* RightThumbstick */
+                default: break;
+            }
+            if (bit != 0u) {
+                if (ev.value != 0) st.evdev_gp.buttons |= bit;
+                else st.evdev_gp.buttons &= ~bit;
+            }
+        } else if (ev.type == EV_ABS) {
+            switch (ev.code) {
+                case ABS_X:  st.evdev_gp.left_thumbstick_x  =  normalize_axis(ev.value, st.abs_x_min, st.abs_x_max); break;
+                case ABS_Y:  st.evdev_gp.left_thumbstick_y  = -normalize_axis(ev.value, st.abs_y_min, st.abs_y_max); break;
+                case ABS_RX: st.evdev_gp.right_thumbstick_x =  normalize_axis(ev.value, st.abs_rx_min, st.abs_rx_max); break;
+                case ABS_RY: st.evdev_gp.right_thumbstick_y = -normalize_axis(ev.value, st.abs_ry_min, st.abs_ry_max); break;
+                case ABS_Z:  st.evdev_gp.left_trigger  = std::clamp(static_cast<float>(ev.value) / st.abs_lt_max, 0.0f, 1.0f); break;
+                case ABS_RZ: st.evdev_gp.right_trigger = std::clamp(static_cast<float>(ev.value) / st.abs_rt_max, 0.0f, 1.0f); break;
+                case ABS_HAT0X:
+                    st.evdev_gp.buttons &= ~(0x0100u | 0x0200u);
+                    if (ev.value < 0) st.evdev_gp.buttons |= 0x0100u;
+                    else if (ev.value > 0) st.evdev_gp.buttons |= 0x0200u;
+                    break;
+                case ABS_HAT0Y:
+                    st.evdev_gp.buttons &= ~(0x0040u | 0x0080u);
+                    if (ev.value < 0) st.evdev_gp.buttons |= 0x0040u;
+                    else if (ev.value > 0) st.evdev_gp.buttons |= 0x0080u;
+                    break;
+                default: break;
+            }
+        }
+    }
+}
+
+void init_x11_if_needed(LiveInputState& st) noexcept {
+    if (st.x11_tried) {
+        return;
+    }
+    st.x11_tried = true;
+    if (std::getenv("DISPLAY") == nullptr) {
+        return;
+    }
+    st.x11_lib = dlopen("libX11.so.6", RTLD_LAZY | RTLD_LOCAL);
+    if (st.x11_lib == nullptr) {
+        return;
+    }
+    using open_display_fn = void* (*)(const char*);
+    using default_root_fn = unsigned long (*)(void*);
+    auto fn_open = reinterpret_cast<open_display_fn>(dlsym(st.x11_lib, "XOpenDisplay"));
+    auto fn_root = reinterpret_cast<default_root_fn>(dlsym(st.x11_lib, "XDefaultRootWindow"));
+    st.fn_XQueryKeymap = reinterpret_cast<decltype(st.fn_XQueryKeymap)>(dlsym(st.x11_lib, "XQueryKeymap"));
+    st.fn_XQueryPointer = reinterpret_cast<decltype(st.fn_XQueryPointer)>(dlsym(st.x11_lib, "XQueryPointer"));
+    st.fn_XKeycodeToKeysym = reinterpret_cast<decltype(st.fn_XKeycodeToKeysym)>(dlsym(st.x11_lib, "XKeycodeToKeysym"));
+    st.fn_XKeysymToKeycode = reinterpret_cast<decltype(st.fn_XKeysymToKeycode)>(dlsym(st.x11_lib, "XKeysymToKeycode"));
+    if (fn_open == nullptr || fn_root == nullptr || st.fn_XQueryKeymap == nullptr) {
+        return;
+    }
+    st.x11_dpy = fn_open(nullptr);
+    if (st.x11_dpy != nullptr) {
+        st.x11_root = fn_root(st.x11_dpy);
+    }
+}
+
+} // namespace
+
+void GameInputBackend::poll_live_input(uint64_t handle) noexcept {
+    LiveInputState& st = live_state();
+    scarlett_input_reading_record_t rec{};
+    {
+        std::lock_guard<std::mutex> lock(st.mutex);
+        const uint64_t now_us = current_timestamp_us();
+        if (st.last_poll_us != 0u && (now_us - st.last_poll_us) < 2000u) {
+            return;
+        }
+        st.last_poll_us = now_us;
+
+        try_open_evdev_gamepad(st, now_us);
+        poll_evdev_gamepad(st);
+        init_x11_if_needed(st);
+
+        rec.timestamp_us = now_us;
+        rec.device_id = 1u;
+        rec.input_kind = SCARLETT_GAMEINPUT_KIND_GAMEPAD |
+                         SCARLETT_GAMEINPUT_KIND_KEYBOARD |
+                         SCARLETT_GAMEINPUT_KIND_MOUSE;
+        rec.gamepad = st.evdev_gp;
+
+        if (st.x11_dpy != nullptr && st.fn_XQueryKeymap != nullptr && st.fn_XKeysymToKeycode != nullptr) {
+            char keymap[32]{};
+            st.fn_XQueryKeymap(st.x11_dpy, keymap);
+            auto is_ks_down = [&](unsigned long ks) -> bool {
+                const unsigned int kc = st.fn_XKeysymToKeycode(st.x11_dpy, ks);
+                if (kc == 0u || kc >= 256u) return false;
+                return (static_cast<uint8_t>(keymap[kc >> 3]) & (1u << (kc & 7u))) != 0u;
+            };
+
+            struct KeyBind { unsigned long ks; uint8_t vk; };
+            static constexpr KeyBind kBinds[] = {
+                {0x0077u, 'W'}, {0x0061u, 'A'}, {0x0073u, 'S'}, {0x0064u, 'D'},
+                {0x0065u, 'E'}, {0x0066u, 'F'}, {0x0071u, 'Q'}, {0x0072u, 'R'},
+                {0x006du, 'M'}, {0xff0du, 0x0Du}, {0x0020u, 0x20u}, {0xff1bu, 0x1Bu},
+                {0xff08u, 0x08u}, {0xff09u, 0x09u}, {0xff51u, 0x25u}, {0xff52u, 0x26u},
+                {0xff53u, 0x27u}, {0xff54u, 0x28u}, {0xffe1u, 0x10u}, {0xffe3u, 0x11u}
+            };
+            for (const auto& b : kBinds) {
+                if (is_ks_down(b.ks) && rec.keyboard.key_count < 16u) {
+                    rec.keyboard.virtual_keys[rec.keyboard.key_count++] = b.vk;
+                }
+            }
+
+            if (st.fn_XQueryPointer != nullptr && st.x11_root != 0ul) {
+                unsigned long r = 0, c = 0;
+                int rx = 0, ry = 0, wx = 0, wy = 0;
+                unsigned int mask = 0;
+                if (st.fn_XQueryPointer(st.x11_dpy, st.x11_root, &r, &c, &rx, &ry, &wx, &wy, &mask) != 0) {
+                    rec.mouse.position_x = rx;
+                    rec.mouse.position_y = ry;
+                    if ((mask & (1u << 8)) != 0u) rec.mouse.buttons |= 0x01u; /* Left */
+                    if ((mask & (1u << 10)) != 0u) rec.mouse.buttons |= 0x02u; /* Right */
+                    if ((mask & (1u << 9)) != 0u) rec.mouse.buttons |= 0x04u; /* Middle */
+                }
+            }
+
+            // Virtual Xbox gamepad fallback from keyboard+mouse when no physical gamepad is connected
+            if (st.evdev_fd < 0) {
+                if (is_ks_down(0x0077u)) rec.gamepad.left_thumbstick_y += 1.0f;  /* W */
+                if (is_ks_down(0x0073u)) rec.gamepad.left_thumbstick_y -= 1.0f;  /* S */
+                if (is_ks_down(0x0061u)) rec.gamepad.left_thumbstick_x -= 1.0f;  /* A */
+                if (is_ks_down(0x0064u)) rec.gamepad.left_thumbstick_x += 1.0f;  /* D */
+                if (is_ks_down(0xff52u)) rec.gamepad.buttons |= 0x0040u;         /* Up -> DPadUp */
+                if (is_ks_down(0xff54u)) rec.gamepad.buttons |= 0x0080u;         /* Down -> DPadDown */
+                if (is_ks_down(0xff51u)) rec.gamepad.buttons |= 0x0100u;         /* Left -> DPadLeft */
+                if (is_ks_down(0xff53u)) rec.gamepad.buttons |= 0x0200u;         /* Right -> DPadRight */
+                if (is_ks_down(0xff0du) || is_ks_down(0x0020u)) rec.gamepad.buttons |= 0x0004u; /* Enter/Space -> A */
+                if (is_ks_down(0xff08u) || is_ks_down(0xff1bu)) rec.gamepad.buttons |= 0x0008u; /* Backspace/Esc -> B */
+                if (is_ks_down(0x0065u)) rec.gamepad.buttons |= 0x0010u;         /* E -> X */
+                if (is_ks_down(0x0066u)) rec.gamepad.buttons |= 0x0020u;         /* F -> Y */
+                if (is_ks_down(0xff09u)) rec.gamepad.buttons |= 0x0002u;         /* Tab -> View */
+                if (is_ks_down(0x006du)) rec.gamepad.buttons |= 0x0001u;         /* M -> Menu */
+                if (is_ks_down(0x0071u)) rec.gamepad.buttons |= 0x0400u;         /* Q -> LB */
+                if (is_ks_down(0x0072u)) rec.gamepad.buttons |= 0x0800u;         /* R -> RB */
+                if ((rec.mouse.buttons & 0x01u) != 0u) rec.gamepad.right_trigger = 1.0f;
+                if ((rec.mouse.buttons & 0x02u) != 0u) rec.gamepad.left_trigger = 1.0f;
+            }
+        }
+    }
+    (void)push_reading(handle, rec);
 }
 
 } // namespace scarlett::audio_media

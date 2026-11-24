@@ -33,6 +33,13 @@ extern "C" {
         { 0xC0u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x46u }             \
     }
 
+/* IID_IDStorageFactory (Xbox Scarlett GDK) = {62959D11-D45F-4884-A0A3-F7862EA243AE} */
+#define SCARLETT_IID_IDSTORAGEFACTORY_XBOX_INIT                                \
+    {                                                                          \
+        UINT32_C(0x62959D11), UINT16_C(0xD45F), UINT16_C(0x4884),              \
+        { 0xA0u, 0xA3u, 0xF7u, 0x86u, 0x2Eu, 0xA2u, 0x43u, 0xAEu }             \
+    }
+
 /* IID_IDStorageFactoryX = {6924EA0C-C3CD-4826-B10A-F64F4ED927C1} */
 #define SCARLETT_IID_IDSTORAGEFACTORYX_INIT                                    \
     {                                                                          \
@@ -75,6 +82,13 @@ extern "C" {
         { 0x8Eu, 0xA5u, 0x69u, 0x04u, 0x21u, 0x37u, 0xF4u, 0x9Du }             \
     }
 
+/* IID_IDStorageQueueX1/X2 (Xbox Scarlett GDK) = {3C02CB0C-C050-4195-99A1-A1CE94BA33C5} */
+#define SCARLETT_IID_IDSTORAGEQUEUEX_XBOX_INIT                                 \
+    {                                                                          \
+        UINT32_C(0x3C02CB0C), UINT16_C(0xC050), UINT16_C(0x4195),              \
+        { 0x99u, 0xA1u, 0xA1u, 0xCEu, 0x94u, 0xBAu, 0x33u, 0xC5u }             \
+    }
+
 /* IID_IDStorageFileX = {5DE95E7B-955A-4868-A73C-243B29F4B8DA} */
 #define SCARLETT_IID_IDSTORAGEFILEX_INIT                                       \
     {                                                                          \
@@ -82,11 +96,25 @@ extern "C" {
         { 0xA7u, 0x3Cu, 0x24u, 0x3Bu, 0x29u, 0xF4u, 0xB8u, 0xDAu }             \
     }
 
+/* IID_IDStorageFileX (Xbox Scarlett GDK) = {43704F9F-27C6-4A9F-8815-D16527894DF4} */
+#define SCARLETT_IID_IDSTORAGEFILEX_XBOX_INIT                                  \
+    {                                                                          \
+        UINT32_C(0x43704F9F), UINT16_C(0x27C6), UINT16_C(0x4A9F),              \
+        { 0x88u, 0x15u, 0xD1u, 0x65u, 0x27u, 0x89u, 0x4Du, 0xF4u }             \
+    }
+
 /* IID_IDStorageStatusArrayX = {82397587-7CD5-453B-A02E-31379BD64656} */
 #define SCARLETT_IID_IDSTORAGESTATUSARRAYX_INIT                                \
     {                                                                          \
         UINT32_C(0x82397587), UINT16_C(0x7CD5), UINT16_C(0x453B),              \
         { 0xA0u, 0x2Eu, 0x31u, 0x37u, 0x9Bu, 0xD6u, 0x46u, 0x56u }             \
+    }
+
+/* IID_IDStorageStatusArrayX (Xbox Scarlett GDK) = {CD66D752-2786-44F7-9070-E2A6FDAD3F1B} */
+#define SCARLETT_IID_IDSTORAGESTATUSARRAYX_XBOX_INIT                           \
+    {                                                                          \
+        UINT32_C(0xCD66D752), UINT16_C(0x2786), UINT16_C(0x44F7),              \
+        { 0x90u, 0x70u, 0xE2u, 0xA6u, 0xFDu, 0xADu, 0x3Fu, 0x1Bu }             \
     }
 
 /* ============================================================================
@@ -193,6 +221,8 @@ struct IDStorageQueueX_S {
     uint64_t source_type;
     uint32_t ref_count;
     uint32_t in_use;
+    void *device;
+    char name[256];
 };
 
 struct IDStorageQueueX1_S {
@@ -203,6 +233,8 @@ struct IDStorageQueueX1_S {
     uint64_t source_type;
     uint32_t ref_count;
     uint32_t in_use;
+    void *device;
+    char name[256];
 };
 
 struct IDStorageQueueX2_S {
@@ -213,6 +245,8 @@ struct IDStorageQueueX2_S {
     uint64_t source_type;
     uint32_t ref_count;
     uint32_t in_use;
+    void *device;
+    char name[256];
 };
 
 /* ============================================================================
@@ -220,7 +254,6 @@ struct IDStorageQueueX2_S {
  * ============================================================================ */
 
 typedef struct IDStorageFactoryX2Vtbl_S {
-    /* IDStorageFactoryX (slots 0..6) */
     scarlett_hresult_t (SCARLETT_DSTORAGEXS_CALL *QueryInterface)(
         IDStorageFactoryX *self, const scarlett_guid_t *riid, void **ppvObject);
     uint32_t (SCARLETT_DSTORAGEXS_CALL *AddRef)(IDStorageFactoryX *self);
@@ -241,23 +274,26 @@ typedef struct IDStorageFactoryX2Vtbl_S {
         const char *name,
         const scarlett_guid_t *riid,
         void **ppv);
-    scarlett_hresult_t (SCARLETT_DSTORAGEXS_CALL *SetStagingBufferSize)(
-        IDStorageFactoryX *self,
-        uint32_t size);
-    /* IDStorageFactoryX1 (slots 7..8) */
     scarlett_hresult_t (SCARLETT_DSTORAGEXS_CALL *OpenFileUtf8)(
-        IDStorageFactoryX1 *self,
+        IDStorageFactoryX *self,
         const char *path_utf8,
         const scarlett_guid_t *riid,
         void **ppv);
     uint64_t (SCARLETT_DSTORAGEXS_CALL *GetStagingBufferSize)(
-        IDStorageFactoryX1 *self);
-    /* IDStorageFactoryX2 (slots 9..10) */
+        IDStorageFactoryX *self);
+    scarlett_hresult_t (SCARLETT_DSTORAGEXS_CALL *SetStagingBufferSize)(
+        IDStorageFactoryX *self,
+        uint32_t size);
     scarlett_hresult_t (SCARLETT_DSTORAGEXS_CALL *QueryCapabilities)(
-        IDStorageFactoryX2 *self,
+        IDStorageFactoryX *self,
         scarlett_dstorage_caps_params_t *out_caps);
+    scarlett_hresult_t (SCARLETT_DSTORAGEXS_CALL *CreateQueueX)(
+        IDStorageFactoryX *self,
+        const DSTORAGE_QUEUE_DESC *desc,
+        const scarlett_guid_t *riid,
+        void **ppv);
     scarlett_hresult_t (SCARLETT_DSTORAGEXS_CALL *LoadBcpackPlugin)(
-        IDStorageFactoryX2 *self,
+        IDStorageFactoryX *self,
         const char *plugin_path_utf8,
         uint32_t *out_plugin_abi_version);
 } IDStorageFactoryX2Vtbl;

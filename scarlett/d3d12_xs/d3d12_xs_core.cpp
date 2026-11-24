@@ -73,8 +73,8 @@ void DeviceObject::record_breadcrumb(const char *op, const std::string &details)
 }
 
 D3D12XsManager &D3D12XsManager::instance() {
-    static D3D12XsManager mgr;
-    return mgr;
+    static D3D12XsManager *mgr = new D3D12XsManager();
+    return *mgr;
 }
 
 std::shared_ptr<DeviceObject> D3D12XsManager::find_device(uint64_t handle) {
@@ -188,6 +188,7 @@ scarlett_hresult_t D3D12XsManager::destroy_device(scarlett_d3d12xs_destroy_devic
     }
     if (dev != nullptr) {
         std::lock_guard<std::mutex> dlock(dev->mutex);
+        wsi_shutdown(dev->swapchain, dev->vk.get());
         if (dev->vk != nullptr) {
             dev->vk->shutdown();
         }
@@ -785,7 +786,7 @@ scarlett_hresult_t D3D12XsManager::presentx(scarlett_d3d12xs_presentx_params_t &
     }
 
     /* Strictly NO UMA flush inside PresentX (dev->uma_present_flushes stays 0) */
-    scarlett_hresult_t hr = presentx_submit(dev->swapchain, dev->vk->caps_mask, p);
+    scarlett_hresult_t hr = presentx_submit(dev->swapchain, dev->vk.get(), dev->vk->caps_mask, p);
     if (scarlett_succeeded(hr)) {
         dev->record_breadcrumb("PresentX",
                                "planes=" + std::to_string(p.plane_count) +

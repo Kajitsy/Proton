@@ -5,3 +5,10 @@ EXPORTS
     XboxBvhIntersectRay
     XboxBvhMapToVulkanBuildInfo
     XboxBvhBuildProceduralGeometry
+    "??0XboxBvhBuilder@@QEAA@PEAUID3D12Device11@@_N@Z" = XboxBvhBuilder_ctor
+    "??1XboxBvhBuilder@@QEAA@XZ" = XboxBvhBuilder_dtor
+    "?BuildRaytracingAccelerationStructureBatched2X@XboxBvhBuilder@@QEAAXPEAUID3D12GraphicsCommandList6@@IPEBUD3D12XBOX_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_BATCHED_DESC2@@@Z" = XboxBvhBuilder_BuildRaytracingAccelerationStructureBatched2X
+    "?CopyRaytracingAccelerationStructure@XboxBvhBuilder@@QEAAXPEAUID3D12GraphicsCommandList4@@_K1W4D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE@@@Z" = XboxBvhBuilder_CopyRaytracingAccelerationStructure
+    "?GetRaytracingAccelerationStructurePrebuildInfo@XboxBvhBuilder@@QEAAXPEBUD3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS@@PEBUD3D12XBOX_XDXR_STREAM_DESC@@PEAUD3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO@@@Z" = XboxBvhBuilder_GetRaytracingAccelerationStructurePrebuildInfo
+    "?RehydrateRaytracingAccelerationStructureBatched2X@XboxBvhBuilder@@QEAAJPEAUID3D12GraphicsCommandList8@@IPEBUD3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC@@PEB_K@Z" = XboxBvhBuilder_RehydrateRaytracingAccelerationStructureBatched2X
+    "?Set64BitMortonCodes@XboxBvhBuilder@@QEAAX_N@Z" = XboxBvhBuilder_Set64BitMortonCodes

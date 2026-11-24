@@ -353,6 +353,8 @@ def setup_game_dir_drive():
         setup_dir_drive("gamedrive", "s:", try_get_game_library_dir())
 
 def setup_steam_dir_drive():
+        if getattr(g_session, "scarlett_enabled", False):
+            return
         setup_dir_drive("steamdrive", "t:", try_get_steam_dir())
 
 
@@ -992,6 +994,7 @@ class CompatData:
                 os.symlink(src=link, dst=old)
 
     def setup_prefix(self):
+        os.makedirs(self.base_dir, exist_ok=True)
         with self.prefix_lock:
             if file_exists(self.version_file, follow_symlinks=True):
                 with open(self.version_file, "r") as f:
@@ -1018,6 +1021,7 @@ class CompatData:
 
             self.migrate_user_paths()
 
+            makedirs(self.prefix_dir + "/dosdevices")
             if not file_exists(self.prefix_dir + "/dosdevices/c:", follow_symlinks=False):
                 os.symlink("../drive_c", self.prefix_dir + "/dosdevices/c:")
 
@@ -1532,6 +1536,9 @@ SCARLETT_CONSOLE_DLLS = (
     "libHttpClient",
     "XCurl",
     "api-ms-win-core-psm-appnotify-l1-1-0",
+    "xapu",
+    "XCRDAPI",
+    "chad",
 )
 
 SCARLETT_VALID_MODELS = ("anaconda", "lockhart", "devkit")
@@ -1631,6 +1638,47 @@ def detect_scarlett_from_executable(exe_path):
         return False
     return is_scarlett_game_config(config_path)
 
+def resolve_scarlett_game_root(env, argv=None):
+    for var_name in ("PROTON_XBOX_GAME_ROOT", "SCARLETT_GAME_ROOT"):
+        candidate = env.get(var_name, "").strip()
+        if candidate and os.path.isdir(candidate):
+            return os.path.abspath(candidate)
+    if argv is None:
+        argv = sys.argv[2:] if len(sys.argv) > 2 else []
+    fallback_dir = None
+    for arg in argv:
+        norm_path = normalize_candidate_exe_path(arg)
+        if not norm_path:
+            continue
+        exe_dir = os.path.dirname(norm_path)
+        if not os.path.isdir(exe_dir):
+            continue
+        if detect_scarlett_from_executable(arg):
+            return exe_dir
+        if fallback_dir is None and norm_path.lower().endswith(".exe"):
+            fallback_dir = exe_dir
+    if fallback_dir is not None:
+        return fallback_dir
+    install_path = env.get("STEAM_COMPAT_INSTALL_PATH", "").strip()
+    if install_path and os.path.isdir(install_path):
+        return os.path.abspath(install_path)
+    return None
+
+def ensure_scarlett_drive_symlink(dosdevices_dir, drive_name, target_dir):
+    if not dosdevices_dir or not target_dir:
+        return
+    drive_path = os.path.join(dosdevices_dir, drive_name)
+    if os.path.islink(drive_path):
+        try:
+            if os.readlink(drive_path) == target_dir:
+                return
+        except OSError:
+            pass
+        os.unlink(drive_path)
+        os.symlink(target_dir, drive_path)
+    elif not os.path.lexists(drive_path):
+        os.symlink(target_dir, drive_path)
+
 def resolve_scarlett_mode(env, argv=None):
     raw_mode = env.get("PROTON_XBOX_SCARLETT", "auto").strip().lower()
     if raw_mode in ("0", "false", "no", "off"):
@@ -1661,6 +1709,15 @@ def apply_scarlett_environment(env, dlloverrides, lib_dir, prefix_dir, argv=None
         overlay_dir = default_overlay_dir
     env["PROTON_XBOX_OVERLAY_DIR"] = overlay_dir
 
+    overlay_root = env.get("PROTON_XBOX_OVERLAY_ROOT", "").strip()
+    if not overlay_root:
+        overlay_root = overlay_dir
+    env["PROTON_XBOX_OVERLAY_ROOT"] = overlay_root
+
+    game_root = resolve_scarlett_game_root(env, argv)
+    if game_root:
+        env["PROTON_XBOX_GAME_ROOT"] = game_root
+
     shader_mode = env.get("PROTON_XBOX_SHADER_MODE", "adaptive").strip().lower()
     if shader_mode not in SCARLETT_VALID_SHADER_MODES:
         shader_mode = "adaptive"
@@ -1684,10 +1741,15 @@ def apply_scarlett_environment(env, dlloverrides, lib_dir, prefix_dir, argv=None
     prepend_to_env_str(env, "WINEDLLPATH", scarlett_pe_dir + ":" + scarlett_unix_dir, ":")
     prepend_to_env_str(env, ld_path_var, scarlett_unix_dir, ":")
 
-    if "gameinput" in dlloverrides:
-        del dlloverrides["gameinput"]
+    SCARLETT_NATIVE_FIRST_DLLS = {
+        "Bink2Scarlett",
+        "XCurl",
+        "libHttpClient",
+        "libHttpClient.GDK",
+    }
+    dlloverrides["gameinput"] = "b"
     for dll in SCARLETT_CONSOLE_DLLS:
-        dlloverrides[dll] = "b"
+        dlloverrides[dll] = "n,b" if dll in SCARLETT_NATIVE_FIRST_DLLS else "b"
 
     if net_mode in ("passthrough", "lan"):
         if not env.get("SSL_CERT_FILE"):
@@ -2687,6 +2749,31 @@ class Session:
         )
         if self.scarlett_enabled and compatdata_inst is not None:
             makedirs(self.env["PROTON_XBOX_OVERLAY_DIR"])
+            if self.env.get("PROTON_XBOX_OVERLAY_ROOT"):
+                makedirs(self.env["PROTON_XBOX_OVERLAY_ROOT"])
+            dosdevices_dir = os.path.join(prefix_dir.rstrip("/"), "dosdevices")
+            makedirs(dosdevices_dir)
+            scarlett_temp_dir = os.path.join(prefix_dir.rstrip("/"), "drive_c/scarlett_temp")
+            makedirs(scarlett_temp_dir)
+            ensure_scarlett_drive_symlink(dosdevices_dir, "t:", "../drive_c/scarlett_temp")
+            game_root = self.env.get("PROTON_XBOX_GAME_ROOT", "").strip()
+            if game_root and os.path.isdir(game_root):
+                ensure_scarlett_drive_symlink(dosdevices_dir, "g:", game_root)
+                ensure_scarlett_drive_symlink(dosdevices_dir, "d:", game_root)
+            sys32_dir = os.path.join(prefix_dir.rstrip("/"), "drive_c/windows/system32")
+            scarlett_pe_dir = os.path.join(lib_dir.rstrip("/"), "wine/scarlett/x86_64-windows")
+            if os.path.isdir(sys32_dir) and os.path.isdir(scarlett_pe_dir):
+                for dll in SCARLETT_CONSOLE_DLLS:
+                    src = os.path.join(scarlett_pe_dir, f"{dll}.dll")
+                    if not os.path.exists(src):
+                        continue
+                    for name in (f"{dll}.dll", f"{dll.lower()}.dll"):
+                        dst = os.path.join(sys32_dir, name)
+                        if os.path.lexists(dst):
+                            if os.path.islink(dst) and os.readlink(dst) == src:
+                                continue
+                            os.unlink(dst)
+                        os.symlink(src, dst)
         return self.scarlett_enabled
 
     def configure_uwp(self, proton_inst=None, compatdata_inst=None, argv=None):
@@ -2728,10 +2815,10 @@ class Session:
                         break
         return self.uwp_enabled
 
-    def run_proc(self, args, local_env=None):
+    def run_proc(self, args, local_env=None, cwd=None):
         if local_env is None:
             local_env = self.env
-        return subprocess.call(args, env=local_env, stderr=self.log_file, stdout=self.log_file)
+        return subprocess.call(args, env=local_env, stderr=self.log_file, stdout=self.log_file, cwd=cwd)
 
     def run(self):
         if shutil.which('steam-runtime-launcher-interface-0') is not None:
@@ -2763,7 +2850,18 @@ class Session:
             else:
                 argv = [g_proton.wine_bin, "c:\\windows\\system32\\steam.exe"]
 
-        rc = self.run_proc(adverb + argv + sys.argv[2:] + self.cmdlineappend)
+        run_args = list(sys.argv[2:])
+        run_cwd = None
+        if getattr(self, "scarlett_enabled", False):
+            game_root = self.env.get("PROTON_XBOX_GAME_ROOT", "").strip()
+            if game_root and os.path.isdir(game_root):
+                run_cwd = game_root
+                run_args = [
+                    os.path.abspath(arg) if (arg and not os.path.isabs(arg) and os.path.isfile(arg)) else arg
+                    for arg in run_args
+                ]
+
+        rc = self.run_proc(adverb + argv + run_args + self.cmdlineappend, cwd=run_cwd)
 
         if remote_debug_proc:
             remote_debug_proc.kill()

@@ -41,6 +41,13 @@ extern "C" {
         { 0xBEu, 0x54u, 0x18u, 0x21u, 0x33u, 0x9Bu, 0x85u, 0xF7u }             \
     }
 
+/* Xbox GDK IID_ID3D12DeviceX = {5405C344-D457-444E-B4DD-2366E45AEE39} */
+#define SCARLETT_IID_ID3D12DEVICEX_GDK_INIT                                    \
+    {                                                                          \
+        UINT32_C(0x5405C344), UINT16_C(0xD457), UINT16_C(0x444E),              \
+        { 0xB4u, 0xDDu, 0x23u, 0x66u, 0xE4u, 0x5Au, 0xEEu, 0x39u }             \
+    }
+
 typedef struct D3D12XBOX_CREATE_DEVICE_PARAMETERS_S {
     uint32_t Version;
     uint32_t ProcessDebugFlags;
@@ -59,20 +66,41 @@ typedef struct D3D12XBOX_CREATE_DEVICE_PARAMETERS_S {
 SCARLETT_STATIC_ASSERT(sizeof(D3D12XBOX_CREATE_DEVICE_PARAMETERS) == 56,
                        "D3D12XBOX_CREATE_DEVICE_PARAMETERS must be 56 bytes");
 
+typedef struct D3D12XBOX_VIEW_RECT_S {
+    float Left;
+    float Top;
+    float Right;
+    float Bottom;
+} D3D12XBOX_VIEW_RECT;
+
+SCARLETT_STATIC_ASSERT(sizeof(D3D12XBOX_VIEW_RECT) == 16,
+                       "D3D12XBOX_VIEW_RECT must be 16 bytes");
+
+typedef struct D3D12XBOX_RECT_S {
+    int32_t left;
+    int32_t top;
+    int32_t right;
+    int32_t bottom;
+} D3D12XBOX_RECT;
+
 typedef struct D3D12XBOX_PRESENT_PLANE_PARAMETERS_S {
-    void *pResource;
-    uint32_t SubresourceIndex;
-    uint32_t Flags;
-    uint32_t SourceRectLeft;
-    uint32_t SourceRectTop;
-    uint32_t SourceRectRight;
-    uint32_t SourceRectBottom;
-    uint32_t ColorSpace; /* scarlett_d3d12xs_color_space_t */
-    uint32_t Reserved0;
+    uint64_t Token;                               /* +0x00 */
+    uint32_t ResourceCount;                       /* +0x08 */
+    uint32_t _pad0;                               /* +0x0C */
+    void * const *ppResources;                    /* +0x10 */
+    const D3D12XBOX_RECT *pSrcViewRects;          /* +0x18 */
+    const D3D12XBOX_VIEW_RECT *pDestPlacementBase;/* +0x20 */
+    uint32_t ColorSpace;                          /* +0x28: scarlett_d3d12xs_color_space_t */
+    uint32_t ScaleFilter;                         /* +0x2C */
+    uint32_t ExtendedDescCount;                   /* +0x30 */
+    uint32_t _pad1;                               /* +0x34 */
+    const void *pExtendedDescs;                   /* +0x38 */
+    uint32_t Flags;                               /* +0x40 */
+    uint32_t _pad2;                               /* +0x44 */
 } D3D12XBOX_PRESENT_PLANE_PARAMETERS;
 
-SCARLETT_STATIC_ASSERT(sizeof(D3D12XBOX_PRESENT_PLANE_PARAMETERS) == 40,
-                       "D3D12XBOX_PRESENT_PLANE_PARAMETERS must be 40 bytes");
+SCARLETT_STATIC_ASSERT(sizeof(D3D12XBOX_PRESENT_PLANE_PARAMETERS) == 72,
+                       "D3D12XBOX_PRESENT_PLANE_PARAMETERS must be 72 bytes");
 
 typedef struct D3D12XBOX_PRESENT_PARAMETERS_S {
     uint64_t Token;
@@ -176,6 +204,7 @@ typedef struct ID3D12DeviceXVtbl_S {
         uint32_t InitialState,
         const scarlett_guid_t *riid,
         void **ppvResource);
+    void *extra_slots[247]; /* Slots 9..255 (e.g. slot 26, slot 43, slot 48, slot 73, slot 133) */
 } ID3D12DeviceXVtbl;
 
 struct ID3D12DeviceX_S {
@@ -183,6 +212,7 @@ struct ID3D12DeviceX_S {
     uint64_t unix_device_handle;
     uint32_t ref_count;
     uint32_t in_use;
+    void *real_device;
 };
 
 /* ============================================================================
@@ -203,7 +233,8 @@ SCARLETT_D3D12XS_API void scarlett_d3d12xs_set_stub_sink(
  * ============================================================================ */
 
 SCARLETT_D3D12XS_API scarlett_hresult_t SCARLETT_D3D12XS_CALL D3D12XboxCreateDevice(
-    const D3D12XBOX_CREATE_DEVICE_PARAMETERS *pParams,
+    void *pAdapter,
+    const D3D12XBOX_CREATE_DEVICE_PARAMETERS *pParameters,
     const scarlett_guid_t *riid,
     void **ppDevice);
 
@@ -335,6 +366,14 @@ SCARLETT_D3D12XS_API scarlett_hresult_t SCARLETT_D3D12XS_CALL D3D12XboxCreateMes
     const void *pDesc,
     const scarlett_guid_t *riid,
     void **ppState);
+
+SCARLETT_D3D12XS_API scarlett_hresult_t SCARLETT_D3D12XS_CALL D3D12ConfigureVirtualMemoryX(
+    const void *pConfiguration);
+
+SCARLETT_D3D12XS_API scarlett_hresult_t SCARLETT_D3D12XS_CALL D3D12SerializeVersionedRootSignature(
+    const void *pRootSignatureDesc,
+    void **ppBlob,
+    void **ppErrorBlob);
 
 SCARLETT_D3D12XS_API scarlett_hresult_t SCARLETT_D3D12XS_CALL D3D12SerializeRootSignature(
     const void *pRootSignature,

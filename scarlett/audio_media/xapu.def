@@ -1,0 +1,17 @@
+LIBRARY xapu.dll
+EXPORTS
+    XApuConnect @1
+    XApuDequeueResult @2
+    XApuDisconnect @3
+    XApuEnqueueCommand @4
+    XApuGetResultCount @5
+    XAPUCreateDecoder
+    XAPUDestroyDecoder
+    XAPUProcess
+    XAPUFlush
+    XAPUGetStatus
+    XApuCreateDecoder = XAPUCreateDecoder
+    XApuDestroyDecoder = XAPUDestroyDecoder
+    XApuProcess = XAPUProcess
+    XApuFlush = XAPUFlush
+    XApuGetStatus = XAPUGetStatus

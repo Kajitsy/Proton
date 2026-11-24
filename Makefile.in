@@ -929,6 +929,36 @@ $(OBJ)/.scarlett-x86_64-post-build: $(OBJ)/.wine-$(HOST_ARCH)-tools
 	      $(MESON_STRIP_ARG)
 	env $(SCARLETT_x86_64_UNIX_ENV) \
 	ninja -C "$(OBJ)/obj-scarlett-x86_64-unix" install
+	for base in "$(SCARLETT_x86_64_DST)/lib/wine/scarlett" "$(DST_LIBDIR)/wine/scarlett"; do \
+	    [ -d "$$base/x86_64-windows" ] || continue; \
+	    for pair in \
+	        "xmem:xmem_unix.so" "kernelx:xmem_unix.so" \
+	        "d3d12_xs:d3d12_xs_unix.so" "dstorage_xs:dstorage_xs_unix.so" \
+	        "xg_xs:xg_xs_unix.so" "XboxBvhBuilder:xg_xs_unix.so" "pixevt:xg_xs_unix.so" \
+	        "xgameruntime:xgameruntime_unix.so" "XCRDAPI:xgameruntime_unix.so" \
+	        "libHttpClient:xgameruntime_unix.so" "XCurl:xgameruntime_unix.so" \
+	        "xaudio2_9:audio_scarlett_unix.so" "AcpHal:audio_scarlett_unix.so" \
+	        "GameInput:audio_scarlett_unix.so" "Bink2Scarlett:audio_scarlett_unix.so" \
+	        "amd_fidelityfx_loader_xbox:audio_scarlett_unix.so" "amd_fidelityfx_upscaler_xbox:audio_scarlett_unix.so" \
+	        "xapu:audio_scarlett_unix.so" "chad:audio_scarlett_unix.so" \
+	        "xgameplatform:loader_unix.so" "api-ms-win-core-psm-appnotify-l1-1-0:loader_unix.so"; do \
+	        mod=$${pair%%:*}; so=$${pair##*:}; \
+	        lower=$$(printf '%s' "$$mod" | tr 'A-Z' 'a-z'); \
+	        ln -sf "../x86_64-unix/$$so" "$$base/x86_64-windows/$$mod.so"; \
+	        if [ "$$mod" != "$$lower" ]; then \
+	            ln -sf "../x86_64-unix/$$so" "$$base/x86_64-windows/$$lower.so"; \
+	        fi; \
+	        if [ -d "$$base/x86_64-unix" ]; then \
+	            ln -sf "$$so" "$$base/x86_64-unix/$$mod.so"; \
+	            if [ "$$mod" != "$$lower" ]; then \
+	                ln -sf "$$so" "$$base/x86_64-unix/$$lower.so"; \
+	            fi; \
+	        fi; \
+	    done; \
+	done
+	if [ -f "$(DST_LIBDIR)/wine/scarlett/x86_64-windows/GameInput.dll" ]; then \
+	    cp -f "$(DST_LIBDIR)/wine/scarlett/x86_64-windows/GameInput.dll" "$(DST_LIBDIR)/wine/x86_64-windows/gameinput.dll"; \
+	fi
 	if [ -f "$(SCARLETT_x86_64_OBJ)/compile_commands.json" ]; then \
 	    mkdir -p "$(OBJ)/compile_commands"; \
 	    sed "s#$(SCARLETT_SRC)#$(SCARLETT_ORIGIN)#g" "$(SCARLETT_x86_64_OBJ)/compile_commands.json" > "$(OBJ)/compile_commands/scarlett.json"; \

@@ -97,12 +97,44 @@ SCARLETT_XMEM_API void * SCARLETT_XMEM_CALL KernelXVirtualAlloc(
     uint64_t size_bytes,
     uint32_t alloc_type,
     uint32_t protect) {
+    if ((alloc_type & (XMEM_MEM_RESERVE_PLACEHOLDER | XMEM_MEM_REPLACE_PLACEHOLDER)) != 0u) {
+        uint32_t win32_alloc = 0u;
+        uint32_t win32_prot = XMEM_PAGE_NOACCESS;
+        if ((alloc_type & XMEM_MEM_RESERVE_PLACEHOLDER) != 0u) {
+            win32_alloc = XMEM_MEM_RESERVE | XMEM_MEM_RESERVE_PLACEHOLDER;
+            win32_prot = XMEM_PAGE_NOACCESS;
+        } else {
+            win32_alloc = XMEM_MEM_RESERVE | XMEM_MEM_COMMIT | XMEM_MEM_REPLACE_PLACEHOLDER;
+            win32_prot = XMEM_PAGE_READWRITE;
+        }
+        void *va2_res = xmem_pe_virtual_alloc2(
+            address, (size_t)size_bytes, win32_alloc, win32_prot);
+        int32_t va2_status = (va2_res != NULL) ? 0 : (int32_t)xmem_pe_get_last_error();
+        xmem_pe_log_diag(va2_res != NULL ? "[scarlett-kernelx-placeholder]" : "[scarlett-kernelx-fail]",
+                         "kernelx.dll",
+                         "VirtualAlloc",
+                         (uint64_t)(uintptr_t)__builtin_return_address(0),
+                         (uint64_t)(uintptr_t)address,
+                         size_bytes,
+                         (uint64_t)alloc_type,
+                         (uint64_t)(uintptr_t)va2_res,
+                         va2_status);
+        return va2_res;
+    }
+
     uint64_t out_base = 0u;
     scarlett_mem_region_t region = SCARLETT_MEM_REGION_UNKNOWN;
     if ((alloc_type & XMEM_MEM_GRAPHICS) != 0u) {
         region = SCARLETT_MEM_REGION_GRAPHICS;
     } else if ((alloc_type & XMEM_MEM_TITLE) != 0u) {
         region = SCARLETT_MEM_REGION_TITLE;
+    } else if (address == NULL) {
+        if ((alloc_type & XMEM_MEM_PHYSICAL) != 0u ||
+            (protect & (XMEM_PAGE_GPU_COHERENT | XMEM_PAGE_WRITECOMBINE)) != 0u) {
+            region = SCARLETT_MEM_REGION_GRAPHICS;
+        } else {
+            region = SCARLETT_MEM_REGION_TITLE;
+        }
     }
 
     scarlett_xmem_reserve_params_t params;
@@ -115,6 +147,16 @@ SCARLETT_XMEM_API void * SCARLETT_XMEM_CALL KernelXVirtualAlloc(
 
     int32_t rc = xmem_pe_unix_call(SCARLETT_XMEM_UNIX_RESERVE_RANGE, &params);
     if (scarlett_failed(rc) || scarlett_failed(params.out_status)) {
+        int32_t fail_hr = scarlett_failed(rc) ? rc : params.out_status;
+        xmem_pe_log_diag("[scarlett-kernelx-fail]",
+                         "kernelx.dll",
+                         "VirtualAlloc",
+                         (uint64_t)(uintptr_t)__builtin_return_address(0),
+                         (uint64_t)(uintptr_t)address,
+                         size_bytes,
+                         (uint64_t)alloc_type,
+                         (uint64_t)protect,
+                         fail_hr);
         return NULL;
     }
     out_base = params.out_base;
@@ -125,6 +167,25 @@ SCARLETT_XMEM_API uint32_t SCARLETT_XMEM_CALL KernelXVirtualFree(
     void *address,
     uint64_t size_bytes,
     uint32_t free_type) {
+    if ((free_type & (XMEM_MEM_PRESERVE_PLACEHOLDER | XMEM_MEM_COALESCE_PLACEHOLDERS)) != 0u) {
+        int32_t vf_resolved = 0;
+        int32_t vf_ok = xmem_pe_virtual_free(
+            address, (size_t)size_bytes, free_type, &vf_resolved);
+        if (vf_resolved != 0) {
+            int32_t vf_status = (vf_ok != 0) ? 0 : (int32_t)xmem_pe_get_last_error();
+            xmem_pe_log_diag(vf_ok != 0 ? "[scarlett-kernelx-placeholder]" : "[scarlett-kernelx-fail]",
+                             "kernelx.dll",
+                             "VirtualFree",
+                             (uint64_t)(uintptr_t)__builtin_return_address(0),
+                             (uint64_t)(uintptr_t)address,
+                             size_bytes,
+                             (uint64_t)free_type,
+                             (uint64_t)vf_ok,
+                             vf_status);
+            return vf_ok != 0 ? 1u : 0u;
+        }
+    }
+
     scarlett_xmem_free_range_params_t params;
     xmem_pe_zero(&params, sizeof(params));
     params.base_addr = (uint64_t)(uintptr_t)address;
@@ -239,6 +300,16 @@ SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL MapTitleEsramPages(
     xmem_pe_copy_cstr(params.ctx.caller_module_name,
                       sizeof(params.ctx.caller_module_name),
                       "<scarlett_caller>");
+
+    xmem_pe_log_diag("[scarlett-stub]",
+                     "kernelx.dll",
+                     "MapTitleEsramPages",
+                     params.ctx.return_address,
+                     params.ctx.rcx,
+                     params.ctx.rdx,
+                     params.ctx.r8,
+                     params.ctx.r9,
+                     params.ctx.return_hr);
 
     int32_t rc = xmem_pe_unix_call(SCARLETT_XMEM_UNIX_REPORT_STUB, &params);
     return scarlett_stub_enforce_error(scarlett_failed(rc) ? rc : params.out_status);

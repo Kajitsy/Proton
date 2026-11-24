@@ -186,6 +186,36 @@ int32_t crt_app_wrl_get_activation_factory(
 
 uint8_t crt_app_wrl_terminate_module(crt_wrl_module_base_t *module);
 
+/*
+ * Clean-room C++/CX box vtables:
+ *   Platform::Details::GetIBoxVtable(void *object)
+ *   Platform::Details::GetIBoxArrayVtable(void *object)
+ *
+ * The MSVC C++/CX compiler emits a small "box class" per boxed non-primitive
+ * value type (enums, value structs) or boxed Platform::Array<T>.  The object
+ * starts with the identity interface (Windows.Foundation.IReference<T> /
+ * IReferenceArray<T>) and carries a tear-off IPropertyValue interface slot at
+ * object + 8.  The IPropertyValue implementation is supplied by vccorlib
+ * instead of by the compiler: GetIBoxVtable() / GetIBoxArrayVtable() return a
+ * static IPropertyValue-compatible vtable whose IUnknown/IInspectable slots
+ * delegate to the box identity object (this - 8).  Both helpers ignore their
+ * argument in the Microsoft implementation (the compiler calls them from the
+ * box constructor right after the interface slots are installed) and always
+ * return the same static vtable.
+ *
+ * The returned tables have CRT_APP_IBOX_VTABLE_SLOT_COUNT (45) entries: the
+ * full IInspectable + IPropertyValue method layout (QI, AddRef, Release,
+ * GetIids, GetRuntimeClassName, GetTrustLevel, get_Type, get_IsNumericScalar,
+ * 18 scalar getters, 19 array getters).
+ */
+#define CRT_APP_IBOX_VTABLE_SLOT_COUNT 45u
+
+void *crt_app_ibox_vtable(void);
+void *crt_app_ibox_array_vtable(void);
+
+/* Raw vtable slot accessor for host tests / diagnostics (index >= 45 -> NULL). */
+void *crt_app_ibox_vtable_slot(void *vtable, uint32_t index);
+
 #ifdef __cplusplus
 }
 #endif

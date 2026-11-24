@@ -168,42 +168,44 @@ void *crt_impl_vcc_ReCreateException(int32_t hr) {
     return fn(hr);
 }
 
-static const scarlett_stub_descriptor_t g_desc_vcc_GetIBoxVtable = {
-    SCARLETT_STUB_THUNK_ABI_VERSION,
-    SCARLETT_STUB_FLAG_NONE,
-    SCARLETT_STUB_ORDINAL_NONE,
-    SCARLETT_STUB_SLOT_NONE,
-    SCARLETT_E_NOTIMPL,
-    0u,
-    "vccorlib140_app.dll",
-    "?GetIBoxVtable@Details@Platform@@YAPEAXPEAX@Z"
-};
-
-void *crt_stub_vcc_GetIBoxVtable(uint64_t rcx, uint64_t rdx, uint64_t r8, uint64_t r9) {
-    (void)crt_app_stub_dispatch(
-        &g_desc_vcc_GetIBoxVtable,
-        (uint64_t)(uintptr_t)__builtin_return_address(0),
-        rcx, rdx, r8, r9);
-    return NULL;
+/*
+ * Platform::Details::GetIBoxVtable / GetIBoxArrayVtable
+ *
+ * Clean-room implementations of the vccorlib box-vtable helpers used by the
+ * MSVC C++/CX compiler for compiler-generated box classes (enums / value
+ * structs / Platform::Array<T>).  The real Microsoft implementation ignores
+ * its argument and returns a static 45-slot IPropertyValue-shaped vtable whose
+ * IUnknown/IInspectable slots delegate to the box identity object at
+ * `interface_pointer - 8`; the table itself lives in crt_app_runtime.c so it
+ * can be unit-tested on the host.
+ *
+ * Return value is never NULL, so a compiler-generated box class no longer
+ * ends up with a NULL IPropertyValue interface vtable (SAB2 crash).
+ */
+void *crt_impl_vcc_GetIBoxVtable(void *object) {
+    static volatile int32_t logged = 0;
+    void *vtable = crt_app_ibox_vtable();
+    if (!logged) {
+        logged = 1;
+        crt_app_log("vccorlib140_app",
+                    "Platform::Details::GetIBoxVtable(object=%p) -> generic IBox/IPropertyValue "
+                    "vtable=%p caller=%p",
+                    object, vtable, __builtin_return_address(0));
+    }
+    return vtable;
 }
 
-static const scarlett_stub_descriptor_t g_desc_vcc_GetIBoxArrayVtable = {
-    SCARLETT_STUB_THUNK_ABI_VERSION,
-    SCARLETT_STUB_FLAG_NONE,
-    SCARLETT_STUB_ORDINAL_NONE,
-    SCARLETT_STUB_SLOT_NONE,
-    SCARLETT_E_NOTIMPL,
-    0u,
-    "vccorlib140_app.dll",
-    "?GetIBoxArrayVtable@Details@Platform@@YAPEAXPEAX@Z"
-};
-
-void *crt_stub_vcc_GetIBoxArrayVtable(uint64_t rcx, uint64_t rdx, uint64_t r8, uint64_t r9) {
-    (void)crt_app_stub_dispatch(
-        &g_desc_vcc_GetIBoxArrayVtable,
-        (uint64_t)(uintptr_t)__builtin_return_address(0),
-        rcx, rdx, r8, r9);
-    return NULL;
+void *crt_impl_vcc_GetIBoxArrayVtable(void *object) {
+    static volatile int32_t logged = 0;
+    void *vtable = crt_app_ibox_array_vtable();
+    if (!logged) {
+        logged = 1;
+        crt_app_log("vccorlib140_app",
+                    "Platform::Details::GetIBoxArrayVtable(object=%p) -> generic "
+                    "IBoxArray/IPropertyValue vtable=%p caller=%p",
+                    object, vtable, __builtin_return_address(0));
+    }
+    return vtable;
 }
 
 #ifdef _WIN32

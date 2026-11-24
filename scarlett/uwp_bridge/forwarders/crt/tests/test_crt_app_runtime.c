@@ -273,12 +273,285 @@ static void test_wrl_module_activation(void) {
     assert(g_mock_cache.factory == NULL);
 }
 
+
+/* ============================================================================
+ * Clean-room C++/CX box vtables: Platform::Details::GetIBoxVtable /
+ * GetIBoxArrayVtable
+ *
+ * The MSVC C++/CX compiler emits box classes whose object layout is:
+ *   +0x00 identity object vtable (Windows.Foundation.IReference<T>)
+ *   +0x08 IPropertyValue tear-off vtable slot  (<- value from GetIBoxVtable)
+ * The IPropertyValue vtable thunks must forward IUnknown/IInspectable to the
+ * identity object at `this - 8` and provide the fixed generic IPropertyValue
+ * responses (OtherType / not a numeric scalar / E_NOTIMPL accessors).
+ * ============================================================================ */
+
+typedef struct mock_ibox_inner_vtbl_s {
+    int32_t (*query_interface)(void *, const crt_app_guid_t *, void **);
+    uint32_t (*add_ref)(void *);
+    uint32_t (*release)(void *);
+    int32_t (*get_iids)(void *, uint32_t *, crt_app_guid_t **);
+    int32_t (*get_runtime_class_name)(void *, void **);
+    int32_t (*get_trust_level)(void *, int32_t *);
+} mock_ibox_inner_vtbl_t;
+
+typedef struct mock_ibox_box_s {
+    const void *identity_vtbl; /* +0x00 */
+    const void *property_vtbl; /* +0x08 */
+    int32_t refs;
+} mock_ibox_box_t;
+
+static int g_ibox_qi_calls;
+static int g_ibox_addref_calls;
+static int g_ibox_release_calls;
+static int g_ibox_getiids_calls;
+static int g_ibox_getname_calls;
+static int g_ibox_gettrust_calls;
+static void *g_ibox_expected_identity;
+static void *g_ibox_qi_result;
+static uint32_t g_ibox_iid_count;
+
+static int32_t mock_ibox_qi(void *self, const crt_app_guid_t *riid, void **ppv) {
+    (void)riid;
+    assert(self == g_ibox_expected_identity);
+    ++g_ibox_qi_calls;
+    if (ppv) *ppv = g_ibox_qi_result;
+    return 0;
+}
+static uint32_t mock_ibox_add_ref(void *self) {
+    assert(self == g_ibox_expected_identity);
+    ++g_ibox_addref_calls;
+    return ((mock_ibox_box_t *)self)->refs + 1u;
+}
+static uint32_t mock_ibox_release(void *self) {
+    assert(self == g_ibox_expected_identity);
+    ++g_ibox_release_calls;
+    return 0u;
+}
+static int32_t mock_ibox_get_iids(void *self, uint32_t *iid_count, crt_app_guid_t **iids) {
+    assert(self == g_ibox_expected_identity);
+    ++g_ibox_getiids_calls;
+    if (iid_count) *iid_count = g_ibox_iid_count;
+    if (iids) *iids = NULL;
+    return 0;
+}
+static int32_t mock_ibox_get_runtime_class_name(void *self, void **class_name) {
+    assert(self == g_ibox_expected_identity);
+    ++g_ibox_getname_calls;
+    if (class_name) *class_name = (void *)L"Windows.Foundation.IReference`1<Mock>";
+    return 0;
+}
+static int32_t mock_ibox_get_trust_level(void *self, int32_t *trust_level) {
+    assert(self == g_ibox_expected_identity);
+    ++g_ibox_gettrust_calls;
+    if (trust_level) *trust_level = 1; /* PartialTrust */
+    return 0;
+}
+
+static const mock_ibox_inner_vtbl_t g_mock_ibox_inner_vtbl = {
+    mock_ibox_qi,
+    mock_ibox_add_ref,
+    mock_ibox_release,
+    mock_ibox_get_iids,
+    mock_ibox_get_runtime_class_name,
+    mock_ibox_get_trust_level
+};
+
+/* Vtable slot accessors, matching the IInspectable + IPropertyValue ABI. */
+#define CRT_IBOX_CALL_CAST(type, vt, idx) ((type)(uintptr_t)crt_app_ibox_vtable_slot((vt), (idx)))
+
+typedef int32_t (*ibox_qi_fn_t)(void *, const crt_app_guid_t *, void **);
+typedef uint32_t (*ibox_addref_fn_t)(void *);
+typedef int32_t (*ibox_getiids_fn_t)(void *, uint32_t *, crt_app_guid_t **);
+typedef int32_t (*ibox_getname_fn_t)(void *, void **);
+typedef int32_t (*ibox_gettrust_fn_t)(void *, int32_t *);
+typedef int32_t (*ibox_gettype_fn_t)(void *, int32_t *);
+typedef int32_t (*ibox_getbool_fn_t)(void *, uint8_t *);
+typedef int32_t (*ibox_scalar_fn_t)(void *, void *);
+typedef int32_t (*ibox_array_fn_t)(void *, uint32_t *, void **);
+
+static void mock_ibox_reset(void) {
+    g_ibox_qi_calls = 0;
+    g_ibox_addref_calls = 0;
+    g_ibox_release_calls = 0;
+    g_ibox_getiids_calls = 0;
+    g_ibox_getname_calls = 0;
+    g_ibox_gettrust_calls = 0;
+    g_ibox_qi_result = NULL;
+    g_ibox_iid_count = 0u;
+}
+
+static void test_ibox_value_vtable(void) {
+    void *vt = crt_app_ibox_vtable();
+    void *array_vt = crt_app_ibox_array_vtable();
+    assert(vt != NULL);
+    assert(array_vt != NULL);
+    assert(crt_app_ibox_vtable() == vt);       /* static, one table per process */
+    assert(crt_app_ibox_array_vtable() == array_vt);
+    assert(vt != array_vt);
+
+    /* The MS implementation always returns the full 45-slot IPropertyValue
+     * vtable; every slot must be non-NULL (a NULL slot equals the SAB2 crash). */
+    for (uint32_t i = 0; i < CRT_APP_IBOX_VTABLE_SLOT_COUNT; ++i) {
+        assert(crt_app_ibox_vtable_slot(vt, i) != NULL);
+        assert(crt_app_ibox_vtable_slot(array_vt, i) != NULL);
+    }
+    assert(crt_app_ibox_vtable_slot(vt, CRT_APP_IBOX_VTABLE_SLOT_COUNT) == NULL);
+    assert(crt_app_ibox_vtable_slot(NULL, 0u) == NULL);
+
+    mock_ibox_box_t box;
+    box.identity_vtbl = &g_mock_ibox_inner_vtbl;
+    box.property_vtbl = vt;
+    box.refs = 6;
+    void *iface = &box.property_vtbl; /* IPropertyValue interface pointer */
+    g_ibox_expected_identity = &box.identity_vtbl;
+
+    /* Slot 0..5: IUnknown + IInspectable forwarded to the box identity. */
+    mock_ibox_reset();
+    int32_t hr = CRT_IBOX_CALL_CAST(ibox_qi_fn_t, vt, 0)(iface, NULL, &g_ibox_qi_result);
+    assert(hr == 0);
+    assert(g_ibox_qi_calls == 1);
+
+    assert(CRT_IBOX_CALL_CAST(ibox_addref_fn_t, vt, 1)(iface) == 7u);
+    assert(g_ibox_addref_calls == 1);
+
+    assert(CRT_IBOX_CALL_CAST(ibox_addref_fn_t, vt, 2)(iface) == 0u);
+    assert(g_ibox_release_calls == 1);
+
+    uint32_t iid_count = 0u;
+    crt_app_guid_t *iids = NULL;
+    g_ibox_iid_count = 3u;
+    hr = CRT_IBOX_CALL_CAST(ibox_getiids_fn_t, vt, 3)(iface, &iid_count, &iids);
+    assert(hr == 0);
+    assert(g_ibox_getiids_calls == 1);
+    assert(iid_count == 3u);
+    assert(iids == NULL);
+
+    void *class_name = NULL;
+    hr = CRT_IBOX_CALL_CAST(ibox_getname_fn_t, vt, 4)(iface, &class_name);
+    assert(hr == 0);
+    assert(g_ibox_getname_calls == 1);
+    assert(class_name != NULL);
+
+    int32_t trust = -1;
+    hr = CRT_IBOX_CALL_CAST(ibox_gettrust_fn_t, vt, 5)(iface, &trust);
+    assert(hr == 0);
+    assert(g_ibox_gettrust_calls == 1);
+    assert(trust == 1);
+
+    /* Slot 6: get_Type is the constant PropertyType_OtherType (20) for
+     * compiler-generated generic value boxes. */
+    int32_t property_type = -1;
+    hr = CRT_IBOX_CALL_CAST(ibox_gettype_fn_t, vt, 6)(iface, &property_type);
+    assert(hr == 0);
+    assert(property_type == 20);
+
+    /* Slot 7: get_IsNumericScalar is the constant FALSE. */
+    uint8_t numeric = 0xFFu;
+    hr = CRT_IBOX_CALL_CAST(ibox_getbool_fn_t, vt, 7)(iface, &numeric);
+    assert(hr == 0);
+    assert(numeric == 0u);
+
+    /* Slots 8..25 (scalar getters) return E_NOTIMPL without touching outputs. */
+    int32_t sentinel = -1;
+    hr = CRT_IBOX_CALL_CAST(ibox_scalar_fn_t, vt, 8)(iface, &sentinel);
+    assert(hr == (int32_t)0x80004001u); /* E_NOTIMPL */
+    assert(sentinel == -1);
+    hr = CRT_IBOX_CALL_CAST(ibox_scalar_fn_t, vt, 25)(iface, &sentinel);
+    assert(hr == (int32_t)0x80004001u);
+    assert(sentinel == -1);
+
+    /* Slots 26..44 (array getters) return E_NOTIMPL and clear the out pointer. */
+    uint32_t array_size = 0xDEADBEEFu;
+    void *array_ptr = (void *)&box;
+    hr = CRT_IBOX_CALL_CAST(ibox_array_fn_t, vt, 26)(iface, &array_size, &array_ptr);
+    assert(hr == (int32_t)0x80004001u);
+    assert(array_size == 0xDEADBEEFu);
+    assert(array_ptr == NULL);
+
+    array_ptr = (void *)&box;
+    hr = CRT_IBOX_CALL_CAST(ibox_array_fn_t, vt, 44)(iface, NULL, &array_ptr);
+    assert(hr == (int32_t)0x80004001u);
+    assert(array_ptr == NULL);
+
+    /* Argument-independent: another box object gets the same vtable and its
+     * forwarding still targets that object's own identity. */
+    mock_ibox_box_t box2;
+    box2.identity_vtbl = &g_mock_ibox_inner_vtbl;
+    box2.property_vtbl = (void *)0x1234;
+    box2.refs = 41;
+    void *iface2 = &box2.property_vtbl;
+    g_ibox_expected_identity = &box2.identity_vtbl;
+    mock_ibox_reset();
+    assert(crt_app_ibox_vtable() == vt);
+    hr = CRT_IBOX_CALL_CAST(ibox_qi_fn_t, vt, 0)(iface2, NULL, NULL);
+    assert(hr == 0);
+    assert(g_ibox_qi_calls == 1);
+    assert(CRT_IBOX_CALL_CAST(ibox_addref_fn_t, vt, 1)(iface2) == 42u);
+
+    /* Defensive: a box with no identity vtable must not crash. */
+    mock_ibox_box_t broken;
+    broken.identity_vtbl = NULL;
+    broken.property_vtbl = vt;
+    void *broken_iface = &broken.property_vtbl;
+    void *broken_out = (void *)&box;
+    hr = CRT_IBOX_CALL_CAST(ibox_qi_fn_t, vt, 0)(broken_iface, NULL, &broken_out);
+    assert(hr == (int32_t)0x80004003u); /* E_POINTER */
+    assert(broken_out == NULL);
+}
+
+static void test_ibox_array_vtable(void) {
+    void *vt = crt_app_ibox_array_vtable();
+    mock_ibox_box_t box;
+    box.identity_vtbl = &g_mock_ibox_inner_vtbl;
+    box.property_vtbl = vt;
+    void *iface = &box.property_vtbl;
+    g_ibox_expected_identity = &box.identity_vtbl;
+
+    /* IUnknown forwarding works the same as for value boxes. */
+    mock_ibox_reset();
+    assert(CRT_IBOX_CALL_CAST(ibox_qi_fn_t, vt, 0)(iface, NULL, NULL) == 0);
+    assert(g_ibox_qi_calls == 1);
+    assert(CRT_IBOX_CALL_CAST(ibox_addref_fn_t, vt, 1)(iface) == 1u);
+    assert(g_ibox_addref_calls == 1);
+
+    /* Slot 6: array PropertyType resolution is intentionally unimplemented
+     * (MS resolves it through the box IIDs); fail cleanly, output untouched. */
+    int32_t property_type = -1;
+    assert(CRT_IBOX_CALL_CAST(ibox_gettype_fn_t, vt, 6)(iface, &property_type) ==
+           (int32_t)0x80004001u);
+    assert(property_type == -1);
+
+    /* Slot 7: an array is never a numeric scalar. */
+    uint8_t numeric = 0xFFu;
+    assert(CRT_IBOX_CALL_CAST(ibox_getbool_fn_t, vt, 7)(iface, &numeric) == 0);
+    assert(numeric == 0u);
+
+    /* Scalar getters are E_NOTIMPL; array getters are E_NOTIMPL + clear out. */
+    int32_t sentinel = -1;
+    assert(CRT_IBOX_CALL_CAST(ibox_scalar_fn_t, vt, 8)(iface, &sentinel) ==
+           (int32_t)0x80004001u);
+    assert(sentinel == -1);
+    uint32_t array_size = 7u;
+    void *array_ptr = iface;
+    assert(CRT_IBOX_CALL_CAST(ibox_array_fn_t, vt, 26)(iface, &array_size, &array_ptr) ==
+           (int32_t)0x80004001u);
+    assert(array_size == 7u);
+    assert(array_ptr == NULL);
+    array_ptr = iface;
+    assert(CRT_IBOX_CALL_CAST(ibox_array_fn_t, vt, 44)(iface, NULL, &array_ptr) ==
+           (int32_t)0x80004001u);
+    assert(array_ptr == NULL);
+}
+
 int main(void) {
     test_diag_stub_trampoline();
     test_cyl_bessel_i();
     test_intptr_and_rect();
     test_aligned_heap_and_object();
     test_wrl_module_activation();
+    test_ibox_value_vtable();
+    test_ibox_array_vtable();
     printf("[PASS] All CRT app forwarder runtime unit tests passed.\n");
     return 0;
 }

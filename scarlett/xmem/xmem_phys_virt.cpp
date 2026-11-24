@@ -109,10 +109,10 @@ scarlett_mem_access_t xmem_protect_to_access(uint32_t protect) noexcept {
     if ((protect & XMEM_PAGE_READWRITE) != 0u) {
         return SCARLETT_MEM_ACCESS_READWRITE;
     }
-    if ((protect & XMEM_PAGE_READONLY) != 0u) {
+    if ((protect & 0xFu) == XMEM_PAGE_READONLY) {
         return SCARLETT_MEM_ACCESS_READONLY;
     }
-    return SCARLETT_MEM_ACCESS_NOACCESS;
+    return SCARLETT_MEM_ACCESS_READWRITE;
 }
 
 scarlett_mem_cache_attr_t xmem_protect_to_cache_attr(uint32_t protect) noexcept {
@@ -465,7 +465,7 @@ scarlett_hresult_t MemoryManager::reserve_va_locked(uint64_t requested_base,
         }
         void *mapped = ::mmap(reinterpret_cast<void *>(requested_base),
                               static_cast<size_t>(size_bytes),
-                              PROT_NONE,
+                              PROT_READ | PROT_WRITE,
                               MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE,
                               -1, 0);
         if (mapped == MAP_FAILED) {
@@ -517,7 +517,7 @@ scarlett_hresult_t MemoryManager::reserve_va_locked(uint64_t requested_base,
 
         void *mapped = ::mmap(reinterpret_cast<void *>(candidate),
                               static_cast<size_t>(size_bytes),
-                              PROT_NONE,
+                              PROT_READ | PROT_WRITE,
                               MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE,
                               -1, 0);
         if (mapped != MAP_FAILED && reinterpret_cast<uint64_t>(mapped) == candidate) {
@@ -555,8 +555,10 @@ MemoryManager::reserve_or_commit_range(scarlett_xmem_reserve_params_t &params) {
         (params.flags & XMEM_MEM_4MB_PAGES) == 0u) {
         /* 0x80000000 is XMEM_MEM_4MB_PAGES in alloc_type; protect defaults below */
     }
-    const bool do_reserve = (alloc_flags & XMEM_MEM_RESERVE) != 0u || alloc_flags == 0u;
     const bool do_commit = (alloc_flags & XMEM_MEM_COMMIT) != 0u;
+    const bool do_reserve = (alloc_flags & XMEM_MEM_RESERVE) != 0u ||
+                            alloc_flags == 0u ||
+                            (do_commit && params.requested_base == 0u);
     if (protect_bits == 0u) {
         protect_bits = do_commit ? XMEM_PAGE_READWRITE : XMEM_PAGE_NOACCESS;
     }
@@ -565,7 +567,8 @@ MemoryManager::reserve_or_commit_range(scarlett_xmem_reserve_params_t &params) {
     if ((alloc_flags & XMEM_MEM_4MB_PAGES) != 0u) {
         granularity = XMEM_PAGE_SIZE_4MB;
     } else if ((alloc_flags & XMEM_MEM_LARGE_PAGES) != 0u) {
-        granularity = XMEM_PAGE_SIZE_2MB;
+        /* Xbox Scarlett MEM_LARGE_PAGES (0x20000000) uses 64 KiB page granularity. */
+        granularity = XMEM_PAGE_SIZE_64KB;
     }
 
     const uint64_t aligned_size = align_up_u64(params.size_bytes, granularity);
@@ -590,6 +593,9 @@ MemoryManager::reserve_or_commit_range(scarlett_xmem_reserve_params_t &params) {
                 params.out_status = SCARLETT_ERR_XMEM_OUT_OF_RANGE;
                 return params.out_status;
             }
+        } else if ((alloc_flags & XMEM_MEM_PHYSICAL) != 0u ||
+                   (protect_bits & (XMEM_PAGE_GPU_COHERENT | XMEM_PAGE_WRITECOMBINE)) != 0u) {
+            region = SCARLETT_MEM_REGION_GRAPHICS;
         } else {
             region = SCARLETT_MEM_REGION_TITLE;
         }

@@ -54,9 +54,25 @@ typedef uint64_t PFEntityHandle;
  * ============================================================================ */
 
 SCARLETT_XGR_API scarlett_hresult_t SCARLETT_XGR_WIN64_ABI InitializeApiImpl(
-    uint64_t api_id,
-    const scarlett_guid_t *riid,
-    void **out_impl);
+    uint64_t title_version_packed,
+    uint64_t build_hash);
+
+SCARLETT_XGR_API scarlett_hresult_t SCARLETT_XGR_WIN64_ABI InitializeApiImplEx(
+    uint64_t title_version_packed,
+    uint64_t build_hash,
+    uint32_t flags);
+
+SCARLETT_XGR_API scarlett_hresult_t SCARLETT_XGR_WIN64_ABI InitializeApiImplEx2(
+    uint64_t title_version_packed,
+    uint64_t build_hash,
+    uint32_t flags,
+    void *reserved);
+
+SCARLETT_XGR_API void SCARLETT_XGR_WIN64_ABI UninitializeApiImpl(void);
+
+SCARLETT_XGR_API void SCARLETT_XGR_WIN64_ABI XErrorReport(
+    uint32_t hr,
+    const char *msg);
 
 SCARLETT_XGR_API scarlett_hresult_t SCARLETT_XGR_WIN64_ABI QueryApiImpl(
     uint64_t api_id,

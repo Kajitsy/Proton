@@ -9,3 +9,6 @@ EXPORTS
     AcpHalReleaseShapeContexts
     AcpHalDecodeXma2
     AcpHalSubmitFlowgraph
+    ApuIsVirtualAddressValid
+    ApuMapApuAddress
+    ApuMapVirtualAddress

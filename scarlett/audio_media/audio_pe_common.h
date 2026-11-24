@@ -8,6 +8,7 @@
 #ifndef SCARLETT_AUDIO_PE_COMMON_H
 #define SCARLETT_AUDIO_PE_COMMON_H
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -85,6 +86,278 @@ static inline int32_t audio_pe_unix_call(uint32_t opcode, void *params) {
 
 #endif
 
+static inline void audio_pe_format_va(
+    char *dst,
+    size_t cap,
+    const char *fmt,
+    va_list ap) {
+    if (dst == NULL || cap == 0u) {
+        return;
+    }
+    if (fmt == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+
+    size_t out = 0u;
+    for (size_t i = 0u; fmt[i] != '\0' && out + 1u < cap; ++i) {
+        if (fmt[i] != '%' || fmt[i + 1u] == '\0') {
+            dst[out++] = fmt[i];
+            continue;
+        }
+        ++i;
+        bool is_ll = false;
+        if (fmt[i] == 'l' && fmt[i + 1u] == 'l') {
+            is_ll = true;
+            i += 2u;
+        } else if (fmt[i] == 'l') {
+            i += 1u;
+        }
+        char spec = fmt[i];
+        if (spec == '\0') {
+            break;
+        }
+        if (spec == '%') {
+            dst[out++] = '%';
+        } else if (spec == 's') {
+            const char *s = va_arg(ap, const char *);
+            if (s == NULL) {
+                s = "(null)";
+            }
+            for (size_t j = 0u; s[j] != '\0' && out + 1u < cap; ++j) {
+                dst[out++] = s[j];
+            }
+        } else if (spec == 'd' || spec == 'i') {
+            int64_t val = is_ll ? va_arg(ap, int64_t) : (int64_t)va_arg(ap, int);
+            uint64_t uval = 0u;
+            if (val < 0) {
+                if (out + 1u < cap) {
+                    dst[out++] = '-';
+                }
+                uval = (uint64_t)(-(val + 1)) + UINT64_C(1);
+            } else {
+                uval = (uint64_t)val;
+            }
+            char tmp[24];
+            size_t t = 0u;
+            do {
+                tmp[t++] = (char)('0' + (uval % UINT64_C(10)));
+                uval /= UINT64_C(10);
+            } while (uval != 0u && t < sizeof(tmp));
+            while (t > 0u && out + 1u < cap) {
+                dst[out++] = tmp[--t];
+            }
+        } else if (spec == 'u' || spec == 'x' || spec == 'X') {
+            uint64_t uval = is_ll ? va_arg(ap, uint64_t) : (uint64_t)va_arg(ap, unsigned int);
+            uint64_t base = (spec == 'u') ? UINT64_C(10) : UINT64_C(16);
+            const char *digits = (spec == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+            char tmp[24];
+            size_t t = 0u;
+            do {
+                tmp[t++] = digits[uval % base];
+                uval /= base;
+            } while (uval != 0u && t < sizeof(tmp));
+            while (t > 0u && out + 1u < cap) {
+                dst[out++] = tmp[--t];
+            }
+        } else {
+            if (out + 1u < cap) {
+                dst[out++] = '%';
+            }
+            if (out + 1u < cap) {
+                dst[out++] = spec;
+            }
+        }
+    }
+    dst[out] = '\0';
+}
+
+#if defined(_WIN32) || defined(__MINGW32__)
+
+typedef void (SCARLETT_WIN64_API *scarlett_audio_ods_fn_t)(const char *lpOutputString);
+
+typedef struct audio_pe_list_entry_s {
+    struct audio_pe_list_entry_s *Flink;
+    struct audio_pe_list_entry_s *Blink;
+} audio_pe_list_entry_t;
+
+typedef struct audio_pe_unicode_string_s {
+    uint16_t Length;
+    uint16_t MaximumLength;
+    uint32_t Reserved;
+    const uint16_t *Buffer;
+} audio_pe_unicode_string_t;
+
+static scarlett_audio_ods_fn_t g_audio_pfn_OutputDebugStringA = NULL;
+static uint32_t g_audio_ods_resolved = 0u;
+
+static inline bool audio_pe_ascii_ieq(const char *a, const char *b) {
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+    while (*a != '\0' && *b != '\0') {
+        char ca = *a++;
+        char cb = *b++;
+        if (ca >= 'A' && ca <= 'Z') {
+            ca = (char)(ca + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (ca != cb) {
+            return false;
+        }
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static inline bool audio_pe_utf16_ascii_ieq(const uint16_t *w, uint16_t byte_len, const char *ascii) {
+    uint32_t wchar_len = (uint32_t)(byte_len / 2u);
+    uint32_t i = 0u;
+    while (i < wchar_len && ascii[i] != '\0') {
+        uint16_t wc = w[i];
+        char cb = ascii[i];
+        if (wc >= 'A' && wc <= 'Z') {
+            wc = (uint16_t)(wc + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (wc != (uint16_t)(uint8_t)cb) {
+            return false;
+        }
+        ++i;
+    }
+    return i == wchar_len && ascii[i] == '\0';
+}
+
+static inline void *audio_pe_find_export(const uint8_t *base, const char *proc_name) {
+    if (base == NULL || proc_name == NULL) {
+        return NULL;
+    }
+    if (base[0] != 'M' || base[1] != 'Z') {
+        return NULL;
+    }
+    uint32_t pe_off = *(const uint32_t *)(base + 0x3Cu);
+    const uint8_t *nt = base + pe_off;
+    if (nt[0] != 'P' || nt[1] != 'E' || nt[2] != 0 || nt[3] != 0) {
+        return NULL;
+    }
+    uint16_t magic = *(const uint16_t *)(nt + 0x18u);
+    if (magic != 0x020Bu) {
+        return NULL;
+    }
+    uint32_t exp_rva = *(const uint32_t *)(nt + 0x88u);
+    uint32_t exp_size = *(const uint32_t *)(nt + 0x8Cu);
+    if (exp_rva == 0u || exp_size == 0u) {
+        return NULL;
+    }
+
+    const uint8_t *exp_dir = base + exp_rva;
+    uint32_t num_names = *(const uint32_t *)(exp_dir + 0x18u);
+    uint32_t addr_funcs_rva = *(const uint32_t *)(exp_dir + 0x1Cu);
+    uint32_t addr_names_rva = *(const uint32_t *)(exp_dir + 0x20u);
+    uint32_t addr_ords_rva = *(const uint32_t *)(exp_dir + 0x24u);
+
+    const uint32_t *names = (const uint32_t *)(base + addr_names_rva);
+    const uint16_t *ords = (const uint16_t *)(base + addr_ords_rva);
+    const uint32_t *funcs = (const uint32_t *)(base + addr_funcs_rva);
+
+    for (uint32_t i = 0u; i < num_names; ++i) {
+        const char *name = (const char *)(base + names[i]);
+        if (audio_pe_ascii_ieq(name, proc_name)) {
+            uint32_t fn_rva = funcs[ords[i]];
+            if (fn_rva >= exp_rva && fn_rva < exp_rva + exp_size) {
+                return NULL;
+            }
+            return (void *)(uintptr_t)(base + fn_rva);
+        }
+    }
+    return NULL;
+}
+
+static inline void audio_pe_resolve_ods(void) {
+    if (__atomic_load_n(&g_audio_ods_resolved, __ATOMIC_ACQUIRE) != 0u) {
+        return;
+    }
+    const uint8_t *peb = NULL;
+    __asm__ volatile("movq %%gs:0x60, %0" : "=r"(peb));
+    if (peb == NULL) {
+        return;
+    }
+    const uint8_t *ldr = *(const uint8_t *const *)(peb + 0x18u);
+    if (ldr == NULL) {
+        return;
+    }
+    const audio_pe_list_entry_t *head = (const audio_pe_list_entry_t *)(ldr + 0x20u);
+    const uint8_t *k32_base = NULL;
+    const uint8_t *kbase_base = NULL;
+
+    for (const audio_pe_list_entry_t *cur = head->Flink;
+         cur != NULL && cur != head;
+         cur = cur->Flink) {
+        const uint8_t *entry = (const uint8_t *)cur;
+        const uint8_t *dll_base = *(const uint8_t *const *)(entry + 0x20u);
+        const audio_pe_unicode_string_t *base_name =
+            (const audio_pe_unicode_string_t *)(entry + 0x48u);
+        if (dll_base != NULL && base_name->Buffer != NULL) {
+            if (audio_pe_utf16_ascii_ieq(base_name->Buffer, base_name->Length, "kernel32.dll")) {
+                k32_base = dll_base;
+            } else if (audio_pe_utf16_ascii_ieq(base_name->Buffer, base_name->Length, "kernelbase.dll")) {
+                kbase_base = dll_base;
+            }
+        }
+    }
+
+    void *ods = audio_pe_find_export(k32_base, "OutputDebugStringA");
+    if (ods == NULL) {
+        ods = audio_pe_find_export(kbase_base, "OutputDebugStringA");
+    }
+    __atomic_store_n(&g_audio_pfn_OutputDebugStringA, (scarlett_audio_ods_fn_t)ods, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_audio_ods_resolved, 1u, __ATOMIC_RELEASE);
+}
+
+static inline void audio_pe_ods_printf(const char *fmt, ...) {
+    audio_pe_resolve_ods();
+    scarlett_audio_ods_fn_t ods = __atomic_load_n(&g_audio_pfn_OutputDebugStringA, __ATOMIC_ACQUIRE);
+    if (ods == NULL || fmt == NULL) {
+        return;
+    }
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    audio_pe_format_va(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    ods(buf);
+}
+
+#else
+
+static inline void audio_pe_ods_printf(const char *fmt, ...) {
+    (void)fmt;
+}
+
+#endif
+
+static inline void audio_pe_log_stub_call(
+    const char *dll_name,
+    const char *sym_name,
+    uint64_t return_address,
+    uint64_t rcx,
+    uint64_t rdx,
+    uint64_t r8,
+    uint64_t r9) {
+    audio_pe_ods_printf(
+        "[scarlett-stub] dll=%s sym=%s ret=0x%llx rcx=0x%llx rdx=0x%llx r8=0x%llx r9=0x%llx\n",
+        dll_name != NULL ? dll_name : "unknown.dll",
+        sym_name != NULL ? sym_name : "unknown_symbol",
+        (unsigned long long)return_address,
+        (unsigned long long)rcx,
+        (unsigned long long)rdx,
+        (unsigned long long)r8,
+        (unsigned long long)r9);
+}
+
 static inline scarlett_hresult_t audio_pe_stub_dispatch_local(
     const scarlett_stub_descriptor_t *desc,
     uint64_t return_address,
@@ -121,6 +394,15 @@ static inline scarlett_hresult_t audio_pe_stub_dispatch_local(
     params.ctx.rdx = rdx;
     params.ctx.r8 = r8;
     params.ctx.r9 = r9;
+
+    audio_pe_log_stub_call(
+        params.ctx.dll_name,
+        params.ctx.symbol_name,
+        return_address,
+        rcx,
+        rdx,
+        r8,
+        r9);
 
     (void)audio_pe_unix_call(SCARLETT_AUDIO_UNIX_EX_REPORT_STUB, &params);
     if (params.out_action == (uint32_t)SCARLETT_STUB_ACTION_LOG_AND_ABORT) {

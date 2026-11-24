@@ -181,6 +181,36 @@ public:
                                           uint32_t dst_capacity_bytes,
                                           uint32_t& out_decoded_bytes) noexcept;
 
+    /* XAPU Session & Hardware Queue Operations */
+    scarlett_hresult_t xapu_connect(uint64_t& out_session_handle) noexcept;
+    scarlett_hresult_t xapu_disconnect(uint64_t session_handle) noexcept;
+    scarlett_hresult_t xapu_enqueue(uint64_t session_handle,
+                                   const void* cmd_data,
+                                   uint32_t cmd_size,
+                                   uint32_t flags) noexcept;
+    scarlett_hresult_t xapu_get_result_count(uint64_t session_handle,
+                                            uint32_t queue_idx,
+                                            uint32_t& out_count) noexcept;
+    scarlett_hresult_t xapu_dequeue_result(uint64_t session_handle,
+                                          void* out_result_data,
+                                          uint32_t result_cap) noexcept;
+
+    /* XAPU Codec Decoder Operations (Opus 0x704F, ADAT, XMA2) */
+    scarlett_hresult_t xapu_create_decoder(uint32_t codec_id,
+                                          uint32_t sample_rate,
+                                          uint32_t channels,
+                                          const void* extradata,
+                                          uint32_t extra_size,
+                                          uint64_t& out_dec_handle) noexcept;
+    scarlett_hresult_t xapu_destroy_decoder(uint64_t dec_handle) noexcept;
+    scarlett_hresult_t xapu_process(uint64_t dec_handle,
+                                   const uint8_t* in_data,
+                                   uint32_t in_size,
+                                   uint8_t* out_pcm,
+                                   uint32_t out_cap,
+                                   uint32_t& out_written) noexcept;
+    scarlett_hresult_t xapu_flush(uint64_t dec_handle) noexcept;
+
 private:
     struct ApuBlock {
         std::vector<uint8_t> storage;
@@ -194,6 +224,19 @@ private:
         std::unique_ptr<Xma2StreamDecoder> xma2;
     };
 
+    struct XapuSession {
+        uint64_t handle = 0;
+        std::vector<std::vector<uint8_t>> completed_results;
+    };
+
+    struct XapuDecoderEntry {
+        uint32_t codec_id = 0x704F;
+        uint32_t sample_rate = 48000;
+        uint32_t channels = 2;
+        std::unique_ptr<OpusStreamDecoder> opus;
+        std::unique_ptr<Xma2StreamDecoder> xma2;
+    };
+
     std::mutex mutex_;
     uint64_t heap_limit_bytes_ = UINT64_C(256) * 1024u * 1024u;
     uint64_t heap_used_bytes_ = 0;
@@ -203,6 +246,11 @@ private:
     std::unordered_map<uint64_t, uint32_t> hals_;
     uint64_t next_ctx_handle_ = 1;
     std::unordered_map<uint64_t, ShapeContextGroup> shape_groups_;
+
+    uint64_t next_session_handle_ = 0xAP0001;
+    std::unordered_map<uint64_t, XapuSession> xapu_sessions_;
+    uint64_t next_decoder_handle_ = 0xDE0001;
+    std::unordered_map<uint64_t, XapuDecoderEntry> xapu_decoders_;
 };
 
 } // namespace scarlett::audio_media

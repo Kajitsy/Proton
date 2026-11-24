@@ -12,9 +12,13 @@ EXPORTS
     XMemVirtualQuery
     XMemGetWorkingSetStatistics
     XMemMakeTag
+    XMemAlloc
     XMemAllocDefault
+    XMemFree
     XMemFreeDefault
     XMemSizeDefault
+    XMemIsToolsMemAvailable
+    XMemTransferMemory
     XMemUmaProbe
     XMemUmaExport
     XMemUmaFlushBeforeSubmit

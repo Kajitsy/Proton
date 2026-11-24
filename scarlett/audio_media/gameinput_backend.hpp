@@ -39,6 +39,7 @@ public:
 
     scarlett_hresult_t push_reading(uint64_t handle,
                                     const scarlett_input_reading_record_t& rec) noexcept;
+    void poll_live_input(uint64_t handle) noexcept;
     scarlett_hresult_t get_current_reading(uint64_t handle,
                                            uint32_t input_kind,
                                            uint64_t device_id,

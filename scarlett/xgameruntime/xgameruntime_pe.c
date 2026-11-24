@@ -353,9 +353,21 @@ static scarlett_hresult_t SCARLETT_XGR_WIN64_ABI plat_xthread_set_ts(
     }
 
 DEFINE_VTABLE_STUB_SLOT(sys, 11, SCARLETT_STUB_FLAG_XDL_VTABLE | SCARLETT_STUB_FLAG_REMOVED_IN_ABI, "IScarlettSystemDispatch::LegacyTelemetryFlush")
-DEFINE_VTABLE_STUB_SLOT(sys, 12, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::RegisterCrashDumpCallback")
-DEFINE_VTABLE_STUB_SLOT(sys, 13, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_13")
-DEFINE_VTABLE_STUB_SLOT(sys, 14, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_14")
+static scarlett_hresult_t SCARLETT_XGR_WIN64_ABI vtbl_sys_slot12(
+    uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a0; (void)a1; (void)a2; (void)a3;
+    return SCARLETT_OK;
+}
+static scarlett_hresult_t SCARLETT_XGR_WIN64_ABI vtbl_sys_slot13(
+    uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a0; (void)a1; (void)a2; (void)a3;
+    return SCARLETT_OK;
+}
+static scarlett_hresult_t SCARLETT_XGR_WIN64_ABI vtbl_sys_slot14(
+    uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a0; (void)a1; (void)a2; (void)a3;
+    return SCARLETT_OK;
+}
 DEFINE_VTABLE_STUB_SLOT(sys, 15, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_15")
 DEFINE_VTABLE_STUB_SLOT(sys, 16, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_16")
 DEFINE_VTABLE_STUB_SLOT(sys, 17, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_17")
@@ -366,11 +378,19 @@ DEFINE_VTABLE_STUB_SLOT(sys, 21, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystem
 DEFINE_VTABLE_STUB_SLOT(sys, 22, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_22")
 DEFINE_VTABLE_STUB_SLOT(sys, 23, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_23")
 DEFINE_VTABLE_STUB_SLOT(sys, 24, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_24")
-DEFINE_VTABLE_STUB_SLOT(sys, 25, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_25")
+static scarlett_hresult_t SCARLETT_XGR_WIN64_ABI vtbl_sys_slot25(
+    uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a0; (void)a1; (void)a2; (void)a3;
+    return SCARLETT_OK;
+}
 DEFINE_VTABLE_STUB_SLOT(sys, 26, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_26")
 DEFINE_VTABLE_STUB_SLOT(sys, 27, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_27")
 DEFINE_VTABLE_STUB_SLOT(sys, 28, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_28")
-DEFINE_VTABLE_STUB_SLOT(sys, 29, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_29")
+static scarlett_hresult_t SCARLETT_XGR_WIN64_ABI vtbl_sys_slot29(
+    uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
+    (void)a0; (void)a1; (void)a2; (void)a3;
+    return SCARLETT_OK;
+}
 DEFINE_VTABLE_STUB_SLOT(sys, 30, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSlot_30")
 DEFINE_VTABLE_STUB_SLOT(sys, 31, SCARLETT_STUB_FLAG_XDL_VTABLE, "IScarlettSystemDispatch::ReservedSystemTail")
 
@@ -497,17 +517,44 @@ SCARLETT_XGR_API scarlett_hresult_t SCARLETT_XGR_WIN64_ABI QueryApiImpl(
 }
 
 SCARLETT_XGR_API scarlett_hresult_t SCARLETT_XGR_WIN64_ABI InitializeApiImpl(
-    uint64_t api_id,
-    const scarlett_guid_t *riid,
-    void **out_impl) {
-    scarlett_hresult_t hr = XGameRuntimeInitialize();
-    if (scarlett_failed(hr)) {
-        return hr;
-    }
-    if (riid != NULL || out_impl != NULL) {
-        return QueryApiImpl(api_id, riid, out_impl);
-    }
-    return SCARLETT_OK;
+    uint64_t title_version_packed,
+    uint64_t build_hash) {
+    (void)title_version_packed;
+    (void)build_hash;
+    return XGameRuntimeInitialize();
+}
+
+SCARLETT_XGR_API scarlett_hresult_t SCARLETT_XGR_WIN64_ABI InitializeApiImplEx(
+    uint64_t title_version_packed,
+    uint64_t build_hash,
+    uint32_t flags) {
+    (void)title_version_packed;
+    (void)build_hash;
+    (void)flags;
+    return XGameRuntimeInitialize();
+}
+
+SCARLETT_XGR_API scarlett_hresult_t SCARLETT_XGR_WIN64_ABI InitializeApiImplEx2(
+    uint64_t title_version_packed,
+    uint64_t build_hash,
+    uint32_t flags,
+    void *reserved) {
+    (void)title_version_packed;
+    (void)build_hash;
+    (void)flags;
+    (void)reserved;
+    return XGameRuntimeInitialize();
+}
+
+SCARLETT_XGR_API void SCARLETT_XGR_WIN64_ABI UninitializeApiImpl(void) {
+    XGameRuntimeUninitialize();
+}
+
+SCARLETT_XGR_API void SCARLETT_XGR_WIN64_ABI XErrorReport(
+    uint32_t hr,
+    const char *msg) {
+    (void)hr;
+    (void)msg;
 }
 
 /* ============================================================================
@@ -2473,10 +2520,588 @@ SCARLETT_XGR_API scarlett_hresult_t SCARLETT_XGR_CALL PFMatchmakingCreateMatchma
 }
 
 #if defined(_WIN32)
+typedef struct scarlett_win_exception_record_s {
+    uint32_t ExceptionCode;
+    uint32_t ExceptionFlags;
+    struct scarlett_win_exception_record_s *ExceptionRecord;
+    void *ExceptionAddress;
+    uint32_t NumberParameters;
+    uintptr_t ExceptionInformation[15];
+} scarlett_win_exception_record_t;
+
+typedef struct scarlett_win_context_s {
+    uint64_t P1Home, P2Home, P3Home, P4Home, P5Home, P6Home;
+    uint32_t ContextFlags, MxCsr;
+    uint16_t SegCs, SegDs, SegEs, SegFs, SegGs, SegSs;
+    uint32_t EFlags;
+    uint64_t Dr0, Dr1, Dr2, Dr3, Dr6, Dr7;
+    uint64_t Rax, Rcx, Rdx, Rbx, Rsp, Rbp, Rsi, Rdi;
+    uint64_t R8, R9, R10, R11, R12, R13, R14, R15;
+    uint64_t Rip;
+} scarlett_win_context_t;
+
+typedef struct scarlett_win_exception_pointers_s {
+    scarlett_win_exception_record_t *ExceptionRecord;
+    scarlett_win_context_t *ContextRecord;
+} scarlett_win_exception_pointers_t;
+
+typedef int32_t (__stdcall *scarlett_pfn_veh_t)(scarlett_win_exception_pointers_t *ep);
+typedef int32_t (__stdcall *scarlett_pfn_virtual_protect_t)(
+    void *lpAddress, size_t dwSize, uint32_t flNewProtect, uint32_t *lpflOldProtect);
+typedef void * (__stdcall *scarlett_pfn_virtual_alloc_t)(
+    void *lpAddress, size_t dwSize, uint32_t flAllocationType, uint32_t flProtect);
+__declspec(dllimport) void * __stdcall AddVectoredExceptionHandler(uint32_t First, scarlett_pfn_veh_t Handler);
+__declspec(dllimport) void __stdcall OutputDebugStringA(const char *lpOutputString);
+
+typedef struct scarlett_veh_list_entry_s {
+    struct scarlett_veh_list_entry_s *Flink;
+    struct scarlett_veh_list_entry_s *Blink;
+} scarlett_veh_list_entry_t;
+
+typedef struct scarlett_veh_unicode_string_s {
+    uint16_t Length;
+    uint16_t MaximumLength;
+    uint32_t Reserved;
+    const uint16_t *Buffer;
+} scarlett_veh_unicode_string_t;
+
+static scarlett_pfn_virtual_protect_t g_veh_virtual_protect = NULL;
+static scarlett_pfn_virtual_alloc_t g_veh_virtual_alloc = NULL;
+static uint32_t g_veh_vp_resolved = 0u;
+static volatile uint32_t g_veh_patch_lock = 0u;
+static uint8_t *g_clzero_tramp_page = NULL;
+static size_t g_clzero_tramp_used = 0u;
+static uint8_t *g_clzero_tramp_stubs[16] = { NULL };
+
+static bool xgr_veh_ascii_ieq(const char *a, const char *b) {
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+    while (*a != '\0' && *b != '\0') {
+        char ca = *a++;
+        char cb = *b++;
+        if (ca >= 'A' && ca <= 'Z') {
+            ca = (char)(ca + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (ca != cb) {
+            return false;
+        }
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static bool xgr_veh_utf16_ascii_ieq(const uint16_t *w, uint16_t byte_len, const char *ascii) {
+    uint32_t wchar_len = (uint32_t)(byte_len / 2u);
+    uint32_t i = 0u;
+    while (i < wchar_len && ascii[i] != '\0') {
+        uint16_t wc = w[i];
+        char cb = ascii[i];
+        if (wc >= 'A' && wc <= 'Z') {
+            wc = (uint16_t)(wc + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (wc != (uint16_t)(uint8_t)cb) {
+            return false;
+        }
+        ++i;
+    }
+    return i == wchar_len && ascii[i] == '\0';
+}
+
+static void *xgr_veh_find_export(const uint8_t *base, const char *proc_name) {
+    if (base == NULL || proc_name == NULL) {
+        return NULL;
+    }
+    if (base[0] != 'M' || base[1] != 'Z') {
+        return NULL;
+    }
+    uint32_t pe_off = *(const uint32_t *)(base + 0x3Cu);
+    const uint8_t *nt = base + pe_off;
+    if (nt[0] != 'P' || nt[1] != 'E' || nt[2] != 0 || nt[3] != 0) {
+        return NULL;
+    }
+    if (*(const uint16_t *)(nt + 0x18u) != 0x020Bu) {
+        return NULL;
+    }
+    uint32_t exp_rva = *(const uint32_t *)(nt + 0x88u);
+    uint32_t exp_size = *(const uint32_t *)(nt + 0x8Cu);
+    if (exp_rva == 0u || exp_size == 0u) {
+        return NULL;
+    }
+
+    const uint8_t *exp_dir = base + exp_rva;
+    uint32_t num_names = *(const uint32_t *)(exp_dir + 0x18u);
+    const uint32_t *funcs = (const uint32_t *)(base + *(const uint32_t *)(exp_dir + 0x1Cu));
+    const uint32_t *names = (const uint32_t *)(base + *(const uint32_t *)(exp_dir + 0x20u));
+    const uint16_t *ords = (const uint16_t *)(base + *(const uint32_t *)(exp_dir + 0x24u));
+
+    for (uint32_t i = 0u; i < num_names; ++i) {
+        const char *name = (const char *)(base + names[i]);
+        if (xgr_veh_ascii_ieq(name, proc_name)) {
+            uint32_t fn_rva = funcs[ords[i]];
+            if (fn_rva >= exp_rva && fn_rva < exp_rva + exp_size) {
+                return NULL; /* Forwarder */
+            }
+            return (void *)(uintptr_t)(base + fn_rva);
+        }
+    }
+    return NULL;
+}
+
+static scarlett_pfn_virtual_protect_t xgr_veh_get_virtual_protect(void) {
+    if (__atomic_load_n(&g_veh_vp_resolved, __ATOMIC_ACQUIRE) != 0u) {
+        return g_veh_virtual_protect;
+    }
+    const uint8_t *peb = NULL;
+    __asm__ volatile("movq %%gs:0x60, %0" : "=r"(peb));
+    if (peb != NULL) {
+        const uint8_t *ldr = *(const uint8_t *const *)(peb + 0x18u);
+        if (ldr != NULL) {
+            const scarlett_veh_list_entry_t *head = (const scarlett_veh_list_entry_t *)(ldr + 0x20u);
+            const uint8_t *k32_base = NULL;
+            const uint8_t *kbase_base = NULL;
+            for (const scarlett_veh_list_entry_t *cur = head->Flink;
+                 cur != NULL && cur != head;
+                 cur = cur->Flink) {
+                const uint8_t *entry = (const uint8_t *)cur;
+                const uint8_t *dll_base = *(const uint8_t *const *)(entry + 0x20u);
+                const scarlett_veh_unicode_string_t *base_name =
+                    (const scarlett_veh_unicode_string_t *)(entry + 0x48u);
+                if (dll_base != NULL && base_name->Buffer != NULL) {
+                    if (xgr_veh_utf16_ascii_ieq(base_name->Buffer, base_name->Length, "kernel32.dll")) {
+                        k32_base = dll_base;
+                    } else if (xgr_veh_utf16_ascii_ieq(base_name->Buffer, base_name->Length, "kernelbase.dll")) {
+                        kbase_base = dll_base;
+                    }
+                }
+            }
+            void *vp = xgr_veh_find_export(k32_base, "VirtualProtect");
+            if (vp == NULL) {
+                vp = xgr_veh_find_export(kbase_base, "VirtualProtect");
+            }
+            void *va = xgr_veh_find_export(k32_base, "VirtualAlloc");
+            if (va == NULL) {
+                va = xgr_veh_find_export(kbase_base, "VirtualAlloc");
+            }
+            g_veh_virtual_protect = (scarlett_pfn_virtual_protect_t)vp;
+            g_veh_virtual_alloc = (scarlett_pfn_virtual_alloc_t)va;
+        }
+    }
+    __atomic_store_n(&g_veh_vp_resolved, 1u, __ATOMIC_RELEASE);
+    return g_veh_virtual_protect;
+}
+
+static size_t xgr_veh_append_cstr(char *buf, size_t cap, size_t pos, const char *s) {
+    while (*s != '\0' && pos + 1u < cap) {
+        buf[pos++] = *s++;
+    }
+    buf[pos] = '\0';
+    return pos;
+}
+
+static size_t xgr_veh_append_hex64(char *buf, size_t cap, size_t pos, uint64_t val) {
+    static const char hex[] = "0123456789abcdef";
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        if (pos + 1u < cap) {
+            buf[pos++] = hex[(val >> shift) & 0xFu];
+        }
+    }
+    buf[pos] = '\0';
+    return pos;
+}
+
+static size_t xgr_veh_append_u32(char *buf, size_t cap, size_t pos, uint32_t val) {
+    char tmp[12];
+    uint32_t n = 0u;
+    if (val == 0u) {
+        tmp[n++] = '0';
+    } else {
+        while (val > 0u && n < sizeof(tmp)) {
+            tmp[n++] = (char)('0' + (val % 10u));
+            val /= 10u;
+        }
+    }
+    while (n > 0u && pos + 1u < cap) {
+        buf[pos++] = tmp[--n];
+    }
+    buf[pos] = '\0';
+    return pos;
+}
+
+static void xgr_veh_log_patched(const char *insn_name, uint64_t rip, uint32_t len) {
+    char msg[128];
+    size_t pos = 0u;
+    pos = xgr_veh_append_cstr(msg, sizeof(msg), pos, "[scarlett-veh] Patched ");
+    pos = xgr_veh_append_cstr(msg, sizeof(msg), pos, insn_name);
+    pos = xgr_veh_append_cstr(msg, sizeof(msg), pos, " at 0x");
+    pos = xgr_veh_append_hex64(msg, sizeof(msg), pos, rip);
+    pos = xgr_veh_append_cstr(msg, sizeof(msg), pos, " (len=");
+    pos = xgr_veh_append_u32(msg, sizeof(msg), pos, len);
+    xgr_veh_append_cstr(msg, sizeof(msg), pos, ")\n");
+    OutputDebugStringA(msg);
+}
+
+static uint64_t xgr_veh_get_reg64(const scarlett_win_context_t *ctx, uint32_t reg_idx) {
+    switch (reg_idx & 0xFu) {
+        case 0u: return ctx->Rax;
+        case 1u: return ctx->Rcx;
+        case 2u: return ctx->Rdx;
+        case 3u: return ctx->Rbx;
+        case 4u: return ctx->Rsp;
+        case 5u: return ctx->Rbp;
+        case 6u: return ctx->Rsi;
+        case 7u: return ctx->Rdi;
+        case 8u: return ctx->R8;
+        case 9u: return ctx->R9;
+        case 10u: return ctx->R10;
+        case 11u: return ctx->R11;
+        case 12u: return ctx->R12;
+        case 13u: return ctx->R13;
+        case 14u: return ctx->R14;
+        case 15u: return ctx->R15;
+        default: return 0u;
+    }
+}
+
+static void xgr_veh_zero_reg64(scarlett_win_context_t *ctx, uint32_t reg_idx) {
+    switch (reg_idx & 0xFu) {
+        case 0u: ctx->Rax = 0u; break;
+        case 1u: ctx->Rcx = 0u; break;
+        case 2u: ctx->Rdx = 0u; break;
+        case 3u: ctx->Rbx = 0u; break;
+        case 4u: ctx->Rsp = 0u; break;
+        case 5u: ctx->Rbp = 0u; break;
+        case 6u: ctx->Rsi = 0u; break;
+        case 7u: ctx->Rdi = 0u; break;
+        case 8u: ctx->R8 = 0u; break;
+        case 9u: ctx->R9 = 0u; break;
+        case 10u: ctx->R10 = 0u; break;
+        case 11u: ctx->R11 = 0u; break;
+        case 12u: ctx->R12 = 0u; break;
+        case 13u: ctx->R13 = 0u; break;
+        case 14u: ctx->R14 = 0u; break;
+        case 15u: ctx->R15 = 0u; break;
+        default: break;
+    }
+}
+
+static int32_t xgr_veh_hotpatch_site(
+    scarlett_win_context_t *ctx,
+    const char *insn_name,
+    uint32_t len,
+    uint8_t expected_b0,
+    const uint8_t *patch_bytes) {
+    uint64_t rip = ctx->Rip;
+    const volatile uint8_t *code = (const volatile uint8_t *)(uintptr_t)rip;
+
+    while (__atomic_exchange_n(&g_veh_patch_lock, 1u, __ATOMIC_ACQUIRE) != 0u) {
+        __asm__ volatile("pause");
+    }
+    if (*code != expected_b0) {
+        /* Another thread already patched this site */
+        __atomic_store_n(&g_veh_patch_lock, 0u, __ATOMIC_RELEASE);
+        return -1; /* EXCEPTION_CONTINUE_EXECUTION */
+    }
+    scarlett_pfn_virtual_protect_t vp = xgr_veh_get_virtual_protect();
+    uint32_t old_prot = 0u;
+    void *patch_addr = (void *)(uintptr_t)rip;
+    if (vp != NULL && vp(patch_addr, (size_t)len, 0x40u /* PAGE_EXECUTE_READWRITE */, &old_prot) != 0) {
+        volatile uint8_t *dst = (volatile uint8_t *)(uintptr_t)rip;
+        for (uint32_t i = 0u; i < len; ++i) {
+            dst[i] = (patch_bytes != NULL) ? patch_bytes[i] : 0x90u;
+        }
+        __builtin_ia32_sfence();
+        uint32_t dummy_prot = 0u;
+        (void)vp(patch_addr, (size_t)len, old_prot, &dummy_prot);
+        __atomic_store_n(&g_veh_patch_lock, 0u, __ATOMIC_RELEASE);
+        xgr_veh_log_patched(insn_name, rip, len);
+        return -1; /* EXCEPTION_CONTINUE_EXECUTION */
+    }
+    __atomic_store_n(&g_veh_patch_lock, 0u, __ATOMIC_RELEASE);
+    ctx->Rip += len;
+    return -1; /* EXCEPTION_CONTINUE_EXECUTION */
+}
+
+static uint8_t *xgr_veh_get_clzero_trampoline(
+    uint64_t rip,
+    const uint8_t *cmp_bytes,
+    uint32_t bound_reg) {
+    if (bound_reg == 0u || bound_reg == 4u || bound_reg >= 16u) {
+        return NULL;
+    }
+    (void)xgr_veh_get_virtual_protect();
+    scarlett_pfn_virtual_alloc_t va = g_veh_virtual_alloc;
+    if (va == NULL) {
+        return NULL;
+    }
+    while (__atomic_exchange_n(&g_veh_patch_lock, 1u, __ATOMIC_ACQUIRE) != 0u) {
+        __asm__ volatile("pause");
+    }
+    uint8_t *stub = g_clzero_tramp_stubs[bound_reg];
+    if (stub != NULL) {
+        int64_t rel = (int64_t)(uintptr_t)stub - (int64_t)(rip + 5u);
+        if (rel >= (int64_t)INT32_MIN && rel <= (int64_t)INT32_MAX) {
+            __atomic_store_n(&g_veh_patch_lock, 0u, __ATOMIC_RELEASE);
+            return stub;
+        }
+        stub = NULL;
+    }
+    if (g_clzero_tramp_page != NULL && (g_clzero_tramp_used + 128u) <= 4096u) {
+        int64_t page_rel = (int64_t)(uintptr_t)g_clzero_tramp_page - (int64_t)(rip + 5u);
+        if (page_rel < -0x7FFF0000LL || page_rel > 0x7FFF0000LL) {
+            g_clzero_tramp_page = NULL;
+            g_clzero_tramp_used = 0u;
+        }
+    } else {
+        g_clzero_tramp_page = NULL;
+        g_clzero_tramp_used = 0u;
+    }
+    if (g_clzero_tramp_page == NULL) {
+        uint64_t base_hint = rip & ~0xFFFFULL;
+        for (uint64_t off = 0x01000000ULL; off <= 0x70000000ULL; off += 0x01000000ULL) {
+            void *p = va((void *)(uintptr_t)(base_hint + off), 4096u, 0x3000u, 0x40u);
+            if (p != NULL) {
+                int64_t d = (int64_t)(uintptr_t)p - (int64_t)(rip + 5u);
+                if (d >= -0x7FFF0000LL && d <= 0x7FFF0000LL) {
+                    g_clzero_tramp_page = (uint8_t *)p;
+                    g_clzero_tramp_used = 0u;
+                    break;
+                }
+            }
+            if (base_hint > off + 0x100000ULL) {
+                p = va((void *)(uintptr_t)(base_hint - off), 4096u, 0x3000u, 0x40u);
+                if (p != NULL) {
+                    int64_t d = (int64_t)(uintptr_t)p - (int64_t)(rip + 5u);
+                    if (d >= -0x7FFF0000LL && d <= 0x7FFF0000LL) {
+                        g_clzero_tramp_page = (uint8_t *)p;
+                        g_clzero_tramp_used = 0u;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (g_clzero_tramp_page == NULL || (g_clzero_tramp_used + 128u) > 4096u) {
+        __atomic_store_n(&g_veh_patch_lock, 0u, __ATOMIC_RELEASE);
+        return NULL;
+    }
+    stub = g_clzero_tramp_page + g_clzero_tramp_used;
+    size_t n = 0u;
+    uint32_t s = (bound_reg != 7u) ? 7u : 6u; /* rdi or rsi */
+    stub[n++] = (uint8_t)(0x50u + s);          /* push %rdi/%rsi */
+    size_t loop_off = n;
+    stub[n++] = 0x48u;
+    stub[n++] = 0x89u;
+    stub[n++] = (uint8_t)(0xC0u + s);          /* mov %rax, %rdi/%rsi */
+    stub[n++] = 0x48u;
+    stub[n++] = 0x83u;
+    stub[n++] = (uint8_t)(0xE0u + s);
+    stub[n++] = 0xC0u;                         /* and $-64, %rdi/%rsi */
+    for (uint32_t k = 0u; k < 8u; ++k) {
+        stub[n++] = 0x48u;
+        stub[n++] = 0xC7u;
+        stub[n++] = (uint8_t)(0x40u + s);
+        stub[n++] = (uint8_t)(k * 8u);
+        stub[n++] = 0x00u;
+        stub[n++] = 0x00u;
+        stub[n++] = 0x00u;
+        stub[n++] = 0x00u;                     /* movq $0, (k*8)(%rdi/%rsi) */
+    }
+    stub[n++] = 0x48u;
+    stub[n++] = 0x83u;
+    stub[n++] = 0xC0u;
+    stub[n++] = 0x40u;                         /* add $0x40, %rax */
+    stub[n++] = cmp_bytes[0];
+    stub[n++] = cmp_bytes[1];
+    stub[n++] = cmp_bytes[2];                  /* cmp %bound_reg, %rax */
+    int32_t jb_rel = (int32_t)loop_off - (int32_t)(n + 2u);
+    stub[n++] = 0x72u;
+    stub[n++] = (uint8_t)(int8_t)jb_rel;       /* jb loop_off */
+    stub[n++] = (uint8_t)(0x58u + s);          /* pop %rdi/%rsi (preserves EFLAGS) */
+    stub[n++] = 0xC3u;                         /* ret */
+    g_clzero_tramp_used += (n + 15u) & ~(size_t)15u;
+    g_clzero_tramp_stubs[bound_reg] = stub;
+    __builtin_ia32_sfence();
+    __atomic_store_n(&g_veh_patch_lock, 0u, __ATOMIC_RELEASE);
+    return stub;
+}
+
+static int32_t xgr_veh_handle_illegal_insn(scarlett_win_context_t *ctx) {
+    uint64_t rip = ctx->Rip;
+    const uint8_t *code = (const uint8_t *)(uintptr_t)rip;
+    if (code == NULL) {
+        return 0; /* EXCEPTION_CONTINUE_SEARCH */
+    }
+
+    /* Check AMD monitorx (0F 01 FA) and mwaitx (0F 01 FB) */
+    if (code[0] == 0x0Fu && code[1] == 0x01u) {
+        if (code[2] == 0xFAu) {
+            return xgr_veh_hotpatch_site(ctx, "monitorx", 3u, 0x0Fu, NULL);
+        }
+        if (code[2] == 0xFBu) {
+            static const uint8_t pause_nop[3] = { 0xF3u, 0x90u, 0x90u };
+            return xgr_veh_hotpatch_site(ctx, "mwaitx", 3u, 0x0Fu, pause_nop);
+        }
+    }
+
+    /* Check clzero: 0F 01 FC (zeroes 64-byte cache line at RAX & ~63) */
+    if (code[0] == 0x0Fu && code[1] == 0x01u && code[2] == 0xFCu) {
+        static uint32_t s_clzero_logged = 0u;
+        uint64_t rax = ctx->Rax;
+        uint64_t line_base = rax & ~63ULL;
+        if (__atomic_exchange_n(&s_clzero_logged, 1u, __ATOMIC_RELAXED) == 0u) {
+            OutputDebugStringA("[scarlett-veh] Emulating/patching AMD clzero (0F 01 FC)\n");
+        }
+        /* Fast-path tight loop: clzero; add $0x40, %rax; cmp %rXX, %rax; jb -12 */
+        if (line_base != 0u &&
+            code[3] == 0x48u && code[4] == 0x83u && code[5] == 0xC0u && code[6] == 0x40u &&
+            (code[7] & 0xFBu) == 0x48u && code[8] == 0x39u && (code[9] & 0xC7u) == 0xC0u &&
+            code[10] == 0x72u && code[11] == 0xF4u) {
+            uint32_t bound_reg = ((uint32_t)(code[9] >> 3) & 7u) | (((uint32_t)(code[7] & 0x04u)) << 1);
+            uint8_t *stub = xgr_veh_get_clzero_trampoline(rip, &code[7], bound_reg);
+            if (stub != NULL) {
+                int64_t rel = (int64_t)(uintptr_t)stub - (int64_t)(rip + 5u);
+                if (rel >= (int64_t)INT32_MIN && rel <= (int64_t)INT32_MAX) {
+                    int32_t rel32 = (int32_t)rel;
+                    uint8_t patch[12];
+                    patch[0] = 0xE8u; /* call rel32 */
+                    patch[1] = (uint8_t)(rel32 & 0xFF);
+                    patch[2] = (uint8_t)((rel32 >> 8) & 0xFF);
+                    patch[3] = (uint8_t)((rel32 >> 16) & 0xFF);
+                    patch[4] = (uint8_t)((rel32 >> 24) & 0xFF);
+                    for (uint32_t i = 5u; i < 12u; ++i) {
+                        patch[i] = 0x90u;
+                    }
+                    return xgr_veh_hotpatch_site(ctx, "clzero_loop", 12u, 0x0Fu, patch);
+                }
+            }
+            uint64_t bound = xgr_veh_get_reg64(ctx, bound_reg);
+            if (rax < bound && (bound - rax) <= (256ULL * 1024ULL * 1024ULL)) {
+                uint64_t n_iters = (bound - rax + 63ULL) / 64ULL;
+                volatile uint64_t *q = (volatile uint64_t *)(uintptr_t)line_base;
+                size_t n_qwords = (size_t)(n_iters * 8ULL);
+                for (size_t i = 0u; i < n_qwords; ++i) {
+                    q[i] = 0u;
+                }
+                ctx->Rax = rax + n_iters * 64ULL;
+                ctx->Rip += 12u;
+                return -1; /* EXCEPTION_CONTINUE_EXECUTION */
+            }
+        }
+        if (line_base != 0u) {
+            volatile uint64_t *q = (volatile uint64_t *)(uintptr_t)line_base;
+            for (size_t i = 0u; i < 8u; ++i) {
+                q[i] = 0u;
+            }
+        }
+        ctx->Rip += 3u;
+        return -1; /* EXCEPTION_CONTINUE_EXECUTION */
+    }
+
+    /* Check rdpid: F3 [REX 0x40..0x4F] 0F C7 /7 (mod == 3) */
+    if (code[0] == 0xF3u) {
+        uint32_t pos = 1u;
+        uint8_t rex = 0u;
+        if (code[pos] >= 0x40u && code[pos] <= 0x4Fu) {
+            rex = code[pos++];
+        }
+        if (code[pos] == 0x0Fu && code[pos + 1u] == 0xC7u) {
+            uint8_t modrm = code[pos + 2u];
+            if ((modrm >> 6) == 3u && ((modrm >> 3) & 7u) == 7u) {
+                uint32_t reg_idx = (uint32_t)(modrm & 7u) | (((uint32_t)(rex & 1u)) << 3);
+                uint32_t len = pos + 3u;
+                xgr_veh_zero_reg64(ctx, reg_idx);
+                ctx->Rip += len;
+                return -1; /* EXCEPTION_CONTINUE_EXECUTION */
+            }
+        }
+        return 0;
+    }
+
+    /* Check clwb / clflushopt: 66 [REX 0x40..0x4F] 0F AE /6 or /7 (mod != 3) */
+    if (code[0] == 0x66u) {
+        uint32_t pos = 1u;
+        if (code[pos] >= 0x40u && code[pos] <= 0x4Fu) {
+            pos++;
+        }
+        if (code[pos] == 0x0Fu && code[pos + 1u] == 0xAEu) {
+            pos += 2u;
+            uint8_t modrm = code[pos++];
+            uint8_t mod = (modrm >> 6) & 3u;
+            uint8_t reg = (modrm >> 3) & 7u;
+            uint8_t rm = modrm & 7u;
+            if ((reg == 6u || reg == 7u) && mod != 3u) {
+                if (rm == 4u) {
+                    uint8_t sib = code[pos++];
+                    uint8_t sib_base = sib & 7u;
+                    if (mod == 0u && sib_base == 5u) {
+                        pos += 4u;
+                    }
+                } else if (mod == 0u && rm == 5u) {
+                    pos += 4u;
+                }
+                if (mod == 1u) {
+                    pos += 1u;
+                } else if (mod == 2u) {
+                    pos += 4u;
+                }
+                uint32_t len = pos;
+                const char *insn_name = (reg == 6u) ? "clwb" : "clflushopt";
+                return xgr_veh_hotpatch_site(ctx, insn_name, len, 0x66u, NULL);
+            }
+        }
+    }
+
+    {
+        static const char hex[] = "0123456789abcdef";
+        char msg[128];
+        size_t pos = 0u;
+        pos = xgr_veh_append_cstr(msg, sizeof(msg), pos, "[scarlett-veh] Unhandled illegal insn at 0x");
+        pos = xgr_veh_append_hex64(msg, sizeof(msg), pos, rip);
+        pos = xgr_veh_append_cstr(msg, sizeof(msg), pos, " bytes=");
+        for (uint32_t i = 0u; i < 8u; ++i) {
+            if (pos + 2u < sizeof(msg)) {
+                msg[pos++] = hex[(code[i] >> 4) & 0xFu];
+                msg[pos++] = hex[code[i] & 0xFu];
+            }
+        }
+        xgr_veh_append_cstr(msg, sizeof(msg), pos, "\n");
+        OutputDebugStringA(msg);
+    }
+
+    return 0; /* EXCEPTION_CONTINUE_SEARCH */
+}
+
+static int32_t __stdcall scarlett_veh_skip_int3_handler(scarlett_win_exception_pointers_t *ep) {
+    if (ep == NULL || ep->ExceptionRecord == NULL || ep->ContextRecord == NULL) {
+        return 0; /* EXCEPTION_CONTINUE_SEARCH */
+    }
+    uint32_t code = ep->ExceptionRecord->ExceptionCode;
+    if (code == 0x80000003u /* EXCEPTION_BREAKPOINT */) {
+        const unsigned char *at = (const unsigned char *)ep->ExceptionRecord->ExceptionAddress;
+        if (at != NULL && *at == 0xCCu) {
+            if (ep->ContextRecord->Rip == (uint64_t)(uintptr_t)at) {
+                ep->ContextRecord->Rip += 1u;
+            }
+            OutputDebugStringA("[scarlett-veh] Stepped over int3 soft assert\n");
+            return -1; /* EXCEPTION_CONTINUE_EXECUTION */
+        }
+    } else if (code == 0xC000001Du /* EXCEPTION_ILLEGAL_INSTRUCTION */) {
+        return xgr_veh_handle_illegal_insn(ep->ContextRecord);
+    }
+    return 0; /* EXCEPTION_CONTINUE_SEARCH */
+}
+
 uint32_t SCARLETT_XGR_CALL DllMain(void *hinst, uint32_t reason, void *reserved) {
     (void)hinst;
     (void)reserved;
     if (reason == 1u) {
+        AddVectoredExceptionHandler(1u, scarlett_veh_skip_int3_handler);
         if (xgr_pe_init_unix_bridge() != 0) {
             return 0u;
         }

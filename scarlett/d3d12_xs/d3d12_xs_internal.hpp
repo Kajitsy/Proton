@@ -102,6 +102,8 @@ struct VulkanRuntimeContext {
     bool available = false;
     bool real_device_created = false;
     bool validation_layer_enabled = false;
+    bool has_xlib_surface_ext = false;
+    bool has_swapchain_ext = false;
 
     ScarPFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = nullptr;
     ScarPFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = nullptr;
@@ -156,6 +158,27 @@ struct VulkanRuntimeContext {
     ScarPFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT = nullptr;
     ScarPFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = nullptr;
     ScarPFN_vkGetDeviceFaultInfoEXT vkGetDeviceFaultInfoEXT = nullptr;
+
+    /* WSI / X11 / Swapchain / Semaphores / Clear */
+    ScarPFN_vkCreateXlibSurfaceKHR vkCreateXlibSurfaceKHR = nullptr;
+    ScarPFN_vkDestroySurfaceKHR vkDestroySurfaceKHR = nullptr;
+    ScarPFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR = nullptr;
+    ScarPFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR = nullptr;
+    ScarPFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR = nullptr;
+    ScarPFN_vkCreateSwapchainKHR vkCreateSwapchainKHR = nullptr;
+    ScarPFN_vkDestroySwapchainKHR vkDestroySwapchainKHR = nullptr;
+    ScarPFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR = nullptr;
+    ScarPFN_vkAcquireNextImageKHR vkAcquireNextImageKHR = nullptr;
+    ScarPFN_vkQueuePresentKHR vkQueuePresentKHR = nullptr;
+    ScarPFN_vkCreateSemaphore vkCreateSemaphore = nullptr;
+    ScarPFN_vkDestroySemaphore vkDestroySemaphore = nullptr;
+    ScarPFN_vkCmdClearColorImage vkCmdClearColorImage = nullptr;
+    ScarPFN_vkCreateImage vkCreateImage = nullptr;
+    ScarPFN_vkDestroyImage vkDestroyImage = nullptr;
+    ScarPFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements = nullptr;
+    ScarPFN_vkBindImageMemory vkBindImageMemory = nullptr;
+    ScarPFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = nullptr;
+    ScarPFN_vkCmdBlitImage vkCmdBlitImage = nullptr;
 
     ScarVkInstance instance = nullptr;
     ScarVkDebugUtilsMessengerEXT debug_messenger = SCAR_VK_NULL_HANDLE;
@@ -219,6 +242,44 @@ struct VulkanRuntimeContext {
  * Frame Pacing & Swapchain / PresentX State Machine
  * ============================================================================ */
 
+struct WsiState {
+    bool attempted = false;
+    bool active = false;
+    bool owns_x11_window = false;
+    void *x11_dl = nullptr;
+    void *x11_display = nullptr;
+    unsigned long x11_window = 0;
+
+    int (*x11_XPending)(void *) = nullptr;
+    int (*x11_XNextEvent)(void *, void *) = nullptr;
+    int (*x11_XGetGeometry)(void *, unsigned long, unsigned long *, int *, int *,
+                            unsigned int *, unsigned int *, unsigned int *,
+                            unsigned int *) = nullptr;
+    int (*x11_XDestroyWindow)(void *, unsigned long) = nullptr;
+    int (*x11_XCloseDisplay)(void *) = nullptr;
+
+    ScarVkSurfaceKHR surface = SCAR_VK_NULL_HANDLE;
+    ScarVkSwapchainKHR swapchain = SCAR_VK_NULL_HANDLE;
+    uint32_t width = 1280;
+    uint32_t height = 720;
+    uint32_t swapchain_format = SCAR_VK_FORMAT_B8G8R8A8_UNORM;
+    uint32_t swapchain_colorspace = SCAR_VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    std::vector<ScarVkImage> images;
+    ScarVkCommandBuffer cmd_buf = nullptr;
+    ScarVkSemaphore image_available_sem = SCAR_VK_NULL_HANDLE;
+    ScarVkSemaphore render_finished_sem = SCAR_VK_NULL_HANDLE;
+    ScarVkFence in_flight_fence = SCAR_VK_NULL_HANDLE;
+
+    ScarVkBuffer upload_buf = SCAR_VK_NULL_HANDLE;
+    ScarVkDeviceMemory upload_buf_mem = SCAR_VK_NULL_HANDLE;
+    void *upload_buf_mapped = nullptr;
+    uint64_t upload_buf_size = 0;
+    ScarVkImage upload_img = SCAR_VK_NULL_HANDLE;
+    ScarVkDeviceMemory upload_img_mem = SCAR_VK_NULL_HANDLE;
+    uint32_t upload_img_w = 0;
+    uint32_t upload_img_h = 0;
+};
+
 struct SwapchainState {
     uint32_t width = 3840;
     uint32_t height = 2160;
@@ -242,6 +303,8 @@ struct SwapchainState {
     ScarVkHdrMetadataEXT last_hdr_metadata{};
     uint32_t last_plane0_vk_colorspace = SCAR_VK_COLOR_SPACE_HDR10_ST2084_EXT;
     uint32_t last_plane1_vk_colorspace = SCAR_VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+
+    WsiState wsi{};
 };
 
 uint64_t monotonic_now_ns() noexcept;
@@ -261,8 +324,11 @@ scarlett_hresult_t pacing_wait_frame_event(
 
 scarlett_hresult_t presentx_submit(
     SwapchainState &sc,
+    VulkanRuntimeContext *vk,
     uint64_t device_caps_mask,
     scarlett_d3d12xs_presentx_params_t &inout) noexcept;
+
+void wsi_shutdown(SwapchainState &sc, VulkanRuntimeContext *vk) noexcept;
 
 /* ============================================================================
  * Device Objects & Central Manager

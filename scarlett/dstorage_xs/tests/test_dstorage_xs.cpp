@@ -226,7 +226,7 @@ bool test_2_queue_semantics_fifo_autosubmit_priority_cancel_limits() {
         std::memset(src.data() + i * 4096, static_cast<int>(0x10 + i), 4096);
     }
 
-    for (uint32_t i = 0; i < 7u; ++i) {
+    for (uint32_t i = 0; i < 6u; ++i) {
         DSTORAGE_REQUEST req{};
         req.Options.SourceType = DSTORAGE_REQUEST_SOURCE_MEMORY;
         req.SourceAddress = reinterpret_cast<uint64_t>(src.data() + i * 4096);
@@ -245,13 +245,13 @@ bool test_2_queue_semantics_fifo_autosubmit_priority_cancel_limits() {
     CHECK(qinfo.AutoSubmitCount == 0u);
     CHECK(status_arr->lpVtbl->IsComplete(status_arr, 0u) == 0u);
 
-    /* 8th request triggers auto-submit at 50% of Capacity=16 */
-    {
+    /* 8th command (7th request) triggers auto-submit at 50% of Capacity=16 */
+    for (uint32_t i = 6u; i < 8u; ++i) {
         DSTORAGE_REQUEST req{};
         req.Options.SourceType = DSTORAGE_REQUEST_SOURCE_MEMORY;
-        req.SourceAddress = reinterpret_cast<uint64_t>(src.data() + 7u * 4096);
+        req.SourceAddress = reinterpret_cast<uint64_t>(src.data() + i * 4096);
         req.SourceSize = 4096u;
-        req.DestinationAddress = reinterpret_cast<uint64_t>(dst.data() + 7u * 4096);
+        req.DestinationAddress = reinterpret_cast<uint64_t>(dst.data() + i * 4096);
         req.DestinationSize = 4096u;
         q->lpVtbl->EnqueueRequest(reinterpret_cast<IDStorageQueueX *>(q), &req);
     }
@@ -359,7 +359,7 @@ bool test_2_queue_semantics_fifo_autosubmit_priority_cancel_limits() {
             DSTORAGE_QUEUE_DESC pd{};
             pd.SourceType = DSTORAGE_REQUEST_SOURCE_MEMORY;
             pd.Capacity = 2048u;
-            pd.Priority = p;
+            pd.Priority = static_cast<int8_t>(p);
             REQUIRE_HR(factory->lpVtbl->CreateQueue(
                            reinterpret_cast<IDStorageFactoryX *>(factory),
                            &pd, &kIQ2, reinterpret_cast<void **>(&pqs[p])),
@@ -849,6 +849,102 @@ bool test_5_bcpack_plugin_missing_and_loaded() {
     return true;
 }
 
+bool test_6_abi_vfs_com_filehandle_and_riid() {
+    std::cout << "[TEST 6] IDStorageFactoryX ABI, VFS GAME:/D:\\ resolution, COM FileHandle, RIID...\n";
+
+    /* 1. Verify Xbox Scarlett IDStorageFactoryX slot 8 == SetStagingBufferSize (0x40) */
+    CHECK(offsetof(IDStorageFactoryX2Vtbl, SetStagingBufferSize) == 8u * sizeof(void *));
+
+    static const scarlett_guid_t kIFacXbox = SCARLETT_IID_IDSTORAGEFACTORY_XBOX_INIT;
+    static const scarlett_guid_t kIFacX2 = SCARLETT_IID_IDSTORAGEFACTORYX2_INIT;
+    static const scarlett_guid_t kIFileXbox = SCARLETT_IID_IDSTORAGEFILEX_XBOX_INIT;
+    static const scarlett_guid_t kIQ2 = SCARLETT_IID_IDSTORAGEQUEUEX2_INIT;
+    static const scarlett_guid_t kIQXbox = SCARLETT_IID_IDSTORAGEQUEUEX_XBOX_INIT;
+    static const scarlett_guid_t kBogusIid = {0x12345678u, 0x9ABCu, 0xDEF0u, {1, 2, 3, 4, 5, 6, 7, 8}};
+
+    void *bogus_ptr = reinterpret_cast<void *>(0x1234);
+    CHECK(DStorageGetFactory(&kBogusIid, &bogus_ptr) == SCARLETT_E_NOINTERFACE);
+    CHECK(bogus_ptr == nullptr);
+
+    IDStorageFactoryX2 *factory_xbox = nullptr;
+    REQUIRE_HR(DStorageGetFactory(&kIFacXbox, reinterpret_cast<void **>(&factory_xbox)), SCARLETT_OK);
+    IDStorageFactoryX2 *factory = nullptr;
+    REQUIRE_HR(DStorageGetFactory(&kIFacX2, reinterpret_cast<void **>(&factory)), SCARLETT_OK);
+    CHECK(factory->lpVtbl->QueryInterface(
+              reinterpret_cast<IDStorageFactoryX *>(factory), &kBogusIid, &bogus_ptr) ==
+          SCARLETT_E_NOINTERFACE);
+
+    /* 2. VFS GAME:\ and D:\ case-insensitive resolution via PROTON_XBOX_GAME_ROOT */
+    const std::string root = "/tmp/scarlett_dstorage_vfs_test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root + "/Content/SubDir");
+    const std::string payload = "DirectStorage_XS_VFS_Payload_1234567890!";
+    {
+        FILE *f = std::fopen((root + "/Content/SubDir/Asset.bin").c_str(), "wb");
+        CHECK(f != nullptr);
+        std::fwrite(payload.data(), 1, payload.size(), f);
+        std::fclose(f);
+    }
+    ::setenv("PROTON_XBOX_GAME_ROOT", root.c_str(), 1);
+
+    /* Test UTF-16 OpenFile with GAME:\content\subdir\asset.bin and Xbox File IID */
+    const char16_t game_path16[] = u"GAME:\\content\\subdir\\asset.bin";
+    IDStorageFileX *f_game = nullptr;
+    REQUIRE_HR(factory->lpVtbl->OpenFile(
+                   reinterpret_cast<IDStorageFactoryX *>(factory),
+                   reinterpret_cast<const uint16_t *>(game_path16),
+                   &kIFileXbox, reinterpret_cast<void **>(&f_game)),
+               SCARLETT_OK);
+
+    /* Test UTF-8 OpenFileUtf8 with G:\CONTENT\SUBDIR\ASSET.BIN */
+    IDStorageFileX *f_d = nullptr;
+    REQUIRE_HR(factory->lpVtbl->OpenFileUtf8(
+                   reinterpret_cast<IDStorageFactoryX1 *>(factory),
+                   "G:\\CONTENT\\SUBDIR\\ASSET.BIN",
+                   &kIFileXbox, reinterpret_cast<void **>(&f_d)),
+               SCARLETT_OK);
+
+    /* 3. Pass IDStorageFileX* COM pointer directly as DSTORAGE_REQUEST::FileHandle */
+    DSTORAGE_QUEUE_DESC qd{};
+    qd.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    qd.Capacity = 8u;
+    qd.Priority = DSTORAGE_PRIORITY_NORMAL;
+    qd.Name = "vfs_test_q";
+    IDStorageQueueX2 *q = nullptr;
+    REQUIRE_HR(factory->lpVtbl->CreateQueue(
+                   reinterpret_cast<IDStorageFactoryX *>(factory),
+                   &qd, &kIQXbox, reinterpret_cast<void **>(&q)),
+               SCARLETT_OK);
+    (void)kIQ2;
+
+    DSTORAGE_QUEUE_INFO qinfo{};
+    REQUIRE_HR(q->lpVtbl->Query(reinterpret_cast<IDStorageQueueX *>(q), &qinfo), SCARLETT_OK);
+    CHECK(qinfo.Desc.Name != nullptr && std::strcmp(qinfo.Desc.Name, "vfs_test_q") == 0);
+
+    std::vector<uint8_t> out_buf(payload.size(), 0u);
+    DSTORAGE_REQUEST req{};
+    req.Options.SourceType = DSTORAGE_REQUEST_SOURCE_FILE;
+    req.FileHandle = reinterpret_cast<uint64_t>(f_game); /* COM pointer, NOT unix_file_handle! */
+    req.FileOffset = 0u;
+    req.SourceSize = static_cast<uint32_t>(payload.size());
+    req.DestinationAddress = reinterpret_cast<uint64_t>(out_buf.data());
+    req.DestinationSize = static_cast<uint32_t>(out_buf.size());
+    q->lpVtbl->EnqueueRequest(reinterpret_cast<IDStorageQueueX *>(q), &req);
+
+    std::atomic<uint64_t> fence{0};
+    q->lpVtbl->EnqueueSignal(reinterpret_cast<IDStorageQueueX *>(q), &fence, 1u);
+    q->lpVtbl->Submit(reinterpret_cast<IDStorageQueueX *>(q));
+    CHECK(wait_for_atomic_u64(fence, 1u));
+    CHECK(std::memcmp(out_buf.data(), payload.data(), payload.size()) == 0);
+
+    q->lpVtbl->Release(reinterpret_cast<IDStorageQueueX *>(q));
+    f_d->lpVtbl->Release(f_d);
+    f_game->lpVtbl->Release(f_game);
+    ::unsetenv("PROTON_XBOX_GAME_ROOT");
+    std::filesystem::remove_all(root);
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -858,6 +954,7 @@ int main() {
     test_3_io_uring_xmem_scatter_and_spirv_swizzle();
     test_4_throughput_benchmark_over_4_8_gbps();
     test_5_bcpack_plugin_missing_and_loaded();
+    test_6_abi_vfs_com_filehandle_and_riid();
 
     scarlett_dstorage_reset_runtime();
     if (g_failures != 0) {

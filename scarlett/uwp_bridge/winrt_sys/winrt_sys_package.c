@@ -74,6 +74,36 @@ typedef struct WinrtPackage3Vtbl {
     HRESULT (STDMETHODCALLTYPE *GetAppListEntriesAsync)(void *This, void **operation);
 } WinrtPackage3Vtbl;
 
+/* Windows.Foundation.Size (pass-by-value in IPackage8::GetLogoAsRandomAccessStreamReference) */
+typedef struct WinrtFoundationSize {
+    float Width;
+    float Height;
+} WinrtFoundationSize;
+
+/* IPackage8 (Windows 10 1809+; the interface libuwp QIs a Package object for and
+ * then calls slot 9 get_InstalledPath). Slot numbering follows the WinRT metadata:
+ * IInspectable 0-5, then the 12 IPackage8 methods 6-17. */
+typedef struct WinrtPackage8Vtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
+    ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
+    ULONG   (STDMETHODCALLTYPE *Release)(void *This);
+    HRESULT (STDMETHODCALLTYPE *GetIids)(void *This, ULONG *iidCount, IID **iids);
+    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(void *This, HSTRING *className);
+    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(void *This, TrustLevel *trustLevel);
+    HRESULT (STDMETHODCALLTYPE *get_EffectiveExternalLocation)(void *This, void **value);
+    HRESULT (STDMETHODCALLTYPE *get_MachineExternalLocation)(void *This, void **value);
+    HRESULT (STDMETHODCALLTYPE *get_UserExternalLocation)(void *This, void **value);
+    HRESULT (STDMETHODCALLTYPE *get_InstalledPath)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_MutablePath)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_EffectivePath)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_EffectiveExternalPath)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_MachineExternalPath)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *get_UserExternalPath)(void *This, HSTRING *value);
+    HRESULT (STDMETHODCALLTYPE *GetLogoAsRandomAccessStreamReference)(void *This, WinrtFoundationSize size, void **value);
+    HRESULT (STDMETHODCALLTYPE *GetAppListEntries)(void *This, void **value);
+    HRESULT (STDMETHODCALLTYPE *get_IsStub)(void *This, boolean *value);
+} WinrtPackage8Vtbl;
+
 typedef struct WinrtPackageIdVtbl {
     HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *This, REFIID riid, void **ppvObject);
     ULONG   (STDMETHODCALLTYPE *AddRef)(void *This);
@@ -655,6 +685,7 @@ typedef struct WinrtPackageObj {
     const WinrtPackageVtbl  *lpVtbl;
     const WinrtPackage2Vtbl *lpVtbl2;
     const WinrtPackage3Vtbl *lpVtbl3;
+    const WinrtPackage8Vtbl *lpVtbl8;
     volatile LONG ref_count;
 } WinrtPackageObj;
 
@@ -681,6 +712,15 @@ static HRESULT STDMETHODCALLTYPE pkg_qi(void *This, REFIID riid, void **ppv) {
         *ppv = &obj->lpVtbl3;
         return S_OK;
     }
+    if (winrt_sys_guid_eq(riid, &WINRT_IID_IPackage8)) {
+        static LONG logged = 0;
+        if (InterlockedExchange(&logged, 1) == 0) {
+            uwp_bridge_log("winrt_sys", "Package QI(IID_IPackage8) -> S_OK (scarlett winrt_sys layer)");
+        }
+        InterlockedIncrement(&obj->ref_count);
+        *ppv = &obj->lpVtbl8;
+        return S_OK;
+    }
     return E_NOINTERFACE;
 }
 static ULONG STDMETHODCALLTYPE pkg_addref(void *This) {
@@ -697,9 +737,10 @@ static HRESULT STDMETHODCALLTYPE pkg_getiids(void *This, ULONG *c, IID **i) {
     static const GUID list[] = {
         { 0x163c792fu, 0xbd75u, 0x413cu, { 0xbfu, 0x23u, 0xb1u, 0xfeu, 0x7bu, 0x95u, 0xd8u, 0x25u } },
         { 0xa6612fb6u, 0x7688u, 0x4aceu, { 0x95u, 0xfbu, 0x35u, 0x95u, 0x38u, 0xe7u, 0xaau, 0x01u } },
-        { 0x5f738b61u, 0xf86au, 0x4917u, { 0x93u, 0xd1u, 0xf1u, 0xeeu, 0x9du, 0x3bu, 0x35u, 0xd9u } }
+        { 0x5f738b61u, 0xf86au, 0x4917u, { 0x93u, 0xd1u, 0xf1u, 0xeeu, 0x9du, 0x3bu, 0x35u, 0xd9u } },
+        { 0x2c584f7bu, 0xce2au, 0x4be6u, { 0xa0u, 0x93u, 0x77u, 0xcfu, 0xbbu, 0x2au, 0x7eu, 0xa1u } }
     };
-    return winrt_sys_get_iids_copy(list, 3, c, i);
+    return winrt_sys_get_iids_copy(list, 4, c, i);
 }
 static HRESULT STDMETHODCALLTYPE pkg_rcn(void *This, HSTRING *n) {
     (void)This;
@@ -843,6 +884,101 @@ static HRESULT STDMETHODCALLTYPE pkg3_get_applist(void *This, void **op) {
     return winrt_sys_unimplemented("IPackage3::GetAppListEntriesAsync", This);
 }
 
+/* ---- IPackage8 (IInspectable forwarding + path getters) ---- */
+
+static HRESULT STDMETHODCALLTYPE pkg8_qi(void *This, REFIID r, void **p) {
+    return pkg_qi(WINRT_SYS_FROM(WinrtPackageObj, lpVtbl8, This), r, p);
+}
+static ULONG STDMETHODCALLTYPE pkg8_addref(void *This) {
+    return pkg_addref(WINRT_SYS_FROM(WinrtPackageObj, lpVtbl8, This));
+}
+static ULONG STDMETHODCALLTYPE pkg8_release(void *This) {
+    return pkg_release(WINRT_SYS_FROM(WinrtPackageObj, lpVtbl8, This));
+}
+static HRESULT STDMETHODCALLTYPE pkg8_getiids(void *This, ULONG *c, IID **i) {
+    return pkg_getiids(WINRT_SYS_FROM(WinrtPackageObj, lpVtbl8, This), c, i);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_rcn(void *This, HSTRING *n) {
+    return pkg_rcn(WINRT_SYS_FROM(WinrtPackageObj, lpVtbl8, This), n);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_tl(void *This, TrustLevel *tl) {
+    return pkg_tl(WINRT_SYS_FROM(WinrtPackageObj, lpVtbl8, This), tl);
+}
+/* Windows 10 1809+ Package path getters: all alias the package install dir for a
+ * loose-file / developer-deployed app (there is no mutable or external location). */
+static void pkg8_log_install_path_once(const wchar_t *path) {
+    static LONG logged = 0;
+    char utf8[UWP_MAX_PATH_CHARS * 2];
+    size_t w = 0;
+    if (InterlockedExchange(&logged, 1) != 0) return;
+    for (size_t i = 0; path != NULL && path[i] != L'\0' && w + 1u < sizeof(utf8); ++i) {
+        wchar_t c = path[i];
+        utf8[w++] = (c < 0x80) ? (char)c : '?';
+    }
+    utf8[w] = '\0';
+    uwp_bridge_log("winrt_sys", "IPackage8::get_InstalledPath -> \"%s\"", utf8);
+}
+static HRESULT pkg8_make_install_path_hstring(HSTRING *val) {
+    if (!val) return E_POINTER;
+    *val = NULL;
+    uwp_package_identity_t id;
+    resolve_package_identity(&id);
+    pkg8_log_install_path_once(id.install_path);
+    return winrt_sys_make_hstring(id.install_path, val);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_installed_path(void *This, HSTRING *val) {
+    (void)This;
+    return pkg8_make_install_path_hstring(val);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_mutable_path(void *This, HSTRING *val) {
+    (void)This;
+    return pkg8_make_install_path_hstring(val);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_effective_path(void *This, HSTRING *val) {
+    (void)This;
+    return pkg8_make_install_path_hstring(val);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_effective_external_path(void *This, HSTRING *val) {
+    (void)This;
+    return pkg8_make_install_path_hstring(val);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_machine_external_path(void *This, HSTRING *val) {
+    (void)This;
+    return pkg8_make_install_path_hstring(val);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_user_external_path(void *This, HSTRING *val) {
+    (void)This;
+    return pkg8_make_install_path_hstring(val);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_location(void *This, void **val) {
+    if (val) *val = NULL;
+    return winrt_sys_unimplemented("IPackage8::get_ExternalLocation", This);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_logo(void *This, WinrtFoundationSize size, void **val) {
+    (void)size;
+    if (val) *val = NULL;
+    return winrt_sys_unimplemented("IPackage8::GetLogoAsRandomAccessStreamReference", This);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_app_list(void *This, void **val) {
+    if (val) *val = NULL;
+    return winrt_sys_unimplemented("IPackage8::GetAppListEntries", This);
+}
+static HRESULT STDMETHODCALLTYPE pkg8_get_is_stub(void *This, boolean *val) {
+    (void)This;
+    if (!val) return E_POINTER;
+    *val = 0;
+    return S_OK;
+}
+
+static const WinrtPackage8Vtbl g_pkg8_vtbl = {
+    pkg8_qi, pkg8_addref, pkg8_release, pkg8_getiids, pkg8_rcn, pkg8_tl,
+    pkg8_get_location, pkg8_get_location, pkg8_get_location,
+    pkg8_get_installed_path, pkg8_get_mutable_path, pkg8_get_effective_path,
+    pkg8_get_effective_external_path, pkg8_get_machine_external_path,
+    pkg8_get_user_external_path, pkg8_get_logo, pkg8_get_app_list,
+    pkg8_get_is_stub
+};
+
 static const WinrtPackageVtbl g_pkg_vtbl = {
     pkg_qi, pkg_addref, pkg_release, pkg_getiids, pkg_rcn, pkg_tl,
     pkg_get_id, pkg_get_installed_loc, pkg_get_is_framework, pkg_get_deps
@@ -916,8 +1052,10 @@ static HRESULT STDMETHODCALLTYPE pkg_fac_get_current(void *This, void **val) {
     pkg->lpVtbl = &g_pkg_vtbl;
     pkg->lpVtbl2 = &g_pkg2_vtbl;
     pkg->lpVtbl3 = &g_pkg3_vtbl;
+    pkg->lpVtbl8 = &g_pkg8_vtbl;
     pkg->ref_count = 1;
     *val = &pkg->lpVtbl;
+    uwp_bridge_log("winrt_sys", "Package::get_Current -> WinrtPackageObj=%p (scarlett winrt_sys layer)", (void *)pkg);
     return S_OK;
 }
 

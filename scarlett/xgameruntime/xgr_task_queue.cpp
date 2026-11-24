@@ -398,8 +398,8 @@ struct AsyncState {
 class TaskQueueImpl {
 public:
     static TaskQueueImpl &instance() {
-        static TaskQueueImpl inst;
-        return inst;
+        static TaskQueueImpl *inst = new TaskQueueImpl();
+        return *inst;
     }
 
     ~TaskQueueImpl() {

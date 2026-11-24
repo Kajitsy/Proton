@@ -153,6 +153,12 @@ int32_t op_report_stub(void *args) {
         *static_cast<scarlett_dstorage_report_stub_params_t *>(args));
 }
 
+int32_t op_wait_signals(void *args) {
+    if (args == nullptr) return SCARLETT_E_POINTER;
+    return DStorageManager::instance().wait_signals(
+        *static_cast<scarlett_dstorage_wait_signals_params_t *>(args));
+}
+
 } // namespace
 
 } // namespace scarlett::dstorage_xs::unixlib
@@ -184,7 +190,8 @@ using wine_unixlib_entry_t = int32_t (*)(void *);
     scarlett::dstorage_xs::unixlib::op_set_staging_size,      /* 19: SET_STAGING_SIZE */ \
     scarlett::dstorage_xs::unixlib::op_query_caps,            /* 20: QUERY_CAPS */ \
     scarlett::dstorage_xs::unixlib::op_submit_batch,          /* 21: SUBMIT_BATCH */ \
-    scarlett::dstorage_xs::unixlib::op_report_stub            /* 22: REPORT_STUB */
+    scarlett::dstorage_xs::unixlib::op_report_stub,           /* 22: REPORT_STUB */ \
+    scarlett::dstorage_xs::unixlib::op_wait_signals           /* 23: WAIT_SIGNALS */
 
 static const wine_unixlib_entry_t k_dstorage_local_unix_funcs[] = {
     SCARLETT_DSTORAGE_UNIX_FUNC_LIST

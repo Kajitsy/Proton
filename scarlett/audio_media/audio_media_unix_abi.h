@@ -110,7 +110,8 @@ typedef enum scarlett_audio_voice_ctrl_op_e {
     SCARLETT_VOICE_CTRL_FLUSH        = 4,
     SCARLETT_VOICE_CTRL_SET_HRTF_POS = 5,
     SCARLETT_VOICE_CTRL_SET_XAPO     = 6,
-    SCARLETT_VOICE_CTRL_GET_DETAILS  = 7
+    SCARLETT_VOICE_CTRL_GET_DETAILS  = 7,
+    SCARLETT_VOICE_CTRL_GET_STATE    = 8
 } scarlett_audio_voice_ctrl_op_t;
 
 typedef enum scarlett_xapo_type_e {
@@ -216,7 +217,16 @@ typedef enum scarlett_apu_mem_op_e {
     SCARLETT_APU_OP_ACPHAL_CREATE    = 3,
     SCARLETT_APU_OP_ACPHAL_RELEASE   = 4,
     SCARLETT_APU_OP_ALLOC_SHAPE_CTX  = 5,
-    SCARLETT_APU_OP_FREE_SHAPE_CTX   = 6
+    SCARLETT_APU_OP_FREE_SHAPE_CTX   = 6,
+    SCARLETT_APU_OP_XAPU_CONNECT     = 7,
+    SCARLETT_APU_OP_XAPU_DISCONNECT  = 8,
+    SCARLETT_APU_OP_XAPU_ENQUEUE     = 9,
+    SCARLETT_APU_OP_XAPU_GET_COUNT   = 10,
+    SCARLETT_APU_OP_XAPU_DEQUEUE     = 11,
+    SCARLETT_APU_OP_XAPU_CREATE_DEC  = 12,
+    SCARLETT_APU_OP_XAPU_DESTROY_DEC = 13,
+    SCARLETT_APU_OP_XAPU_PROCESS     = 14,
+    SCARLETT_APU_OP_XAPU_FLUSH       = 15
 } scarlett_apu_mem_op_t;
 
 typedef struct scarlett_audio_apu_mem_params_s {

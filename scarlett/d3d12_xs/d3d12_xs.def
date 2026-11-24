@@ -1,6 +1,8 @@
 LIBRARY d3d12_xs.dll
 EXPORTS
-    D3D12XboxCreateDevice @1
+    D3D12ConfigureVirtualMemoryX @1
+    D3D12SerializeVersionedRootSignature @7
+    D3D12XboxCreateDevice @9
     D3D12XboxDestroyDeviceX
     D3D12XboxQueryDeviceCapsX
     D3D12XboxCreateCommandQueueX

@@ -1085,3 +1085,285 @@ uint8_t crt_app_wrl_terminate_module(crt_wrl_module_base_t *module) {
 
     return (module->vtbl->get_object_count(module) == 0u) ? 1u : 0u;
 }
+
+/* ============================================================================
+ * Clean-Room C++/CX Box Vtables
+ *   Platform::Details::GetIBoxVtable / GetIBoxArrayVtable
+ *
+ * ABI notes (derived from disassembly of Microsoft vccorlib140.dll 14.28/14.29
+ * exports ?GetIBoxVtable@Details@Platform@@YAPEAXPEAX@Z and
+ * ?GetIBoxArrayVtable@Details@Platform@@YAPEAXPEAX@Z):
+ *
+ *   - Both exports ignore their void *argument and return the address of a
+ *     static 45-slot IPropertyValue-shaped vtable (the real DLL's tables also
+ *     carry a few trailing metadata qwords, which are not reachable through
+ *     interface dispatch and are not reproduced here).
+ *   - Slots 0..5 are tiny thunks that adjust `this` by -8 (the box object's
+ *     IPropertyValue tear-off slot is at object+8, the box identity object is
+ *     at object+0), load the identity object's default-interface vtable from
+ *     [identity] and tail-call its QI/AddRef/Release/GetIids/
+ *     GetRuntimeClassName/GetTrustLevel slot.
+ *   - Slot 6 (IPropertyValue::get_Type) is the constant value 20
+ *     (PropertyType_OtherType); slot 7 (get_IsNumericScalar) is the constant
+ *     FALSE.  Compiler-generated box classes only support generic (OtherType)
+ *     IPropertyValue semantics; typed access happens through IReference<T>.
+ *   - Slots 8..25 (scalar getters) all return E_NOTIMPL; slots 26..44 (array
+ *     getters) also return E_NOTIMPL but first store NULL into the out array
+ *     pointer.  The MSVC vccorlib140 get_Type/get_IsNumericScalar/array getter
+ *     variants for GetIBoxArrayVtable inspect the box's IIDs to discover the
+ *     element PropertyType; our clean-room implementation deliberately stops
+ *     at the generic/typed-boundary behaviour documented here.
+ *
+ * SAB2's SDL2.dll (built from the C:\dev\hdr\SDL-uwp-gl SDL2 fork) compiles
+ * `sender->CustomProperties->Insert(..., args->WindowActivationState)` into a
+ * compiler-generated box class for the Windows.UI.Core.CoreWindowActivationState
+ * enum: its constructor calls GetIBoxVtable(this) and stores the result at
+ * object+8.  Returning NULL there left a NULL interface vtable and caused the
+ * downstream page fault at libuwp+0x3130 (`movq (%rcx), %rax`, rcx = 0).
+ * ============================================================================ */
+
+#ifdef _WIN32
+#define CRT_APP_IBOX_CALL WINAPI
+#else
+#define CRT_APP_IBOX_CALL
+#endif
+
+#define CRT_APP_IBOX_E_NOTIMPL ((int32_t)0x80004001u)
+#define CRT_APP_IBOX_E_POINTER ((int32_t)0x80004003u)
+#define CRT_APP_IBOX_PROPERTY_TYPE_OTHER 20 /* Windows.Foundation.PropertyType::OtherType */
+
+typedef int32_t (CRT_APP_IBOX_CALL *crt_app_ibox_qi_fn_t)(
+    void *self, const crt_app_guid_t *riid, void **ppv);
+typedef uint32_t (CRT_APP_IBOX_CALL *crt_app_ibox_addref_fn_t)(void *self);
+typedef uint32_t (CRT_APP_IBOX_CALL *crt_app_ibox_release_fn_t)(void *self);
+typedef int32_t (CRT_APP_IBOX_CALL *crt_app_ibox_get_iids_fn_t)(
+    void *self, uint32_t *iid_count, crt_app_guid_t **iids);
+typedef int32_t (CRT_APP_IBOX_CALL *crt_app_ibox_get_name_fn_t)(void *self, void **class_name);
+typedef int32_t (CRT_APP_IBOX_CALL *crt_app_ibox_get_trust_fn_t)(
+    void *self, int32_t *trust_level);
+typedef int32_t (CRT_APP_IBOX_CALL *crt_app_ibox_get_type_fn_t)(
+    void *self, int32_t *property_type);
+typedef int32_t (CRT_APP_IBOX_CALL *crt_app_ibox_get_bool_fn_t)(void *self, uint8_t *value);
+/* All IPropertyValue scalar getters take (this, out_pointer); pointee type only
+ * matters to the caller, so the vtable slot is typed as a plain pointer. */
+typedef int32_t (CRT_APP_IBOX_CALL *crt_app_ibox_scalar_getter_fn_t)(
+    void *self, void *out_value);
+/* IPropertyValue array getters take (this, size_out, array_out). */
+typedef int32_t (CRT_APP_IBOX_CALL *crt_app_ibox_array_getter_fn_t)(
+    void *self, uint32_t *size_out, void **array_out);
+
+/* First six slots (IInspectable) of the box identity object's vtable. */
+typedef struct crt_app_ibox_inner_vtbl_s {
+    crt_app_ibox_qi_fn_t query_interface;
+    crt_app_ibox_addref_fn_t add_ref;
+    crt_app_ibox_release_fn_t release;
+    crt_app_ibox_get_iids_fn_t get_iids;
+    crt_app_ibox_get_name_fn_t get_runtime_class_name;
+    crt_app_ibox_get_trust_fn_t get_trust_level;
+} crt_app_ibox_inner_vtbl_t;
+
+/* 45-slot IPropertyValue-shaped vtable (6 IInspectable + 39 IPropertyValue). */
+typedef struct crt_app_ibox_vtbl_s {
+    crt_app_ibox_qi_fn_t query_interface;              /* slot 0  */
+    crt_app_ibox_addref_fn_t add_ref;                  /* slot 1  */
+    crt_app_ibox_release_fn_t release;                 /* slot 2  */
+    crt_app_ibox_get_iids_fn_t get_iids;               /* slot 3  */
+    crt_app_ibox_get_name_fn_t get_runtime_class_name; /* slot 4  */
+    crt_app_ibox_get_trust_fn_t get_trust_level;       /* slot 5  */
+    crt_app_ibox_get_type_fn_t get_type;               /* slot 6  */
+    crt_app_ibox_get_bool_fn_t get_is_numeric_scalar;  /* slot 7  */
+    crt_app_ibox_scalar_getter_fn_t scalar_getters[18];/* slots 8..25  */
+    crt_app_ibox_array_getter_fn_t array_getters[19];  /* slots 26..44 */
+} crt_app_ibox_vtbl_t;
+
+static void *crt_app_ibox_identity(void *self) {
+    return (void *)((char *)self - sizeof(void *));
+}
+
+static const crt_app_ibox_inner_vtbl_t *crt_app_ibox_inner_vtbl(void *self) {
+    void *identity = crt_app_ibox_identity(self);
+    if (!identity) return NULL;
+    return *(const crt_app_ibox_inner_vtbl_t *const *)identity;
+}
+
+static int32_t CRT_APP_IBOX_CALL crt_app_ibox_forward_qi(
+    void *self, const crt_app_guid_t *riid, void **ppv) {
+    void *identity = crt_app_ibox_identity(self);
+    const crt_app_ibox_inner_vtbl_t *vtbl = crt_app_ibox_inner_vtbl(self);
+    if (!vtbl || !vtbl->query_interface) {
+        if (ppv) *ppv = NULL;
+        return CRT_APP_IBOX_E_POINTER;
+    }
+    return vtbl->query_interface(identity, riid, ppv);
+}
+
+static uint32_t CRT_APP_IBOX_CALL crt_app_ibox_forward_add_ref(void *self) {
+    void *identity = crt_app_ibox_identity(self);
+    const crt_app_ibox_inner_vtbl_t *vtbl = crt_app_ibox_inner_vtbl(self);
+    if (!vtbl || !vtbl->add_ref) return 0u;
+    return vtbl->add_ref(identity);
+}
+
+static uint32_t CRT_APP_IBOX_CALL crt_app_ibox_forward_release(void *self) {
+    void *identity = crt_app_ibox_identity(self);
+    const crt_app_ibox_inner_vtbl_t *vtbl = crt_app_ibox_inner_vtbl(self);
+    if (!vtbl || !vtbl->release) return 0u;
+    return vtbl->release(identity);
+}
+
+static int32_t CRT_APP_IBOX_CALL crt_app_ibox_forward_get_iids(
+    void *self, uint32_t *iid_count, crt_app_guid_t **iids) {
+    void *identity = crt_app_ibox_identity(self);
+    const crt_app_ibox_inner_vtbl_t *vtbl = crt_app_ibox_inner_vtbl(self);
+    if (!vtbl || !vtbl->get_iids) {
+        if (iid_count) *iid_count = 0u;
+        if (iids) *iids = NULL;
+        return CRT_APP_IBOX_E_POINTER;
+    }
+    return vtbl->get_iids(identity, iid_count, iids);
+}
+
+static int32_t CRT_APP_IBOX_CALL crt_app_ibox_forward_get_runtime_class_name(
+    void *self, void **class_name) {
+    void *identity = crt_app_ibox_identity(self);
+    const crt_app_ibox_inner_vtbl_t *vtbl = crt_app_ibox_inner_vtbl(self);
+    if (!vtbl || !vtbl->get_runtime_class_name) {
+        if (class_name) *class_name = NULL;
+        return CRT_APP_IBOX_E_POINTER;
+    }
+    return vtbl->get_runtime_class_name(identity, class_name);
+}
+
+static int32_t CRT_APP_IBOX_CALL crt_app_ibox_forward_get_trust_level(
+    void *self, int32_t *trust_level) {
+    void *identity = crt_app_ibox_identity(self);
+    const crt_app_ibox_inner_vtbl_t *vtbl = crt_app_ibox_inner_vtbl(self);
+    if (!vtbl || !vtbl->get_trust_level) {
+        if (trust_level) *trust_level = 0; /* BaseTrust */
+        return CRT_APP_IBOX_E_POINTER;
+    }
+    return vtbl->get_trust_level(identity, trust_level);
+}
+
+/* Slot 6 for boxed values: generic compiler-generated box => OtherType. */
+static int32_t CRT_APP_IBOX_CALL crt_app_ibox_value_get_type(
+    void *self, int32_t *property_type) {
+    (void)self;
+    if (property_type) *property_type = CRT_APP_IBOX_PROPERTY_TYPE_OTHER;
+    return 0;
+}
+
+/* Slot 6 for boxed arrays: the MS implementation resolves the element
+ * PropertyType through the box's IIDs; without that table we fail cleanly
+ * instead of guessing (callers treat errors as "not a numeric property"). */
+static int32_t CRT_APP_IBOX_CALL crt_app_ibox_array_get_type(
+    void *self, int32_t *property_type) {
+    (void)self;
+    (void)property_type;
+    return CRT_APP_IBOX_E_NOTIMPL;
+}
+
+/* Slot 7: neither compiler-generated value boxes nor arrays are numeric scalars. */
+static int32_t CRT_APP_IBOX_CALL crt_app_ibox_get_is_numeric_scalar(
+    void *self, uint8_t *value) {
+    (void)self;
+    if (value) *value = 0u;
+    return 0;
+}
+
+static int32_t CRT_APP_IBOX_CALL crt_app_ibox_scalar_notimpl(
+    void *self, void *out_value) {
+    (void)self;
+    (void)out_value;
+    return CRT_APP_IBOX_E_NOTIMPL;
+}
+
+static int32_t CRT_APP_IBOX_CALL crt_app_ibox_array_notimpl(
+    void *self, uint32_t *size_out, void **array_out) {
+    (void)self;
+    (void)size_out;
+    if (array_out) *array_out = NULL;
+    return CRT_APP_IBOX_E_NOTIMPL;
+}
+
+static const crt_app_ibox_vtbl_t g_crt_app_ibox_vtable = {
+    crt_app_ibox_forward_qi,
+    crt_app_ibox_forward_add_ref,
+    crt_app_ibox_forward_release,
+    crt_app_ibox_forward_get_iids,
+    crt_app_ibox_forward_get_runtime_class_name,
+    crt_app_ibox_forward_get_trust_level,
+    crt_app_ibox_value_get_type,
+    crt_app_ibox_get_is_numeric_scalar,
+    {
+        /* GetUInt8 GetInt16 GetUInt16 GetInt32 GetUInt32 GetInt64 GetUInt64 */
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl,
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl,
+        crt_app_ibox_scalar_notimpl,
+        /* GetSingle GetDouble GetChar16 GetBoolean */
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl,
+        crt_app_ibox_scalar_notimpl,
+        /* GetString GetGuid GetDateTime GetTimeSpan */
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl,
+        crt_app_ibox_scalar_notimpl,
+        /* GetPoint GetSize GetRect */
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl
+    },
+    {
+        /* 19 array getters: GetUInt8Array .. GetRectArray */
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl
+    }
+};
+
+static const crt_app_ibox_vtbl_t g_crt_app_ibox_array_vtable = {
+    crt_app_ibox_forward_qi,
+    crt_app_ibox_forward_add_ref,
+    crt_app_ibox_forward_release,
+    crt_app_ibox_forward_get_iids,
+    crt_app_ibox_forward_get_runtime_class_name,
+    crt_app_ibox_forward_get_trust_level,
+    crt_app_ibox_array_get_type,
+    crt_app_ibox_get_is_numeric_scalar,
+    {
+        /* 18 scalar getters: E_NOTIMPL (boxed arrays are not scalars). */
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl,
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl,
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl,
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl,
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl,
+        crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl, crt_app_ibox_scalar_notimpl
+    },
+    {
+        /* 19 array getters: need the element PropertyType, so fail cleanly and
+         * clear the out pointer.  Callers unbox arrays through
+         * IReferenceArray<T>::get_Value, which the compiler generates. */
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl, crt_app_ibox_array_notimpl,
+        crt_app_ibox_array_notimpl
+    }
+};
+
+void *crt_app_ibox_vtable(void) {
+    return (void *)&g_crt_app_ibox_vtable;
+}
+
+void *crt_app_ibox_array_vtable(void) {
+    return (void *)&g_crt_app_ibox_array_vtable;
+}
+
+void *crt_app_ibox_vtable_slot(void *vtable, uint32_t index) {
+    void *slot = NULL;
+    if (!vtable || index >= CRT_APP_IBOX_VTABLE_SLOT_COUNT) return NULL;
+    crt_app_copy_bytes(&slot, (const uint8_t *)vtable + (size_t)index * sizeof(void *), sizeof(slot));
+    return slot;
+}

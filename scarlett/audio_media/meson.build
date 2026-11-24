@@ -21,6 +21,8 @@ if is_windows_pe
     ['Bink2Scarlett', 'bink2_scarlett_pe.c', 'Bink2Scarlett.def'],
     ['amd_fidelityfx_loader_xbox', 'ffx_loader_xbox_pe.c', 'amd_fidelityfx_loader_xbox.def'],
     ['amd_fidelityfx_upscaler_xbox', 'ffx_upscaler_xbox_pe.c', 'amd_fidelityfx_upscaler_xbox.def'],
+    ['xapu', 'xapu_pe.c', 'xapu.def'],
+    ['chad', 'chad_pe.c', 'chad.def'],
   ]
   foreach shim : pe_shims
     shared_library(shim[0],
@@ -75,6 +77,8 @@ else
       'bink2_scarlett_pe.c',
       'ffx_loader_xbox_pe.c',
       'ffx_upscaler_xbox_pe.c',
+      'xapu_pe.c',
+      'chad_pe.c',
       include_directories: [scarlett_inc, include_directories('.')],
       install: false,
     )

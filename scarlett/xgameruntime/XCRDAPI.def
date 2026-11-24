@@ -1,0 +1,13 @@
+LIBRARY XCRDAPI.dll
+EXPORTS
+    DStorageGetFactory @1
+    XcrdInitialize
+    XcrdShutdown
+    XcrdReportCrash
+    XcrdSetDumpMode
+    XcrdAddUserData
+    XcrdAddAttachment
+    XcrdWriteDiagnosticReport
+    XcrdRegisterCrashCallback
+    XcrdUnregisterCrashCallback
+    XcrdGetStatus

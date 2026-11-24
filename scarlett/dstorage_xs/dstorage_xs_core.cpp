@@ -1,11 +1,14 @@
 #include "dstorage_xs_core.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <filesystem>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -71,11 +74,171 @@ bool read_bcpack_header_telemetry(
     return false;
 }
 
+bool iequals_ascii(std::string_view a, std::string_view b) noexcept {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+        const unsigned char ca = static_cast<unsigned char>(a[i]);
+        const unsigned char cb = static_cast<unsigned char>(b[i]);
+        if (std::tolower(ca) != std::tolower(cb)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool split_normalized_components(
+    std::string_view rel,
+    std::vector<std::string> &out) noexcept {
+    out.clear();
+    size_t pos = 0;
+    while (pos < rel.size()) {
+        while (pos < rel.size() && (rel[pos] == '\\' || rel[pos] == '/')) {
+            ++pos;
+        }
+        if (pos >= rel.size()) {
+            break;
+        }
+        size_t next = pos;
+        while (next < rel.size() && rel[next] != '\\' && rel[next] != '/') {
+            ++next;
+        }
+        std::string_view comp = rel.substr(pos, next - pos);
+        pos = next;
+        if (comp == ".") {
+            continue;
+        }
+        if (comp == "..") {
+            if (out.empty()) {
+                return false;
+            }
+            out.pop_back();
+            continue;
+        }
+        out.emplace_back(comp);
+    }
+    return true;
+}
+
+bool resolve_case_insensitive_under(
+    const std::filesystem::path &base,
+    const std::vector<std::string> &components,
+    std::filesystem::path &out_path) noexcept {
+    std::error_code ec;
+    if (!std::filesystem::exists(base, ec)) {
+        return false;
+    }
+    std::filesystem::path cur = base;
+    for (const std::string &comp : components) {
+        std::filesystem::path direct = cur / comp;
+        if (std::filesystem::exists(direct, ec)) {
+            cur = std::move(direct);
+            continue;
+        }
+        bool matched = false;
+        std::filesystem::directory_iterator it(cur, ec);
+        if (ec) {
+            return false;
+        }
+        for (const auto &entry : it) {
+            const std::string name = entry.path().filename().string();
+            if (iequals_ascii(name, comp)) {
+                cur = entry.path();
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            return false;
+        }
+    }
+    if (!std::filesystem::is_regular_file(cur, ec)) {
+        return false;
+    }
+    out_path = std::move(cur);
+    return true;
+}
+
+std::string resolve_dstorage_path(const std::string &input) noexcept {
+    if (input.empty()) {
+        return {};
+    }
+
+    std::string_view sv(input);
+    bool is_xbox_vfs = false;
+    char drive_letter = '\0';
+    if (sv.size() >= 4 && (sv.substr(0, 4) == "\\\\?\\" || sv.substr(0, 4) == "\\\\.\\")) {
+        sv.remove_prefix(4);
+    }
+    if (sv.size() >= 5 && iequals_ascii(sv.substr(0, 5), "GAME:")) {
+        sv.remove_prefix(5);
+        is_xbox_vfs = true;
+    } else if (sv.size() >= 2 &&
+               (sv[0] == 'D' || sv[0] == 'd' || sv[0] == 'G' || sv[0] == 'g') &&
+               sv[1] == ':') {
+        drive_letter = static_cast<char>(std::tolower(static_cast<unsigned char>(sv[0])));
+        sv.remove_prefix(2);
+        is_xbox_vfs = true;
+    }
+
+    if (is_xbox_vfs) {
+        std::vector<std::string> comps;
+        if (!split_normalized_components(sv, comps) || comps.empty()) {
+            return {};
+        }
+
+        std::vector<std::filesystem::path> roots;
+        if (const char *ov = std::getenv("PROTON_XBOX_OVERLAY_ROOT"); ov != nullptr && ov[0] != '\0') {
+            roots.emplace_back(ov);
+        }
+        if (const char *ov2 = std::getenv("SCARLETT_VFS_OVERLAY_DIR"); ov2 != nullptr && ov2[0] != '\0') {
+            roots.emplace_back(ov2);
+        }
+        if (const char *pfx = std::getenv("WINEPREFIX"); pfx != nullptr && pfx[0] != '\0') {
+            if (drive_letter == 'g') {
+                roots.emplace_back(std::filesystem::path(pfx) / "dosdevices" / "g:");
+            }
+        }
+        if (const char *gr = std::getenv("PROTON_XBOX_GAME_ROOT"); gr != nullptr && gr[0] != '\0') {
+            roots.emplace_back(gr);
+        }
+        if (const char *gr2 = std::getenv("SCARLETT_GAME_ROOT"); gr2 != nullptr && gr2[0] != '\0') {
+            roots.emplace_back(gr2);
+        }
+        if (const char *pfx = std::getenv("WINEPREFIX"); pfx != nullptr && pfx[0] != '\0') {
+            roots.emplace_back(std::filesystem::path(pfx) / "dosdevices" / "d:");
+            if (drive_letter != 'g') {
+                roots.emplace_back(std::filesystem::path(pfx) / "dosdevices" / "g:");
+            }
+        }
+        std::error_code ec;
+        std::filesystem::path cwd = std::filesystem::current_path(ec);
+        if (!ec && !cwd.empty()) {
+            roots.push_back(std::move(cwd));
+        }
+
+        for (const auto &root : roots) {
+            std::filesystem::path resolved;
+            if (resolve_case_insensitive_under(root, comps, resolved)) {
+                return resolved.string();
+            }
+        }
+        return {};
+    }
+
+    std::string normalized = input;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    return normalized;
+}
+
 } // namespace
 
 DStorageManager &DStorageManager::instance() {
-    static DStorageManager inst;
-    return inst;
+    /* Intentional immortal singleton: Wine NtTerminateProcess/exit() kills threads
+     * before __cxa_finalize, which would otherwise std::terminate() in ~thread(). */
+    static DStorageManager *inst = new DStorageManager();
+    return *inst;
 }
 
 DStorageManager::DStorageManager() = default;
@@ -100,7 +263,9 @@ void DStorageManager::stop_scheduler() {
             return;
         }
         sched_stop_ = true;
+        pe_signals_stop_ = true;
         cv_sched_.notify_all();
+        cv_pe_signal_.notify_all();
     }
     if (sched_thread_.joinable()) {
         sched_thread_.join();
@@ -124,12 +289,10 @@ void DStorageManager::reset_all() {
         delete kv.second;
     }
     status_arrays_.clear();
-    for (auto &kv : files_) {
-        if (kv.second.fd >= 0) {
-            ::close(kv.second.fd);
-        }
-    }
     files_.clear();
+    pending_pe_signals_.clear();
+    pe_signals_stop_ = false;
+    seen_opt_combos_mask_ = 0u;
     unload_bcpack_plugin_locked();
     io_engine_.shutdown();
     decomp_pool_.shutdown();
@@ -146,6 +309,7 @@ scarlett_hresult_t DStorageManager::init_module(scarlett_unix_init_params_t &par
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
+    pe_signals_stop_ = false;
     const char *env_strict = std::getenv(SCARLETT_ENV_STRICT);
     if (env_strict != nullptr && env_strict[0] == '1') {
         strict_mode_ = 1u;
@@ -278,7 +442,12 @@ scarlett_hresult_t DStorageManager::open_file(scarlett_dstorage_open_file_params
 
     const char *raw = reinterpret_cast<const char *>(
         static_cast<uintptr_t>(params.path_utf8_addr));
-    std::string path(raw, params.path_utf8_len);
+    std::string raw_path(raw, params.path_utf8_len);
+    std::string path = resolve_dstorage_path(raw_path);
+    if (path.empty()) {
+        params.out_status = SCARLETT_E_DSTORAGE_FILE_NOT_OPEN;
+        return params.out_status;
+    }
 
     int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
@@ -295,15 +464,15 @@ scarlett_hresult_t DStorageManager::open_file(scarlett_dstorage_open_file_params
 
     std::lock_guard<std::mutex> lock(mutex_);
     const uint64_t h = next_handle_++;
-    OpenFile f{};
-    f.handle = h;
-    f.fd = fd;
-    f.size_bytes = static_cast<uint64_t>(st.st_size);
-    f.open_flags = params.open_flags;
+    auto f = std::make_shared<OpenFile>();
+    f->handle = h;
+    f->fd = fd;
+    f->size_bytes = static_cast<uint64_t>(st.st_size);
+    f->open_flags = params.open_flags;
     files_.emplace(h, f);
 
     params.out_file_handle = h;
-    params.out_file_size = f.size_bytes;
+    params.out_file_size = f->size_bytes;
     params.out_status = SCARLETT_OK;
     return SCARLETT_OK;
 }
@@ -314,9 +483,6 @@ scarlett_hresult_t DStorageManager::close_file(scarlett_dstorage_close_file_para
     if (it == files_.end()) {
         params.out_status = SCARLETT_E_DSTORAGE_INVALID_FILE_HANDLE;
         return params.out_status;
-    }
-    if (it->second.fd >= 0) {
-        ::close(it->second.fd);
     }
     files_.erase(it);
     params.out_status = SCARLETT_OK;
@@ -330,8 +496,8 @@ scarlett_hresult_t DStorageManager::get_file_info(scarlett_dstorage_file_info_pa
         params.out_status = SCARLETT_E_DSTORAGE_INVALID_FILE_HANDLE;
         return params.out_status;
     }
-    params.out_file_size_bytes = it->second.size_bytes;
-    params.out_open_flags = it->second.open_flags;
+    params.out_file_size_bytes = it->second->size_bytes;
+    params.out_open_flags = it->second->open_flags;
     params.out_status = SCARLETT_OK;
     return SCARLETT_OK;
 }
@@ -447,6 +613,19 @@ void DStorageManager::record_queue_error_locked(
     }
     ++q.error_record.FailureCount;
     q.batch_last_hr = hr;
+    std::fprintf(
+        stderr,
+        "[scarlett:dstorage_xs] queue error: q=0x%llx cmd=%u hr=0x%08x Zlib=%u Bcpack=%u Swizzle=%u src=%u dst=%u offset=0x%llx\n",
+        static_cast<unsigned long long>(q.handle),
+        static_cast<unsigned>(cmd_type),
+        static_cast<unsigned>(hr),
+        static_cast<unsigned>(req.Options.ZlibDecompress),
+        static_cast<unsigned>(req.Options.BcpackMode),
+        static_cast<unsigned>(req.Options.SwizzleMode),
+        req.SourceSize,
+        req.DestinationSize,
+        static_cast<unsigned long long>(req.FileOffset));
+    std::fflush(stderr);
 }
 
 void DStorageManager::flush_queue_pending_locked(QueueState &q, bool is_auto_submit) {
@@ -492,6 +671,10 @@ scarlett_hresult_t DStorageManager::enqueue_request(
         params.out_status = SCARLETT_E_INVALIDARG;
         return params.out_status;
     }
+    if (q->pending_requests >= q->capacity) {
+        params.out_status = SCARLETT_E_FAIL;
+        return params.out_status;
+    }
 
     DSTORAGE_REQUEST req{};
     req.Options.AsUInt64 = params.options.raw;
@@ -505,6 +688,24 @@ scarlett_hresult_t DStorageManager::enqueue_request(
     req.Name = reinterpret_cast<const char *>(static_cast<uintptr_t>(params.name_utf8_addr));
     req.SwizzleSubresourceIndex = params.swizzle_subresource_index;
     req.SwizzleReserved = params.swizzle_reserved;
+
+    const uint32_t opt_key =
+        (static_cast<uint32_t>(req.Options.ZlibDecompress) << 4) |
+        static_cast<uint32_t>(req.Options.BcpackMode);
+    const uint32_t opt_bit = 1u << opt_key;
+    if ((seen_opt_combos_mask_ & opt_bit) == 0u) {
+        seen_opt_combos_mask_ |= opt_bit;
+        std::fprintf(
+            stderr,
+            "[scarlett:dstorage_xs] first EnqueueRequest options: ZlibDecompress=%u BcpackMode=%u SwizzleMode=%u SourceType=%u src_size=%u dst_size=%u\n",
+            static_cast<unsigned>(req.Options.ZlibDecompress),
+            static_cast<unsigned>(req.Options.BcpackMode),
+            static_cast<unsigned>(req.Options.SwizzleMode),
+            static_cast<unsigned>(req.Options.SourceType),
+            req.SourceSize,
+            req.DestinationSize);
+        std::fflush(stderr);
+    }
 
     PendingCmd cmd{};
     cmd.type = DSTORAGE_COMMAND_TYPE_REQUEST;
@@ -531,6 +732,15 @@ scarlett_hresult_t DStorageManager::enqueue_status(
         params.out_status = SCARLETT_E_INVALIDARG;
         return params.out_status;
     }
+    QueueState *q = qit->second;
+    if (q->closed) {
+        params.out_status = SCARLETT_E_INVALIDARG;
+        return params.out_status;
+    }
+    if (q->pending_requests >= q->capacity) {
+        params.out_status = SCARLETT_E_FAIL;
+        return params.out_status;
+    }
     if (params.index >= sit->second->capacity) {
         params.out_status = SCARLETT_E_DSTORAGE_INDEX_BOUND;
         return params.out_status;
@@ -543,7 +753,13 @@ scarlett_hresult_t DStorageManager::enqueue_status(
     cmd.type = DSTORAGE_COMMAND_TYPE_STATUS;
     cmd.status_array_handle = params.status_array_handle;
     cmd.status_index = params.index;
-    qit->second->pending.push_back(cmd);
+    q->pending.push_back(cmd);
+    ++q->pending_requests;
+
+    if (q->pending_requests >= q->auto_submit_threshold) {
+        flush_queue_pending_locked(*q, true);
+        params.out_auto_submitted = 1u;
+    }
 
     params.out_status = SCARLETT_OK;
     return SCARLETT_OK;
@@ -558,13 +774,28 @@ scarlett_hresult_t DStorageManager::enqueue_signal(
         params.out_status = SCARLETT_E_INVALIDARG;
         return params.out_status;
     }
+    QueueState *q = qit->second;
+    if (q->closed) {
+        params.out_status = SCARLETT_E_INVALIDARG;
+        return params.out_status;
+    }
+    if (q->pending_requests >= q->capacity) {
+        params.out_status = SCARLETT_E_FAIL;
+        return params.out_status;
+    }
 
     PendingCmd cmd{};
     cmd.type = DSTORAGE_COMMAND_TYPE_SIGNAL;
     cmd.signal_addr = params.fence_or_event_addr;
     cmd.signal_value = params.value;
-    cmd.signal_is_event = (params.is_event != 0u);
-    qit->second->pending.push_back(cmd);
+    cmd.signal_mode = params.is_event;
+    q->pending.push_back(cmd);
+    ++q->pending_requests;
+
+    if (q->pending_requests >= q->auto_submit_threshold) {
+        flush_queue_pending_locked(*q, true);
+        params.out_auto_submitted = 1u;
+    }
 
     params.out_status = SCARLETT_OK;
     return SCARLETT_OK;
@@ -696,7 +927,8 @@ scarlett_hresult_t DStorageManager::execute_single_request(
         return hr;
     }
 
-    /* Resolve file descriptor if SourceType == File */
+    /* Resolve file descriptor if SourceType == File (hold shared_ptr across I/O to prevent close_file race) */
+    std::shared_ptr<OpenFile> file_ref;
     int fd = -1;
     uint64_t file_size = 0u;
     if (req.Options.SourceType == DSTORAGE_REQUEST_SOURCE_FILE) {
@@ -705,10 +937,11 @@ scarlett_hresult_t DStorageManager::execute_single_request(
         if (fit == files_.end()) {
             return SCARLETT_E_DSTORAGE_INVALID_FILE_HANDLE;
         }
-        fd = fit->second.fd;
-        file_size = fit->second.size_bytes;
+        file_ref = fit->second;
+        fd = file_ref->fd;
+        file_size = file_ref->size_bytes;
         if (req.FileOffset > file_size ||
-            req.FileOffset + req.SourceSize > file_size) {
+            static_cast<uint64_t>(req.SourceSize) > file_size - req.FileOffset) {
             return SCARLETT_E_DSTORAGE_END_OF_FILE;
         }
     }
@@ -787,6 +1020,18 @@ scarlett_hresult_t DStorageManager::execute_single_request(
             }
         }
         if (dec == nullptr) {
+            uint32_t magic = 0u;
+            if (src_ptr != nullptr && req.SourceSize >= 4u) {
+                std::memcpy(&magic, src_ptr, 4u);
+            }
+            std::fprintf(
+                stderr,
+                "[scarlett:dstorage_xs] BCPack request without plugin: BcpackMode=%u src_size=%u dst_size=%u magic=0x%08x\n",
+                static_cast<unsigned>(req.Options.BcpackMode),
+                req.SourceSize,
+                req.DestinationSize,
+                magic);
+            std::fflush(stderr);
             return SCARLETT_ERR_DSTORAGE_BCPACK_PLUGIN_MISSING;
         }
         hr = dec->decode(
@@ -910,16 +1155,26 @@ void DStorageManager::scheduler_loop() {
                 cmd_hr = execute_single_request(item.cmd.request, bytes);
             } else if (item.cmd.type == DSTORAGE_COMMAND_TYPE_SIGNAL &&
                        item.cmd.signal_addr != 0u) {
-                if (item.cmd.signal_is_event) {
+                if (item.cmd.signal_mode == SCARLETT_DSTORAGE_SIGNAL_MODE_HOST_EVENT) {
                     auto *ev = reinterpret_cast<std::atomic<uint32_t> *>(
                         static_cast<uintptr_t>(item.cmd.signal_addr));
                     ev->store(1u, std::memory_order_release);
                     ev->notify_all();
-                } else {
+                } else if (item.cmd.signal_mode == SCARLETT_DSTORAGE_SIGNAL_MODE_HOST_FENCE) {
                     auto *fence = reinterpret_cast<std::atomic<uint64_t> *>(
                         static_cast<uintptr_t>(item.cmd.signal_addr));
                     fence->store(item.cmd.signal_value, std::memory_order_release);
                     fence->notify_all();
+                } else {
+                    /* PE_FENCE / PE_EVENT: NEVER dereference ID3D12Fence* or Win32 HANDLE in Unix!
+                     * Hand off to PE completion thread via pending_pe_signals_. */
+                    std::lock_guard<std::mutex> sig_lock(mutex_);
+                    scarlett_dstorage_pe_signal_item_t sig{};
+                    sig.target_addr = item.cmd.signal_addr;
+                    sig.value = item.cmd.signal_value;
+                    sig.mode = item.cmd.signal_mode;
+                    pending_pe_signals_.push_back(sig);
+                    cv_pe_signal_.notify_one();
                 }
             }
         }
@@ -1056,6 +1311,7 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
         const uint8_t *mem_ptr = nullptr;
     };
     std::vector<BatchSrcSlice> slices(params.request_count);
+    std::vector<std::shared_ptr<OpenFile>> held_files;
     uint64_t total_file_read_bytes = 0u;
     uint64_t total_dst_bytes = 0u;
 
@@ -1081,12 +1337,13 @@ scarlett_hresult_t DStorageManager::submit_batch(scarlett_dstorage_submit_batch_
                     params.out_status = SCARLETT_E_DSTORAGE_INVALID_FILE_HANDLE;
                     return params.out_status;
                 }
-                if (reqs[i].FileOffset > fit->second.size_bytes ||
-                    reqs[i].SourceSize > fit->second.size_bytes - reqs[i].FileOffset) {
+                if (reqs[i].FileOffset > fit->second->size_bytes ||
+                    reqs[i].SourceSize > fit->second->size_bytes - reqs[i].FileOffset) {
                     params.out_status = SCARLETT_E_DSTORAGE_END_OF_FILE;
                     return params.out_status;
                 }
-                slices[i].fd = fit->second.fd;
+                held_files.push_back(fit->second);
+                slices[i].fd = fit->second->fd;
                 slices[i].offset = reqs[i].FileOffset;
                 slices[i].size = reqs[i].SourceSize;
                 slices[i].staging_offset = total_file_read_bytes;
@@ -1330,7 +1587,43 @@ scarlett_hresult_t DStorageManager::report_stub(scarlett_dstorage_report_stub_pa
     if (stub_sink_ != nullptr) {
         const scarlett_stub_action_t sink_action = stub_sink_(&params.ctx, stub_sink_user_data_);
         params.out_action = static_cast<uint32_t>(sink_action);
+    } else {
+        std::fprintf(
+            stderr,
+            "[scarlett:dstorage_xs:stub] dll=%s fn=%s caller=0x%llx rcx=0x%llx rdx=0x%llx r8=0x%llx r9=0x%llx\n",
+            params.ctx.dll_name,
+            params.ctx.symbol_name,
+            static_cast<unsigned long long>(params.ctx.return_address),
+            static_cast<unsigned long long>(params.ctx.rcx),
+            static_cast<unsigned long long>(params.ctx.rdx),
+            static_cast<unsigned long long>(params.ctx.r8),
+            static_cast<unsigned long long>(params.ctx.r9));
     }
+    params.out_status = SCARLETT_OK;
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t DStorageManager::wait_signals(scarlett_dstorage_wait_signals_params_t &params) {
+    params.out_count = 0u;
+    params.out_stop = 0u;
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (params.blocking != 0u) {
+        cv_pe_signal_.wait(lock, [&]() {
+            return !pending_pe_signals_.empty() || pe_signals_stop_;
+        });
+    }
+    if (pe_signals_stop_ && pending_pe_signals_.empty()) {
+        params.out_stop = 1u;
+        params.out_status = SCARLETT_OK;
+        return SCARLETT_OK;
+    }
+    uint32_t count = 0u;
+    while (!pending_pe_signals_.empty() && count < SCARLETT_DSTORAGE_PE_SIGNAL_BATCH_MAX) {
+        params.items[count++] = pending_pe_signals_.front();
+        pending_pe_signals_.pop_front();
+    }
+    params.out_count = count;
+    params.out_stop = pe_signals_stop_ ? 1u : 0u;
     params.out_status = SCARLETT_OK;
     return SCARLETT_OK;
 }

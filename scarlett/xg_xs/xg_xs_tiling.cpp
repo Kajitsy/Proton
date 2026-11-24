@@ -51,65 +51,121 @@ bool checked_add_u64(uint64_t a, uint64_t b, uint64_t& out) noexcept {
 FormatMetrics query_format_metrics(uint32_t xg_format) noexcept {
     switch (xg_format) {
         // 8 bpp (1 byte/texel)
+        case 60: // R8_TYPELESS
         case XG_FORMAT_R8_UNORM:
         case XG_FORMAT_R8_UINT:
+        case 63: // R8_SNORM
+        case 64: // R8_SINT
+        case 65: // A8_UNORM
             return {1u, 0u, 1u, 1u, false, true};
 
         // 16 bpp (2 bytes/texel)
+        case 48: // R8G8_TYPELESS
         case XG_FORMAT_R8G8_UNORM:
+        case 50: // R8G8_UINT
+        case 51: // R8G8_SNORM
+        case 52: // R8G8_SINT
+        case 53: // R16_TYPELESS
         case XG_FORMAT_R16_FLOAT:
         case XG_FORMAT_D16_UNORM:
         case XG_FORMAT_R16_UNORM:
         case XG_FORMAT_R16_UINT:
+        case 58: // R16_SNORM
+        case 59: // R16_SINT
+        case 85: // B5G6R5_UNORM
+        case 86: // B5G5R5A1_UNORM
+        case 115: // B4G4R4A4_UNORM
             return {2u, 1u, 1u, 1u, false, true};
 
         // 32 bpp (4 bytes/texel)
+        case 23: // R10G10B10A2_TYPELESS
         case XG_FORMAT_R10G10B10A2_UNORM:
+        case 25: // R10G10B10A2_UINT
+        case 26: // R11G11B10_FLOAT
+        case 27: // R8G8B8A8_TYPELESS
         case XG_FORMAT_R8G8B8A8_UNORM:
         case XG_FORMAT_R8G8B8A8_UNORM_SRGB:
         case XG_FORMAT_R8G8B8A8_UINT:
-        case XG_FORMAT_B8G8R8A8_UNORM:
+        case 31: // R8G8B8A8_SNORM
+        case 32: // R8G8B8A8_SINT
+        case 33: // R16G16_TYPELESS
         case XG_FORMAT_R16G16_FLOAT:
+        case 35: // R16G16_UNORM
+        case 36: // R16G16_UINT
+        case 37: // R16G16_SNORM
+        case 38: // R16G16_SINT
+        case 39: // R32_TYPELESS
         case XG_FORMAT_D32_FLOAT:
         case XG_FORMAT_R32_FLOAT:
         case XG_FORMAT_R32_UINT:
+        case 43: // R32_SINT
+        case 44: // R24G8_TYPELESS
         case XG_FORMAT_D24_UNORM_S8_UINT:
+        case 46: // R24_UNORM_X8_TYPELESS
+        case 47: // X24_TYPELESS_G8_UINT
+        case 67: // R9G9B9E5_SHAREDEXP
+        case XG_FORMAT_B8G8R8A8_UNORM:
+        case 88: // B8G8R8X8_UNORM
+        case 90: // B8G8R8A8_TYPELESS
+        case 91: // B8G8R8A8_UNORM_SRGB
+        case 92: // B8G8R8X8_TYPELESS
+        case 93: // B8G8R8X8_UNORM_SRGB
             return {4u, 2u, 1u, 1u, false, true};
 
         // 64 bpp (8 bytes/texel)
+        case 9: // R16G16B16A16_TYPELESS
         case XG_FORMAT_R16G16B16A16_FLOAT:
         case XG_FORMAT_R16G16B16A16_UNORM:
+        case 12: // R16G16B16A16_UINT
+        case 13: // R16G16B16A16_SNORM
+        case 14: // R16G16B16A16_SINT
+        case 15: // R32G32_TYPELESS
         case XG_FORMAT_R32G32_FLOAT:
         case XG_FORMAT_R32G32_UINT:
+        case 18: // R32G32_SINT
+        case 19: // R32G8X24_TYPELESS
+        case 20: // D32_FLOAT_S8X24_UINT
+        case 21: // R32_FLOAT_X8X24_TYPELESS
+        case 22: // X32_TYPELESS_G8X24_UINT
             return {8u, 3u, 1u, 1u, false, true};
 
         // 128 bpp (16 bytes/texel)
+        case 1: // R32G32B32A32_TYPELESS
         case XG_FORMAT_R32G32B32A32_FLOAT:
         case XG_FORMAT_R32G32B32A32_UINT:
+        case 4: // R32G32B32A32_SINT
             return {16u, 4u, 1u, 1u, false, true};
 
         // BC1 / BC4: 4x4 block = 8 bytes (64 bpe)
+        case 70: // BC1_TYPELESS
         case XG_FORMAT_BC1_UNORM:
         case XG_FORMAT_BC1_UNORM_SRGB:
+        case 79: // BC4_TYPELESS
         case XG_FORMAT_BC4_UNORM:
         case XG_FORMAT_BC4_SNORM:
             return {8u, 3u, 4u, 4u, true, true};
 
         // BC2 / BC3 / BC5 / BC6H / BC7: 4x4 block = 16 bytes (128 bpe)
+        case 73: // BC2_TYPELESS
         case XG_FORMAT_BC2_UNORM:
         case XG_FORMAT_BC2_UNORM_SRGB:
+        case 76: // BC3_TYPELESS
         case XG_FORMAT_BC3_UNORM:
         case XG_FORMAT_BC3_UNORM_SRGB:
+        case 82: // BC5_TYPELESS
         case XG_FORMAT_BC5_UNORM:
         case XG_FORMAT_BC5_SNORM:
+        case 94: // BC6H_TYPELESS
         case XG_FORMAT_BC6H_UF16:
         case XG_FORMAT_BC6H_SF16:
+        case 97: // BC7_TYPELESS
         case XG_FORMAT_BC7_UNORM:
         case XG_FORMAT_BC7_UNORM_SRGB:
             return {16u, 4u, 4u, 4u, true, true};
 
         default:
-            return {0u, 0u, 0u, 0u, false, false};
+            // Safe 32bpp fallback so unexpected/Xbox-private DXGI_FORMATs never fail
+            return {4u, 2u, 1u, 1u, false, true};
     }
 }
 

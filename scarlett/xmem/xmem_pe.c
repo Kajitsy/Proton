@@ -83,6 +83,23 @@ SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemAllocatePhysicalPage
     if (out_alloc_id != NULL) {
         *out_alloc_id = params.out_alloc_id;
     }
+    {
+        static uint32_t g_phys_alloc_seq = 0u;
+        uint32_t seq = __atomic_add_fetch(&g_phys_alloc_seq, 1u, __ATOMIC_RELAXED);
+        uint64_t total_bytes = page_count * page_size_bytes;
+        if (total_bytes >= (UINT64_C(4) << 20) || seq <= 16u || (seq % 100u) == 0u ||
+            scarlett_failed(params.out_status)) {
+            xmem_pe_log_diag("[scarlett-xmem-phys-alloc]",
+                             "xmem.dll",
+                             "XMemAllocatePhysicalPages",
+                             (uint64_t)(uintptr_t)__builtin_return_address(0),
+                             total_bytes,
+                             (uint64_t)cache_attr,
+                             (uint64_t)flags,
+                             params.out_alloc_id,
+                             params.out_status);
+        }
+    }
     return params.out_status;
 }
 
@@ -104,47 +121,162 @@ SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemFreePhysicalPages(
     if (scarlett_failed(rc)) {
         return rc;
     }
+    {
+        static uint32_t g_phys_free_seq = 0u;
+        uint32_t seq = __atomic_add_fetch(&g_phys_free_seq, 1u, __ATOMIC_RELAXED);
+        uint64_t total_bytes = page_count * page_size_bytes;
+        if (total_bytes >= (UINT64_C(4) << 20) || seq <= 16u || (seq % 100u) == 0u ||
+            scarlett_failed(params.out_status)) {
+            xmem_pe_log_diag("[scarlett-xmem-phys-free]",
+                             "xmem.dll",
+                             "XMemFreePhysicalPages",
+                             (uint64_t)(uintptr_t)__builtin_return_address(0),
+                             total_bytes,
+                             page_count,
+                             page_size_bytes,
+                             (uint64_t)seq,
+                             params.out_status);
+        }
+    }
     return params.out_status;
 }
 
-SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemVirtualAlloc(
-    uint64_t requested_base,
+SCARLETT_XMEM_API void * SCARLETT_XMEM_CALL XMemVirtualAlloc(
+    void *requested_base,
     uint64_t size_bytes,
     uint32_t alloc_type,
-    uint32_t protect,
-    uint64_t *out_base) {
-    if (out_base == NULL) {
-        return SCARLETT_E_POINTER;
+    uint32_t arg4,
+    uint64_t arg5) {
+    if ((alloc_type & (XMEM_MEM_RESERVE_PLACEHOLDER | XMEM_MEM_REPLACE_PLACEHOLDER)) != 0u) {
+        uint32_t win32_alloc = 0u;
+        uint32_t win32_prot = XMEM_PAGE_NOACCESS;
+        if ((alloc_type & XMEM_MEM_RESERVE_PLACEHOLDER) != 0u) {
+            win32_alloc = XMEM_MEM_RESERVE | XMEM_MEM_RESERVE_PLACEHOLDER;
+            win32_prot = XMEM_PAGE_NOACCESS;
+        } else {
+            win32_alloc = XMEM_MEM_RESERVE | XMEM_MEM_COMMIT | XMEM_MEM_REPLACE_PLACEHOLDER;
+            win32_prot = XMEM_PAGE_READWRITE;
+        }
+        void *va2_res = xmem_pe_virtual_alloc2(
+            requested_base, (size_t)size_bytes, win32_alloc, win32_prot);
+        int32_t va2_status = (va2_res != NULL) ? 0 : (int32_t)xmem_pe_get_last_error();
+        xmem_pe_log_diag(va2_res != NULL ? "[scarlett-xmem-placeholder]" : "[scarlett-xmem-fail]",
+                         "xmem.dll",
+                         "XMemVirtualAlloc",
+                         (uint64_t)(uintptr_t)__builtin_return_address(0),
+                         (uint64_t)(uintptr_t)requested_base,
+                         size_bytes,
+                         (uint64_t)alloc_type,
+                         (uint64_t)(uintptr_t)va2_res,
+                         va2_status);
+        if (va2_res == NULL) {
+            return NULL;
+        }
+        if (arg5 > UINT64_C(0x10000) && (arg5 & 7u) == 0u) {
+            *(uint64_t *)(uintptr_t)arg5 = (uint64_t)(uintptr_t)va2_res;
+        }
+        return va2_res;
     }
-    *out_base = 0u;
+
+    uint32_t combined_prot = arg4 | (uint32_t)arg5;
+    uint32_t cache_bits = combined_prot & (XMEM_PAGE_NOCACHE | XMEM_PAGE_WRITECOMBINE);
+    uint32_t low_prot4 = arg4 & UINT32_C(0xF);
+    uint32_t low_prot5 = (uint32_t)arg5 & UINT32_C(0xF);
+
+    uint32_t protect = XMEM_PAGE_READWRITE;
+    if ((arg5 & XMEM_PAGE_READWRITE) != 0u || (arg4 & XMEM_PAGE_READWRITE) != 0u ||
+        low_prot5 == UINT32_C(0x3) || low_prot4 == UINT32_C(0x3)) {
+        protect = XMEM_PAGE_READWRITE | cache_bits;
+    } else if (low_prot5 == XMEM_PAGE_READONLY || low_prot4 == XMEM_PAGE_READONLY) {
+        protect = XMEM_PAGE_READONLY | cache_bits;
+    } else {
+        protect = XMEM_PAGE_READWRITE | cache_bits;
+    }
 
     scarlett_mem_region_t region = SCARLETT_MEM_REGION_UNKNOWN;
     if ((alloc_type & XMEM_MEM_GRAPHICS) != 0u) {
         region = SCARLETT_MEM_REGION_GRAPHICS;
     } else if ((alloc_type & XMEM_MEM_TITLE) != 0u) {
         region = SCARLETT_MEM_REGION_TITLE;
+    } else if (requested_base == NULL) {
+        if ((alloc_type & XMEM_MEM_PHYSICAL) != 0u ||
+            (combined_prot & (XMEM_PAGE_GPU_COHERENT | XMEM_PAGE_WRITECOMBINE)) != 0u) {
+            region = SCARLETT_MEM_REGION_GRAPHICS;
+        } else {
+            region = SCARLETT_MEM_REGION_TITLE;
+        }
     }
 
     scarlett_xmem_reserve_params_t params;
     xmem_pe_zero(&params, sizeof(params));
-    params.requested_base = requested_base;
+    params.requested_base = (uint64_t)(uintptr_t)requested_base;
     params.size_bytes = size_bytes;
     params.region = (uint32_t)region;
     params.flags = (alloc_type & UINT32_C(0xFFFFF000)) |
                    (protect & UINT32_C(0x00000FFF));
 
     int32_t rc = xmem_pe_unix_call(SCARLETT_XMEM_UNIX_RESERVE_RANGE, &params);
-    if (scarlett_failed(rc)) {
-        return rc;
+    if (scarlett_failed(rc) || scarlett_failed(params.out_status)) {
+        int32_t fail_hr = scarlett_failed(rc) ? rc : params.out_status;
+        xmem_pe_log_diag("[scarlett-xmem-fail]",
+                         "xmem.dll",
+                         "XMemVirtualAlloc",
+                         (uint64_t)(uintptr_t)__builtin_return_address(0),
+                         (uint64_t)(uintptr_t)requested_base,
+                         size_bytes,
+                         (uint64_t)alloc_type,
+                         (uint64_t)arg4,
+                         fail_hr);
+        return NULL;
     }
-    *out_base = params.out_base;
-    return params.out_status;
+
+    /* Support legacy callers/tests passing an out_base pointer (>64KB and 8-byte aligned) */
+    if (arg5 > UINT64_C(0x10000) && (arg5 & 7u) == 0u) {
+        *(uint64_t *)(uintptr_t)arg5 = params.out_base;
+    }
+
+    {
+        static uint32_t g_valloc_seq = 0u;
+        uint32_t seq = __atomic_add_fetch(&g_valloc_seq, 1u, __ATOMIC_RELAXED);
+        if (size_bytes >= (UINT64_C(4) << 20) || seq <= 16u || (seq % 100u) == 0u) {
+            xmem_pe_log_diag("[scarlett-xmem-alloc]",
+                             "xmem.dll",
+                             "XMemVirtualAlloc",
+                             (uint64_t)(uintptr_t)__builtin_return_address(0),
+                             params.out_base,
+                             size_bytes,
+                             (uint64_t)alloc_type,
+                             (uint64_t)protect,
+                             params.out_status);
+        }
+    }
+
+    return (void *)(uintptr_t)params.out_base;
 }
 
 SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemVirtualFree(
     uint64_t base_addr,
     uint64_t size_bytes,
     uint32_t free_type) {
+    if ((free_type & (XMEM_MEM_PRESERVE_PLACEHOLDER | XMEM_MEM_COALESCE_PLACEHOLDERS)) != 0u) {
+        int32_t vf_resolved = 0;
+        int32_t vf_ok = xmem_pe_virtual_free(
+            (void *)(uintptr_t)base_addr, (size_t)size_bytes, free_type, &vf_resolved);
+        if (vf_resolved != 0) {
+            int32_t vf_status = (vf_ok != 0) ? 0 : (int32_t)xmem_pe_get_last_error();
+            xmem_pe_log_diag(vf_ok != 0 ? "[scarlett-xmem-placeholder]" : "[scarlett-xmem-fail]",
+                             "xmem.dll",
+                             "XMemVirtualFree",
+                             (uint64_t)(uintptr_t)__builtin_return_address(0),
+                             base_addr,
+                             size_bytes,
+                             (uint64_t)free_type,
+                             (uint64_t)vf_ok,
+                             vf_status);
+            return (vf_ok != 0) ? SCARLETT_OK : SCARLETT_E_FAIL;
+        }
+    }
+
     scarlett_xmem_free_range_params_t params;
     xmem_pe_zero(&params, sizeof(params));
     params.base_addr = base_addr;
@@ -154,6 +286,22 @@ SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemVirtualFree(
     int32_t rc = xmem_pe_unix_call(SCARLETT_XMEM_UNIX_FREE_RANGE, &params);
     if (scarlett_failed(rc)) {
         return rc;
+    }
+    {
+        static uint32_t g_vfree_seq = 0u;
+        uint32_t seq = __atomic_add_fetch(&g_vfree_seq, 1u, __ATOMIC_RELAXED);
+        if (size_bytes >= (UINT64_C(4) << 20) || seq <= 24u || (seq % 100u) == 0u ||
+            scarlett_failed(params.out_status)) {
+            xmem_pe_log_diag("[scarlett-xmem-free]",
+                             "xmem.dll",
+                             "XMemVirtualFree",
+                             (uint64_t)(uintptr_t)__builtin_return_address(0),
+                             base_addr,
+                             size_bytes,
+                             (uint64_t)free_type,
+                             (uint64_t)seq,
+                             params.out_status);
+        }
     }
     return params.out_status;
 }
@@ -354,6 +502,35 @@ SCARLETT_XMEM_API uint64_t SCARLETT_XMEM_CALL XMemSizeDefault(
         return 0u;
     }
     return params.out_size_bytes;
+}
+
+SCARLETT_XMEM_API void * SCARLETT_XMEM_CALL XMemAlloc(
+    uint64_t size_bytes,
+    uint64_t attributes) {
+    return XMemAllocDefault(size_bytes, attributes);
+}
+
+SCARLETT_XMEM_API void SCARLETT_XMEM_CALL XMemFree(
+    void *ptr,
+    uint64_t attributes) {
+    (void)XMemFreeDefault(ptr, attributes);
+}
+
+SCARLETT_XMEM_API int32_t SCARLETT_XMEM_CALL XMemIsToolsMemAvailable(void) {
+    return 0;
+}
+
+SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemTransferMemory(
+    void *dst,
+    const void *src,
+    uint64_t size_bytes,
+    uint32_t flags) {
+    if (dst == NULL || src == NULL) {
+        return SCARLETT_E_INVALIDARG;
+    }
+    (void)flags;
+    xmem_pe_copy(dst, src, (size_t)size_bytes);
+    return SCARLETT_OK;
 }
 
 SCARLETT_XMEM_API scarlett_hresult_t SCARLETT_XMEM_CALL XMemUmaProbe(
