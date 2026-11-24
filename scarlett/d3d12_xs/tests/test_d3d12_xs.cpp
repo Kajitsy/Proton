@@ -2013,6 +2013,729 @@ bool test_12_pso_capacity_shader_lift_res_flags_and_slot61() {
     return true;
 }
 
+/* ============================================================================
+ * Test 13: ID3D12GraphicsCommandListX VTable Mapping, Translation & PresentX Readback
+ * ============================================================================ */
+namespace mock_vkd3d_cl {
+
+uint32_t mock_add_ref(void *) { return 2u; }
+uint32_t mock_release(void *) { return 0u; }
+
+struct MockDescHeap {
+    void * const *lpVtbl;
+    uint64_t cpu_va;
+    uint64_t gpu_va;
+};
+
+struct MockObj {
+    void * const *lpVtbl;
+    uint64_t gpu_va;
+    std::vector<uint8_t> readback_buf;
+};
+
+struct MockCmdList {
+    void * const *lpVtbl;
+    uint32_t close_calls = 0u;
+    uint32_t reset_calls = 0u;
+    uint32_t draw_inst_calls = 0u;
+    uint32_t last_draw_vtx = 0u;
+    uint32_t draw_idx_calls = 0u;
+    int32_t last_base_vertex = 0;
+    uint32_t dispatch_calls = 0u;
+    uint32_t last_dispatch_z = 0u;
+    uint32_t viewport_calls = 0u;
+    uint32_t scissor_calls = 0u;
+    uint32_t blend_calls = 0u;
+    uint32_t stencil_calls = 0u;
+    uint32_t last_stencil_ref = 0u;
+    uint32_t barrier_calls = 0u;
+    uint32_t last_barrier_before = 0u;
+    uint32_t last_barrier_after = 0u;
+    uint32_t copy_tex_calls = 0u;
+    uint32_t set_heaps_calls = 0u;
+    const void *last_heap0 = nullptr;
+    uint32_t set_comp_rs_calls = 0u;
+    const void *last_comp_rs = nullptr;
+    uint32_t set_gfx_rs_calls = 0u;
+    const void *last_gfx_rs = nullptr;
+    uint32_t set_gfx_table_calls = 0u;
+    uint64_t last_gfx_table = 0u;
+    uint32_t set_gfx_32consts_calls = 0u;
+    uint32_t last_gfx_const0 = 0u;
+    uint32_t set_gfx_cbv_calls = 0u;
+    uint64_t last_gfx_cbv_va = 0u;
+    uint32_t ia_ib_calls = 0u;
+    uint64_t last_ib_va = 0u;
+    uint32_t ia_vb_calls = 0u;
+    uint64_t last_vb_va = 0u;
+    uint32_t om_rt_calls = 0u;
+    uint64_t last_rtv_handle = 0u;
+    uint64_t last_dsv_handle = 0u;
+    uint32_t clear_rtv_calls = 0u;
+    uint64_t last_clear_rtv = 0u;
+    uint32_t clear_dsv_calls = 0u;
+    uint32_t depth_bounds_calls = 0u;
+    float last_depth_min = 0.0f;
+    float last_depth_max = 0.0f;
+    uint32_t forbidden_slot_calls = 0u;
+};
+
+struct MockQueue {
+    void * const *lpVtbl;
+    uint32_t exec_calls = 0u;
+    const void *last_exec_list = nullptr;
+    uint32_t signal_calls = 0u;
+    uint64_t last_signal_val = 0u;
+};
+
+struct MockFence {
+    void * const *lpVtbl;
+    uint64_t completed_val = 0u;
+};
+
+struct MockDevice {
+    void * const *lpVtbl;
+    MockQueue queue{};
+    MockObj alloc{};
+    MockFence fence{};
+    MockCmdList cmd_lists[4]{};
+    uint32_t cmd_list_count = 0u;
+    MockDescHeap dh_pool[4]{};
+    uint32_t dh_count = 0u;
+    MockObj rs_pool[2]{};
+    uint32_t rs_count = 0u;
+    MockObj res_pool[8]{};
+    uint32_t res_count = 0u;
+    MockObj *rb_res = nullptr;
+    uint32_t rtv_calls = 0u;
+    uint32_t dsv_calls = 0u;
+};
+
+static MockDevice *g_active_mock_dev = nullptr;
+
+uint64_t mock_res_get_va(void *iface) {
+    return static_cast<MockObj *>(iface)->gpu_va;
+}
+scarlett_hresult_t mock_res_map(void *iface, uint32_t, const void *, void **ppData) {
+    auto *r = static_cast<MockObj *>(iface);
+    if (ppData != nullptr) {
+        *ppData = r->readback_buf.empty() ? nullptr : r->readback_buf.data();
+    }
+    return SCARLETT_OK;
+}
+void mock_res_unmap(void *, uint32_t, const void *) {}
+
+void * build_res_vtbl(size_t i) {
+    switch (i) {
+        case 1: return reinterpret_cast<void *>(mock_add_ref);
+        case 2: return reinterpret_cast<void *>(mock_release);
+        case 8: return reinterpret_cast<void *>(mock_res_map);
+        case 9: return reinterpret_cast<void *>(mock_res_unmap);
+        case 11: return reinterpret_cast<void *>(mock_res_get_va);
+        default: return nullptr;
+    }
+}
+struct ResVtblHolder {
+    void *slots[16];
+    ResVtblHolder() {
+        for (size_t i = 0; i < 16; ++i) slots[i] = build_res_vtbl(i);
+    }
+};
+const ResVtblHolder kResVtbl;
+
+scarlett_hresult_t mock_alloc_reset(void *) { return SCARLETT_OK; }
+void * build_alloc_vtbl(size_t i) {
+    switch (i) {
+        case 1: return reinterpret_cast<void *>(mock_add_ref);
+        case 2: return reinterpret_cast<void *>(mock_release);
+        case 8: return reinterpret_cast<void *>(mock_alloc_reset);
+        default: return nullptr;
+    }
+}
+struct AllocVtblHolder {
+    void *slots[12];
+    AllocVtblHolder() {
+        for (size_t i = 0; i < 12; ++i) slots[i] = build_alloc_vtbl(i);
+    }
+};
+const AllocVtblHolder kAllocVtbl;
+
+uint64_t mock_fence_get_completed(void *iface) {
+    return static_cast<MockFence *>(iface)->completed_val;
+}
+scarlett_hresult_t mock_fence_set_event(void *, uint64_t, void *) { return SCARLETT_OK; }
+void * build_fence_vtbl(size_t i) {
+    switch (i) {
+        case 1: return reinterpret_cast<void *>(mock_add_ref);
+        case 2: return reinterpret_cast<void *>(mock_release);
+        case 8: return reinterpret_cast<void *>(mock_fence_get_completed);
+        case 9: return reinterpret_cast<void *>(mock_fence_set_event);
+        default: return nullptr;
+    }
+}
+struct FenceVtblHolder {
+    void *slots[12];
+    FenceVtblHolder() {
+        for (size_t i = 0; i < 12; ++i) slots[i] = build_fence_vtbl(i);
+    }
+};
+const FenceVtblHolder kFenceVtbl;
+
+void mock_q_exec(void *iface, uint32_t count, void * const *lists) {
+    auto *q = static_cast<MockQueue *>(iface);
+    ++q->exec_calls;
+    if (count > 0u && lists != nullptr) {
+        q->last_exec_list = lists[0];
+    }
+}
+scarlett_hresult_t mock_q_signal(void *iface, void *fence, uint64_t val) {
+    auto *q = static_cast<MockQueue *>(iface);
+    ++q->signal_calls;
+    q->last_signal_val = val;
+    if (fence != nullptr) {
+        static_cast<MockFence *>(fence)->completed_val = val;
+    }
+    return SCARLETT_OK;
+}
+void * build_q_vtbl(size_t i) {
+    switch (i) {
+        case 1: return reinterpret_cast<void *>(mock_add_ref);
+        case 2: return reinterpret_cast<void *>(mock_release);
+        case 10: return reinterpret_cast<void *>(mock_q_exec);
+        case 14: return reinterpret_cast<void *>(mock_q_signal);
+        default: return nullptr;
+    }
+}
+struct QVtblHolder {
+    void *slots[16];
+    QVtblHolder() {
+        for (size_t i = 0; i < 16; ++i) slots[i] = build_q_vtbl(i);
+    }
+};
+const QVtblHolder kQVtbl;
+
+scarlett_hresult_t mock_cl_close(void *iface) {
+    ++static_cast<MockCmdList *>(iface)->close_calls;
+    return SCARLETT_OK;
+}
+scarlett_hresult_t mock_cl_reset(void *iface, void *, void *) {
+    ++static_cast<MockCmdList *>(iface)->reset_calls;
+    return SCARLETT_OK;
+}
+void mock_cl_draw_inst(void *iface, uint32_t vtx, uint32_t, uint32_t, uint32_t) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->draw_inst_calls;
+    cl->last_draw_vtx = vtx;
+}
+void mock_cl_draw_idx(void *iface, uint32_t, uint32_t, uint32_t, int32_t base_vtx, uint32_t) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->draw_idx_calls;
+    cl->last_base_vertex = base_vtx;
+}
+void mock_cl_dispatch(void *iface, uint32_t, uint32_t, uint32_t z) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->dispatch_calls;
+    cl->last_dispatch_z = z;
+}
+void mock_cl_copy_tex(void *iface, const void *dst_loc, uint32_t, uint32_t, uint32_t,
+                      const void *, const void *) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->copy_tex_calls;
+    struct CopyLoc {
+        void *pRes;
+        uint32_t Type;
+        uint64_t Offset;
+        uint32_t Format, Width, Height, Depth, RowPitch;
+    };
+    const auto *dl = static_cast<const CopyLoc *>(dst_loc);
+    if (dl != nullptr && dl->pRes != nullptr) {
+        auto *rb = static_cast<MockObj *>(dl->pRes);
+        if (rb->readback_buf.size() >= 16u * 256u) {
+            for (uint32_t y = 0u; y < 16u; ++y) {
+                auto *row = reinterpret_cast<uint32_t *>(rb->readback_buf.data() + y * 256u);
+                for (uint32_t x = 0u; x < 16u; ++x) {
+                    row[x] = 0xFF336699u;
+                }
+            }
+        }
+    }
+}
+void mock_cl_viewports(void *iface, uint32_t, const void *) {
+    ++static_cast<MockCmdList *>(iface)->viewport_calls;
+}
+void mock_cl_scissors(void *iface, uint32_t, const void *) {
+    ++static_cast<MockCmdList *>(iface)->scissor_calls;
+}
+void mock_cl_blend(void *iface, const float *) {
+    ++static_cast<MockCmdList *>(iface)->blend_calls;
+}
+void mock_cl_stencil(void *iface, uint32_t ref) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->stencil_calls;
+    cl->last_stencil_ref = ref;
+}
+void mock_cl_barrier(void *iface, uint32_t n, const void *barriers) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->barrier_calls;
+    if (n > 0u && barriers != nullptr) {
+        struct B { uint32_t t, f; void *r; uint32_t sub, before, after; };
+        const auto *b = static_cast<const B *>(barriers);
+        cl->last_barrier_before = b->before;
+        cl->last_barrier_after = b->after;
+    }
+}
+void mock_cl_set_heaps(void *iface, uint32_t n, void * const *heaps) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->set_heaps_calls;
+    cl->last_heap0 = (n > 0u && heaps != nullptr) ? heaps[0] : nullptr;
+}
+void mock_cl_set_comp_rs(void *iface, void *rs) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->set_comp_rs_calls;
+    cl->last_comp_rs = rs;
+}
+void mock_cl_set_gfx_rs(void *iface, void *rs) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->set_gfx_rs_calls;
+    cl->last_gfx_rs = rs;
+}
+void mock_cl_set_gfx_table(void *iface, uint32_t, uint64_t h) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->set_gfx_table_calls;
+    cl->last_gfx_table = h;
+}
+void mock_cl_set_gfx_32consts(void *iface, uint32_t, uint32_t n, const void *p, uint32_t) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->set_gfx_32consts_calls;
+    if (n > 0u && p != nullptr) {
+        cl->last_gfx_const0 = *static_cast<const uint32_t *>(p);
+    }
+}
+void mock_cl_set_gfx_cbv(void *iface, uint32_t, uint64_t va) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->set_gfx_cbv_calls;
+    cl->last_gfx_cbv_va = va;
+}
+void mock_cl_ia_ib(void *iface, const void *v) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->ia_ib_calls;
+    if (v != nullptr) {
+        cl->last_ib_va = *static_cast<const uint64_t *>(v);
+    }
+}
+void mock_cl_ia_vb(void *iface, uint32_t, uint32_t n, const void *v) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->ia_vb_calls;
+    if (n > 0u && v != nullptr) {
+        cl->last_vb_va = *static_cast<const uint64_t *>(v);
+    }
+}
+void mock_cl_om_rt(void *iface, uint32_t n, const uint64_t *rtvs, uint32_t, const uint64_t *dsv) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->om_rt_calls;
+    cl->last_rtv_handle = (n > 0u && rtvs != nullptr) ? rtvs[0] : 0u;
+    cl->last_dsv_handle = (dsv != nullptr) ? *dsv : 0u;
+}
+void mock_cl_clear_dsv(void *iface, uint64_t, uint32_t, float, uint8_t, uint32_t, const void *) {
+    ++static_cast<MockCmdList *>(iface)->clear_dsv_calls;
+}
+void mock_cl_clear_rtv(void *iface, uint64_t h, const float *, uint32_t, const void *) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->clear_rtv_calls;
+    cl->last_clear_rtv = h;
+}
+void mock_cl_depth_bounds(void *iface, float mn, float mx) {
+    auto *cl = static_cast<MockCmdList *>(iface);
+    ++cl->depth_bounds_calls;
+    cl->last_depth_min = mn;
+    cl->last_depth_max = mx;
+}
+void mock_cl_forbidden(void *iface, uint64_t, uint64_t, uint64_t) {
+    ++static_cast<MockCmdList *>(iface)->forbidden_slot_calls;
+}
+
+void * build_cl_vtbl(size_t i) {
+    switch (i) {
+        case 1: return reinterpret_cast<void *>(mock_add_ref);
+        case 2: return reinterpret_cast<void *>(mock_release);
+        case 9: return reinterpret_cast<void *>(mock_cl_close);
+        case 10: return reinterpret_cast<void *>(mock_cl_reset);
+        case 12: return reinterpret_cast<void *>(mock_cl_draw_inst);
+        case 13: return reinterpret_cast<void *>(mock_cl_draw_idx);
+        case 14: return reinterpret_cast<void *>(mock_cl_dispatch);
+        case 16: return reinterpret_cast<void *>(mock_cl_copy_tex);
+        case 21: return reinterpret_cast<void *>(mock_cl_viewports);
+        case 22: return reinterpret_cast<void *>(mock_cl_scissors);
+        case 23: return reinterpret_cast<void *>(mock_cl_blend);
+        case 24: return reinterpret_cast<void *>(mock_cl_stencil);
+        case 26: return reinterpret_cast<void *>(mock_cl_barrier);
+        case 28: return reinterpret_cast<void *>(mock_cl_set_heaps);
+        case 29: return reinterpret_cast<void *>(mock_cl_set_comp_rs);
+        case 30: return reinterpret_cast<void *>(mock_cl_set_gfx_rs);
+        case 32: return reinterpret_cast<void *>(mock_cl_set_gfx_table);
+        case 36: return reinterpret_cast<void *>(mock_cl_set_gfx_32consts);
+        case 38: return reinterpret_cast<void *>(mock_cl_set_gfx_cbv);
+        case 43: return reinterpret_cast<void *>(mock_cl_ia_ib);
+        case 44: return reinterpret_cast<void *>(mock_cl_ia_vb);
+        case 46: return reinterpret_cast<void *>(mock_cl_om_rt);
+        case 47: return reinterpret_cast<void *>(mock_cl_clear_dsv);
+        case 48: return reinterpret_cast<void *>(mock_cl_clear_rtv);
+        case 62: return reinterpret_cast<void *>(mock_cl_depth_bounds);
+        case 72:
+        case 74:
+        case 75: return reinterpret_cast<void *>(mock_cl_forbidden);
+        default: return nullptr;
+    }
+}
+struct CLVtblHolder {
+    void *slots[80];
+    CLVtblHolder() {
+        for (size_t i = 0; i < 80; ++i) slots[i] = build_cl_vtbl(i);
+    }
+};
+const CLVtblHolder kCLVtbl;
+
+uint64_t * mock_dh_cpu(void *iface, uint64_t *out) {
+    if (out != nullptr) *out = static_cast<MockDescHeap *>(iface)->cpu_va;
+    return out;
+}
+uint64_t * mock_dh_gpu(void *iface, uint64_t *out) {
+    if (out != nullptr) *out = static_cast<MockDescHeap *>(iface)->gpu_va;
+    return out;
+}
+void * build_dh_vtbl(size_t i) {
+    switch (i) {
+        case 1: return reinterpret_cast<void *>(mock_add_ref);
+        case 2: return reinterpret_cast<void *>(mock_release);
+        case 9: return reinterpret_cast<void *>(mock_dh_cpu);
+        case 10: return reinterpret_cast<void *>(mock_dh_gpu);
+        default: return nullptr;
+    }
+}
+struct DHVtblHolder {
+    void *slots[12];
+    DHVtblHolder() {
+        for (size_t i = 0; i < 12; ++i) slots[i] = build_dh_vtbl(i);
+    }
+};
+const DHVtblHolder kDHVtbl;
+
+scarlett_hresult_t mock_create_queue(void *iface, const void *, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    d->queue.lpVtbl = kQVtbl.slots;
+    *pp = &d->queue;
+    return SCARLETT_OK;
+}
+scarlett_hresult_t mock_create_alloc(void *iface, uint32_t, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    d->alloc.lpVtbl = kAllocVtbl.slots;
+    *pp = &d->alloc;
+    return SCARLETT_OK;
+}
+scarlett_hresult_t mock_create_cl(
+    void *iface, uint32_t, uint32_t, void *, void *, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    if (d->cmd_list_count >= 4u) return SCARLETT_E_OUTOFMEMORY;
+    auto *cl = &d->cmd_lists[d->cmd_list_count++];
+    *cl = MockCmdList{};
+    cl->lpVtbl = kCLVtbl.slots;
+    *pp = cl;
+    return SCARLETT_OK;
+}
+scarlett_hresult_t mock_create_dh(
+    void *iface, const mock_vkd3d_dh::MockDescHeapDesc *desc, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    if (d->dh_count >= 4u) return SCARLETT_E_OUTOFMEMORY;
+    auto *dh = &d->dh_pool[d->dh_count];
+    dh->lpVtbl = kDHVtbl.slots;
+    dh->cpu_va = UINT64_C(0x800010000000) + static_cast<uint64_t>(d->dh_count) * 0x100000u;
+    dh->gpu_va = (desc->Flags & 1u)
+        ? (UINT64_C(0x810010000000) + static_cast<uint64_t>(d->dh_count) * 0x100000u)
+        : 0u;
+    ++d->dh_count;
+    *pp = dh;
+    return SCARLETT_OK;
+}
+uint32_t mock_get_inc(void *, uint32_t) { return 64u; }
+scarlett_hresult_t mock_create_rs(
+    void *iface, uint32_t, const void *, size_t, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    if (d->rs_count >= 2u) return SCARLETT_E_OUTOFMEMORY;
+    auto *rs = &d->rs_pool[d->rs_count++];
+    rs->lpVtbl = kResVtbl.slots;
+    *pp = rs;
+    return SCARLETT_OK;
+}
+void mock_create_rtv(void *iface, void *res, const void *, uint64_t) {
+    if (res != nullptr) ++static_cast<MockDevice *>(iface)->rtv_calls;
+}
+void mock_create_dsv(void *iface, void *res, const void *, uint64_t) {
+    if (res != nullptr) ++static_cast<MockDevice *>(iface)->dsv_calls;
+}
+scarlett_hresult_t mock_create_res(
+    void *iface, const void *hp, uint32_t, const mock_vkd3d_m3::MockResDesc *desc,
+    uint32_t, const void *, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    if (d->res_count >= 8u) return SCARLETT_E_OUTOFMEMORY;
+    auto *r = &d->res_pool[d->res_count];
+    r->lpVtbl = kResVtbl.slots;
+    const uint32_t heap_type = (hp != nullptr) ? *static_cast<const uint32_t *>(hp) : 1u;
+    if (heap_type == 3u) {
+        r->readback_buf.assign(static_cast<size_t>(desc->Width), 0u);
+        r->gpu_va = 0u;
+        d->rb_res = r;
+    } else {
+        r->gpu_va = UINT64_C(0xA00000000000) + static_cast<uint64_t>(d->res_count) * 0x100000u;
+    }
+    ++d->res_count;
+    *pp = r;
+    return SCARLETT_OK;
+}
+scarlett_hresult_t mock_create_fence(void *iface, uint64_t init_val, uint32_t, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    d->fence.lpVtbl = kFenceVtbl.slots;
+    d->fence.completed_val = init_val;
+    *pp = &d->fence;
+    return SCARLETT_OK;
+}
+void mock_get_copyable_footprints(
+    void *, const mock_vkd3d_m3::MockResDesc *desc, uint32_t, uint32_t, uint64_t,
+    void *fp_out, uint32_t *rows_out, uint64_t *row_bytes_out, uint64_t *total_out) {
+    struct FP {
+        uint64_t Offset;
+        uint32_t Format, Width, Height, Depth, RowPitch;
+    };
+    const uint32_t w = desc != nullptr && desc->Width > 0u ? static_cast<uint32_t>(desc->Width) : 16u;
+    const uint32_t h = desc != nullptr && desc->Height > 0u ? desc->Height : 16u;
+    const uint32_t pitch = ((w * 4u) + 255u) & ~255u;
+    if (fp_out != nullptr) {
+        auto *fp = static_cast<FP *>(fp_out);
+        fp->Offset = 0u;
+        fp->Format = desc != nullptr ? desc->Format : 28u;
+        fp->Width = w;
+        fp->Height = h;
+        fp->Depth = 1u;
+        fp->RowPitch = pitch;
+    }
+    if (rows_out != nullptr) *rows_out = h;
+    if (row_bytes_out != nullptr) *row_bytes_out = w * 4u;
+    if (total_out != nullptr) *total_out = static_cast<uint64_t>(pitch) * h;
+}
+
+void * build_dev_vtbl(size_t i) {
+    switch (i) {
+        case 8: return reinterpret_cast<void *>(mock_create_queue);
+        case 9: return reinterpret_cast<void *>(mock_create_alloc);
+        case 12: return reinterpret_cast<void *>(mock_create_cl);
+        case 14: return reinterpret_cast<void *>(mock_create_dh);
+        case 15: return reinterpret_cast<void *>(mock_get_inc);
+        case 16: return reinterpret_cast<void *>(mock_create_rs);
+        case 20: return reinterpret_cast<void *>(mock_create_rtv);
+        case 21: return reinterpret_cast<void *>(mock_create_dsv);
+        case 27: return reinterpret_cast<void *>(mock_create_res);
+        case 36: return reinterpret_cast<void *>(mock_create_fence);
+        case 38: return reinterpret_cast<void *>(mock_get_copyable_footprints);
+        default: return nullptr;
+    }
+}
+struct DevVtblHolder {
+    void *slots[56];
+    DevVtblHolder() {
+        for (size_t i = 0; i < 56; ++i) slots[i] = build_dev_vtbl(i);
+    }
+};
+const DevVtblHolder kDevVtbl;
+
+} // namespace mock_vkd3d_cl
+
+bool test_13_cmdlist_forwarding_and_presentx_readback() {
+    void *dev_raw = nullptr;
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
+    void *saved_real = dev->real_device;
+
+    static mock_vkd3d_cl::MockDevice s_mock_dev{};
+    s_mock_dev = mock_vkd3d_cl::MockDevice{};
+    s_mock_dev.lpVtbl = mock_vkd3d_cl::kDevVtbl.slots;
+    mock_vkd3d_cl::g_active_mock_dev = &s_mock_dev;
+    dev->real_device = &s_mock_dev;
+
+    auto *dev_vtbl = reinterpret_cast<void * const *>(dev->lpVtbl);
+    const scarlett_guid_t iid_unk = {
+        0x00000000u, 0x0000u, 0x0000u,
+        {0xC0u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x46u}};
+    const scarlett_guid_t iid_rs = {
+        0xC54A6B66u, 0x72DFu, 0x4EE8u,
+        {0x8Bu, 0xE5u, 0xA9u, 0x46u, 0xA1u, 0x42u, 0x92u, 0x14u}};
+    const scarlett_guid_t iid_dh = {
+        0x8EFB471Du, 0x616Cu, 0x4F49u,
+        {0x90u, 0xF7u, 0x12u, 0x7Bu, 0xB7u, 0x63u, 0xFAu, 0x51u}};
+    const scarlett_guid_t iid_res = {
+        0x696442BEu, 0xA72Eu, 0x4059u,
+        {0xBCu, 0x79u, 0x5Bu, 0x5Cu, 0x98u, 0x04u, 0x0Fu, 0xADu}};
+
+    struct QueueDesc { uint32_t Type, Priority, Flags, NodeMask; } q_desc{0u, 0u, 0u, 0u};
+    using PfnCreateQueue = scarlett_hresult_t (*)(ID3D12DeviceX *, const QueueDesc *, const scarlett_guid_t *, void **);
+    using PfnCreateAlloc = scarlett_hresult_t (*)(ID3D12DeviceX *, uint32_t, const scarlett_guid_t *, void **);
+    using PfnCreateList = scarlett_hresult_t (*)(ID3D12DeviceX *, uint32_t, uint32_t, void *, void *, const scarlett_guid_t *, void **);
+    using PfnCreateDH = scarlett_hresult_t (*)(ID3D12DeviceX *, const mock_vkd3d_dh::MockDescHeapDesc *, const scarlett_guid_t *, void **);
+    using PfnCreateRS = scarlett_hresult_t (*)(ID3D12DeviceX *, uint32_t, const void *, uint64_t, const scarlett_guid_t *, void **);
+    using PfnCreatePlacedX = scarlett_hresult_t (*)(ID3D12DeviceX *, uint64_t, const mock_vkd3d_m3::MockResDesc *, uint32_t, const void *, const scarlett_guid_t *, void **);
+    using PfnCreateView = void (*)(ID3D12DeviceX *, void *, const void *, uint64_t);
+    using PfnGetStart = uint64_t (*)(void *);
+
+    void *queue_raw = nullptr, *alloc_raw = nullptr, *cl_raw = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreateQueue>(dev_vtbl[8])(dev, &q_desc, &iid_unk, &queue_raw), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreateAlloc>(dev_vtbl[9])(dev, 0u, &iid_unk, &alloc_raw), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreateList>(dev_vtbl[12])(dev, 0u, 0u, alloc_raw, nullptr, &iid_unk, &cl_raw), SCARLETT_OK);
+    CHECK(s_mock_dev.cmd_list_count == 1u);
+    auto &mock_cl = s_mock_dev.cmd_lists[0];
+
+    mock_vkd3d_dh::MockDescHeapDesc cbv_dh_desc{0u, 32u, 1u, 0u};
+    mock_vkd3d_dh::MockDescHeapDesc rtv_dh_desc{2u, 16u, 0u, 0u};
+    mock_vkd3d_dh::MockDescHeapDesc dsv_dh_desc{3u, 16u, 0u, 0u};
+    void *cbv_dh = nullptr, *rtv_dh = nullptr, *dsv_dh = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreateDH>(dev_vtbl[14])(dev, &cbv_dh_desc, &iid_dh, &cbv_dh), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreateDH>(dev_vtbl[14])(dev, &rtv_dh_desc, &iid_dh, &rtv_dh), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreateDH>(dev_vtbl[14])(dev, &dsv_dh_desc, &iid_dh, &dsv_dh), SCARLETT_OK);
+    uint64_t cbv_gpu = reinterpret_cast<PfnGetStart>((*reinterpret_cast<void * const * const *>(cbv_dh))[10])(cbv_dh);
+    uint64_t rtv_cpu = reinterpret_cast<PfnGetStart>((*reinterpret_cast<void * const * const *>(rtv_dh))[9])(rtv_dh);
+    uint64_t dsv_cpu = reinterpret_cast<PfnGetStart>((*reinterpret_cast<void * const * const *>(dsv_dh))[9])(dsv_dh);
+
+    const std::vector<uint8_t> kDummyRts0(32u, 0u);
+    auto rs_blob = build_synthetic_dxbc({{{'R','T','S','0'}, kDummyRts0}});
+    void *rs_raw = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreateRS>(dev_vtbl[16])(dev, 0u, rs_blob.data(), rs_blob.size(), &iid_rs, &rs_raw), SCARLETT_OK);
+
+    /* Allocate UMA backing for a 16x16 RGBA8 render target + buffer for VB/IB/CBV */
+    alignas(256) std::vector<uint8_t> rt_uma(65536u, 0u);
+    alignas(256) std::vector<uint8_t> buf_uma(65536u, 0u);
+    mock_vkd3d_m3::MockResDesc rt_desc{3u, 0u, 16u, 16u, 1u, 1u, 28u /* R8G8B8A8_UNORM */, 1u, 0u, 0u, 0x01u};
+    mock_vkd3d_m3::MockResDesc ds_desc{3u, 0u, 16u, 16u, 1u, 1u, 45u /* D32_FLOAT */, 1u, 0u, 0u, 0x02u};
+    mock_vkd3d_m3::MockResDesc buf_desc{1u, 0u, 65536u, 1u, 1u, 1u, 0u, 1u, 0u, 1u, 0u};
+    void *rt_res = nullptr, *ds_res = nullptr, *buf_res = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreatePlacedX>(dev_vtbl[133])(
+                 dev, reinterpret_cast<uint64_t>(rt_uma.data()), &rt_desc, 0u, nullptr, &iid_res, &rt_res), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreatePlacedX>(dev_vtbl[133])(
+                 dev, 0u, &ds_desc, 0u, nullptr, &iid_res, &ds_res), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreatePlacedX>(dev_vtbl[133])(
+                 dev, reinterpret_cast<uint64_t>(buf_uma.data()), &buf_desc, 0u, nullptr, &iid_res, &buf_res), SCARLETT_OK);
+
+    reinterpret_cast<PfnCreateView>(dev_vtbl[20])(dev, rt_res, nullptr, rtv_cpu);
+    reinterpret_cast<PfnCreateView>(dev_vtbl[21])(dev, ds_res, nullptr, dsv_cpu);
+    CHECK(s_mock_dev.rtv_calls == 1u && s_mock_dev.dsv_calls == 1u);
+
+    auto *cl_vtbl = *reinterpret_cast<void * const * const *>(cl_raw);
+    void *heaps[1] = {cbv_dh};
+    reinterpret_cast<void (*)(void *, uint32_t, void * const *)>(cl_vtbl[32])(cl_raw, 1u, heaps);
+    reinterpret_cast<void (*)(void *, void *)>(cl_vtbl[33])(cl_raw, rs_raw);
+    reinterpret_cast<void (*)(void *, void *)>(cl_vtbl[34])(cl_raw, rs_raw);
+    reinterpret_cast<void (*)(void *, uint32_t, uint64_t)>(cl_vtbl[36])(cl_raw, 0u, cbv_gpu + 3u * 32u);
+    const uint32_t rc_vals[2] = {0xCAFEBABEu, 0x12345678u};
+    reinterpret_cast<void (*)(void *, uint32_t, uint32_t, const void *, uint32_t)>(cl_vtbl[40])(cl_raw, 1u, 2u, rc_vals, 0u);
+    const uint64_t buf_xbox_va = reinterpret_cast<uint64_t>(buf_uma.data());
+    reinterpret_cast<void (*)(void *, uint32_t, uint64_t)>(cl_vtbl[42])(cl_raw, 2u, buf_xbox_va + 256u);
+
+    struct { uint64_t va; uint32_t sz; uint32_t fmt; } ibv{buf_xbox_va + 512u, 64u, 57u};
+    struct { uint64_t va; uint32_t sz; uint32_t stride; } vbv{buf_xbox_va + 1024u, 256u, 16u};
+    reinterpret_cast<void (*)(void *, const void *)>(cl_vtbl[47])(cl_raw, &ibv);
+    reinterpret_cast<void (*)(void *, uint32_t, uint32_t, const void *)>(cl_vtbl[48])(cl_raw, 0u, 1u, &vbv);
+
+    const float vp[6] = {0.0f, 0.0f, 16.0f, 16.0f, 0.0f, 1.0f};
+    const int32_t sc[4] = {0, 0, 16, 16};
+    const float bf[4] = {1.0f, 0.5f, 0.25f, 1.0f};
+    reinterpret_cast<void (*)(void *, uint32_t, const void *)>(cl_vtbl[21])(cl_raw, 1u, vp);
+    reinterpret_cast<void (*)(void *, uint32_t, const void *)>(cl_vtbl[22])(cl_raw, 1u, sc);
+    reinterpret_cast<void (*)(void *, const void *)>(cl_vtbl[23])(cl_raw, bf);
+    reinterpret_cast<void (*)(void *, uint32_t)>(cl_vtbl[24])(cl_raw, 0x5Au);
+    reinterpret_cast<void (*)(void *, float, float)>(cl_vtbl[70])(cl_raw, 0.1f, 0.9f);
+
+    reinterpret_cast<void (*)(void *, uint32_t, const uint64_t *, uint32_t, const uint64_t *)>(cl_vtbl[50])(
+        cl_raw, 1u, &rtv_cpu, 0u, &dsv_cpu);
+    const float clear_rgba[4] = {0.2f, 0.4f, 0.6f, 1.0f};
+    reinterpret_cast<void (*)(void *, uint64_t, const float *, uint32_t, const void *)>(cl_vtbl[52])(
+        cl_raw, rtv_cpu, clear_rgba, 0u, nullptr);
+    reinterpret_cast<void (*)(void *, uint32_t, uint32_t, uint32_t, uint32_t)>(cl_vtbl[12])(cl_raw, 3u, 1u, 0u, 0u);
+    reinterpret_cast<void (*)(void *, uint32_t, uint32_t, uint32_t, int32_t, uint32_t)>(cl_vtbl[13])(cl_raw, 6u, 1u, 0u, -4, 0u);
+    reinterpret_cast<void (*)(void *, uint32_t, uint32_t, uint32_t)>(cl_vtbl[14])(cl_raw, 5u, 5u, 0x21u);
+
+    /* Xbox slots 72, 74, 75 must NOT touch PC raytracing / SetPipelineState1 slots */
+    CHECK_HR(reinterpret_cast<scarlett_hresult_t (*)(void *, uint64_t, uint64_t, uint64_t)>(cl_vtbl[72])(
+                 cl_raw, 0x1111u, 0u, 0u), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<scarlett_hresult_t (*)(void *, uint64_t, uint64_t, uint64_t)>(cl_vtbl[74])(
+                 cl_raw, 0x2222u, 7u, 1u), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<scarlett_hresult_t (*)(void *, uint64_t, uint64_t, uint64_t)>(cl_vtbl[75])(
+                 cl_raw, 1u, 0u, 0u), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<scarlett_hresult_t (*)(void *)>(cl_vtbl[9])(cl_raw), SCARLETT_OK);
+
+    auto *q_vtbl = *reinterpret_cast<void * const * const *>(queue_raw);
+    reinterpret_cast<void (*)(void *, uint32_t, void * const *)>(q_vtbl[10])(queue_raw, 1u, &cl_raw);
+
+    CHECK(mock_cl.set_heaps_calls == 1u && mock_cl.last_heap0 == &s_mock_dev.dh_pool[0]);
+    CHECK(mock_cl.set_comp_rs_calls == 1u && mock_cl.last_comp_rs == &s_mock_dev.rs_pool[0]);
+    CHECK(mock_cl.set_gfx_rs_calls == 1u && mock_cl.last_gfx_rs == &s_mock_dev.rs_pool[0]);
+    CHECK(mock_cl.set_gfx_table_calls == 1u &&
+          mock_cl.last_gfx_table == s_mock_dev.dh_pool[0].gpu_va + 3u * 64u);
+    CHECK(mock_cl.set_gfx_32consts_calls == 1u && mock_cl.last_gfx_const0 == 0xCAFEBABEu);
+    const uint64_t expected_buf_real_va = s_mock_dev.res_pool[2].gpu_va;
+    CHECK(mock_cl.set_gfx_cbv_calls == 1u && mock_cl.last_gfx_cbv_va == expected_buf_real_va + 256u);
+    CHECK(mock_cl.ia_ib_calls == 1u && mock_cl.last_ib_va == expected_buf_real_va + 512u);
+    CHECK(mock_cl.ia_vb_calls == 1u && mock_cl.last_vb_va == expected_buf_real_va + 1024u);
+    CHECK(mock_cl.viewport_calls == 1u && mock_cl.scissor_calls == 1u && mock_cl.blend_calls == 1u);
+    CHECK(mock_cl.stencil_calls == 1u && mock_cl.last_stencil_ref == 0x5Au);
+    CHECK(mock_cl.depth_bounds_calls == 1u &&
+          std::fabs(mock_cl.last_depth_min - 0.1f) < 1e-5f &&
+          std::fabs(mock_cl.last_depth_max - 0.9f) < 1e-5f);
+    CHECK(mock_cl.om_rt_calls == 1u &&
+          mock_cl.last_rtv_handle == s_mock_dev.dh_pool[1].cpu_va &&
+          mock_cl.last_dsv_handle == s_mock_dev.dh_pool[2].cpu_va);
+    CHECK(mock_cl.clear_rtv_calls == 1u && mock_cl.last_clear_rtv == s_mock_dev.dh_pool[1].cpu_va);
+    CHECK(mock_cl.draw_inst_calls == 1u && mock_cl.last_draw_vtx == 3u);
+    CHECK(mock_cl.draw_idx_calls == 1u && mock_cl.last_base_vertex == -4);
+    CHECK(mock_cl.dispatch_calls == 1u && mock_cl.last_dispatch_z == 0x21u);
+    CHECK(mock_cl.forbidden_slot_calls == 0u);
+    CHECK(mock_cl.close_calls == 1u);
+    CHECK(s_mock_dev.queue.exec_calls == 1u && s_mock_dev.queue.last_exec_list == &mock_cl);
+
+    /* PresentX must trigger GPU->UMA readback of dirty rt_res into rt_uma */
+    void *planes_res[1] = {rt_res};
+    D3D12XBOX_PRESENT_PLANE_PARAMETERS plane{};
+    plane.Token = 1u;
+    plane.ResourceCount = 1u;
+    plane.ppResources = planes_res;
+    plane.ColorSpace = SCARLETT_COLOR_SPACE_G22_P709;
+    D3D12XBOX_PRESENT_PARAMETERS pres{};
+    pres.Token = 1u;
+    CHECK(*reinterpret_cast<const uint32_t *>(rt_uma.data()) == 0u);
+    CHECK_HR(reinterpret_cast<scarlett_hresult_t (*)(void *, uint64_t, uint64_t, uint64_t)>(q_vtbl[32])(
+                 queue_raw, 1u, reinterpret_cast<uint64_t>(&plane), reinterpret_cast<uint64_t>(&pres)),
+             SCARLETT_OK);
+    CHECK(s_mock_dev.cmd_list_count == 2u); /* readback helper allocated 2nd real command list via Std IID */
+    CHECK(s_mock_dev.cmd_lists[1].copy_tex_calls == 1u);
+    CHECK(s_mock_dev.cmd_lists[1].barrier_calls == 2u); /* COMMON -> COPY_SOURCE -> COMMON */
+    CHECK(*reinterpret_cast<const uint32_t *>(rt_uma.data()) == 0xFF336699u);
+
+    using PfnRelease = uint32_t (*)(void *);
+    auto rel = [](void *p) {
+        auto *v = *reinterpret_cast<void * const * const *>(p);
+        return reinterpret_cast<PfnRelease>(v[2])(p);
+    };
+    CHECK(rel(buf_res) == 0u);
+    CHECK(rel(ds_res) == 0u);
+    CHECK(rel(rt_res) == 0u);
+    CHECK(rel(rs_raw) == 0u);
+    CHECK(rel(dsv_dh) == 0u);
+    CHECK(rel(rtv_dh) == 0u);
+    CHECK(rel(cbv_dh) == 0u);
+    CHECK(rel(cl_raw) == 0u);
+    CHECK(rel(alloc_raw) == 0u);
+    CHECK(rel(queue_raw) == 0u);
+
+    dev->real_device = saved_real;
+    CHECK(dev->lpVtbl->Release(dev) == 0u);
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -2046,6 +2769,8 @@ int main() {
          test_11_descriptor_heap_abi_and_bounds},
         {"12. Dynamic PSO/StateObject Scaling, Shader Lifting, Resource Flags & Slot61",
          test_12_pso_capacity_shader_lift_res_flags_and_slot61},
+        {"13. ID3D12GraphicsCommandListX VTable Mapping, Translation & PresentX Readback",
+         test_13_cmdlist_forwarding_and_presentx_readback},
     };
 
     int passed = 0;

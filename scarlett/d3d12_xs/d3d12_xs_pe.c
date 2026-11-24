@@ -392,19 +392,33 @@ static bool d3d12xs_pe_is_writable_va(uint64_t va, size_t bytes) {
     if (vq == NULL) {
         return true;
     }
-    scarlett_mbi_t mbi;
-    d3d12xs_pe_zero(&mbi, sizeof(mbi));
-    if (vq((const void *)(uintptr_t)va, &mbi, sizeof(mbi)) < sizeof(mbi)) {
+    uint64_t cur = va;
+    uint64_t target_end = va + (uint64_t)bytes;
+    uint64_t span_base = 0u;
+    for (uint32_t step = 0u; step < 64u && cur < target_end; ++step) {
+        scarlett_mbi_t mbi;
+        d3d12xs_pe_zero(&mbi, sizeof(mbi));
+        if (vq((const void *)(uintptr_t)cur, &mbi, sizeof(mbi)) < sizeof(mbi)) {
+            return false;
+        }
+        if (mbi.State != 0x1000u || (mbi.Protect & 0x101u) != 0u ||
+            (mbi.Protect & 0xCCu) == 0u || mbi.RegionSize == 0u) {
+            return false;
+        }
+        if (step == 0u) {
+            span_base = mbi.BaseAddress;
+        }
+        uint64_t reg_end = mbi.BaseAddress + mbi.RegionSize;
+        if (reg_end <= cur) {
+            return false;
+        }
+        cur = reg_end;
+    }
+    if (cur < target_end) {
         return false;
     }
-    if (mbi.State != 0x1000u || (mbi.Protect & 0x101u) != 0u || (mbi.Protect & 0xCCu) == 0u) {
-        return false;
-    }
-    if ((va + bytes) > (mbi.BaseAddress + mbi.RegionSize)) {
-        return false;
-    }
-    __atomic_store_n(&g_last_rw_base, mbi.BaseAddress, __ATOMIC_RELEASE);
-    __atomic_store_n(&g_last_rw_end, mbi.BaseAddress + mbi.RegionSize, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_last_rw_base, span_base, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_last_rw_end, cur, __ATOMIC_RELEASE);
     return true;
 }
 
@@ -1293,6 +1307,7 @@ static inline bool d3d12xs_is_com_fence(const void *ptr);
 static void *d3d12xs_unwrap_cmd_list_real(const void *ptr);
 static void *d3d12xs_unwrap_fence_real(const ID3D12FenceX *f);
 static void d3d12xs_cmd_list_flush_labels(void *ptr);
+static uint32_t g_gpu_exec_seq = 0u;
 static bool d3d12xs_readback_plane0_if_dirty(
     d3d12xs_cmd_queue_meta_t *qm,
     const D3D12XBOX_PRESENT_PLANE_PARAMETERS *planes,
@@ -1327,6 +1342,7 @@ static void SCARLETT_D3D12XS_CALL cmd_queue_execute_command_lists(
         void **vtbl = *(void ***)qm->real_obj;
         pfn_real_ecl_t fn = (pfn_real_ecl_t)vtbl[10];
         fn(qm->real_obj, real_count, real_lists);
+        __atomic_add_fetch(&g_gpu_exec_seq, 1u, __ATOMIC_RELEASE);
     }
 }
 
@@ -2362,7 +2378,10 @@ typedef struct d3d12xs_cmd_list_meta_s {
     uint32_t label_write_count;
     uint32_t label_capacity;
     uint32_t pm4_logged;
+    uint32_t bound_rtv_count;
+    uint32_t has_gpu_write_cmds;
     void *real_obj;
+    void *bound_rtvs[8];
     d3d12xs_label_write_t *label_writes;
     void *bound_pm4_begin;
     void *bound_pm4_end;
@@ -2533,6 +2552,9 @@ static uint32_t SCARLETT_D3D12XS_CALL cmd_list_release(ID3D12GraphicsCommandList
             clm->label_writes = NULL;
         }
         clm->label_write_count = 0u;
+    clm->bound_rtv_count = 0u;
+    clm->has_gpu_write_cmds = 0u;
+    d3d12xs_pe_zero(clm->bound_rtvs, sizeof(clm->bound_rtvs));
         clm->label_capacity = 0u;
         clm->unix_device_handle = 0u;
         clm->unix_cmd_list_handle = 0u;
@@ -2648,6 +2670,9 @@ static void d3d12xs_cmd_list_flush_labels(void *ptr) {
         }
     }
     clm->label_write_count = 0u;
+    clm->bound_rtv_count = 0u;
+    clm->has_gpu_write_cmds = 0u;
+    d3d12xs_pe_zero(clm->bound_rtvs, sizeof(clm->bound_rtvs));
 }
 
 static void d3d12xs_cmd_list_record_label(
@@ -2685,6 +2710,9 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_reset(
         return SCARLETT_E_POINTER;
     }
     clm->label_write_count = 0u;
+    clm->bound_rtv_count = 0u;
+    clm->has_gpu_write_cmds = 0u;
+    d3d12xs_pe_zero(clm->bound_rtvs, sizeof(clm->bound_rtvs));
     if (clm->bound_pm4_begin != NULL) {
         self->pBegin = clm->bound_pm4_begin;
         self->pCurrent = clm->bound_pm4_begin;
@@ -3153,28 +3181,884 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_xbox_ok_146(
     return SCARLETT_OK;
 }
 
+typedef struct d3d12xs_res_meta_s d3d12xs_res_meta_t;
+static d3d12xs_res_meta_t *d3d12xs_get_res_meta(const void *ptr);
+static uint64_t d3d12xs_translate_gpu_va(uint64_t xbox_va, void **out_real_res);
+static uint64_t d3d12xs_translate_cpu_desc_handle(
+    uint64_t xbox_cpu_handle, uint32_t *out_heap_type);
+static uint64_t d3d12xs_translate_cpu_desc_handle_range(
+    uint64_t xbox_cpu_handle, uint32_t count, uint32_t *out_heap_type);
+static uint64_t d3d12xs_translate_gpu_desc_handle(
+    uint64_t xbox_gpu_handle, uint32_t *out_heap_type);
+static void *d3d12xs_desc_heap_get_real(const void *ptr);
+static void *d3d12xs_root_sig_get_real(const void *ptr);
+static void *d3d12xs_pso_get_real(const void *ptr);
+static void *d3d12xs_lookup_desc_resource(uint64_t xbox_cpu_handle);
+static void *d3d12xs_lookup_desc_resource_offset(uint64_t xbox_cpu_handle, uint32_t index);
+
+static void d3d12xs_cl_log(
+    const char *op,
+    uint32_t xbox_slot,
+    uint64_t a0,
+    uint64_t a1,
+    uint64_t a2,
+    const char *note,
+    bool is_error) {
+    static uint32_t g_cl_ok_counts[96];
+    static uint32_t g_cl_err_counts[96];
+    uint32_t idx = (xbox_slot < 96u) ? xbox_slot : 95u;
+    uint32_t seq = is_error
+        ? __atomic_add_fetch(&g_cl_err_counts[idx], 1u, __ATOMIC_RELAXED)
+        : __atomic_add_fetch(&g_cl_ok_counts[idx], 1u, __ATOMIC_RELAXED);
+    if (is_error) {
+        if (seq > 8u && (seq & 255u) != 0u) {
+            return;
+        }
+    } else {
+        if (seq > 6u && (seq & 511u) != 0u) {
+            return;
+        }
+    }
+    char buf[280];
+    char *p = buf;
+    char *end = buf + sizeof(buf);
+    p = d3d12xs_pe_append_str(p, end, "[scarlett-cl] ");
+    p = d3d12xs_pe_append_str(p, end, op);
+    p = d3d12xs_pe_append_str(p, end, " slot=");
+    p = d3d12xs_pe_append_u32(p, end, xbox_slot);
+    p = d3d12xs_pe_append_str(p, end, " seq=");
+    p = d3d12xs_pe_append_u32(p, end, seq);
+    p = d3d12xs_pe_append_str(p, end, " a0=0x");
+    p = d3d12xs_pe_append_hex_padded(p, end, a0, 16);
+    p = d3d12xs_pe_append_str(p, end, " a1=0x");
+    p = d3d12xs_pe_append_hex_padded(p, end, a1, 16);
+    p = d3d12xs_pe_append_str(p, end, " a2=0x");
+    p = d3d12xs_pe_append_hex_padded(p, end, a2, 16);
+    if (note != NULL) {
+        p = d3d12xs_pe_append_str(p, end, " ");
+        p = d3d12xs_pe_append_str(p, end, note);
+    }
+    p = d3d12xs_pe_append_str(p, end, "\n");
+    *p = '\0';
+    d3d12xs_pe_ods(buf);
+}
+
+static void d3d12xs_cl_mark_bound_rtvs_dirty(d3d12xs_cmd_list_meta_t *clm) {
+    if (clm == NULL) {
+        return;
+    }
+    uint32_t n = (clm->bound_rtv_count <= 8u) ? clm->bound_rtv_count : 8u;
+    for (uint32_t i = 0u; i < n; ++i) {
+        if (clm->bound_rtvs[i] != NULL) {
+            d3d12xs_resource_mark_gpu_dirty(clm->bound_rtvs[i]);
+        }
+    }
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot11_clear_state(
+    ID3D12GraphicsCommandListX *self,
+    void *pPipelineState) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL) {
+        return;
+    }
+    clm->bound_rtv_count = 0u;
+    d3d12xs_pe_zero(clm->bound_rtvs, sizeof(clm->bound_rtvs));
+    if (clm->real_obj == NULL) {
+        d3d12xs_cl_log("ClearState", 11u, (uint64_t)(uintptr_t)self,
+                       (uint64_t)(uintptr_t)pPipelineState, 0u, "(no_real_cl)", true);
+        return;
+    }
+    void *real_pso = (pPipelineState != NULL) ? d3d12xs_pso_get_real(pPipelineState) : NULL;
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[11])(clm->real_obj, real_pso);
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot12_draw_instanced(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t VertexCountPerInstance,
+    uint32_t InstanceCount,
+    uint32_t StartVertexLocation,
+    uint32_t StartInstanceLocation) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL) {
+        return;
+    }
+    if (clm->real_obj == NULL) {
+        d3d12xs_cl_log("DrawInstanced", 12u, VertexCountPerInstance, InstanceCount,
+                       StartVertexLocation, "(no_real_cl)", true);
+        return;
+    }
+    d3d12xs_cl_mark_bound_rtvs_dirty(clm);
+    clm->has_gpu_write_cmds = 1u;
+    d3d12xs_cl_log("DrawInstanced", 12u, VertexCountPerInstance, InstanceCount,
+                   StartVertexLocation, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint32_t, uint32_t, uint32_t, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[12])(
+        clm->real_obj, VertexCountPerInstance, InstanceCount,
+        StartVertexLocation, StartInstanceLocation);
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot13_draw_indexed_instanced(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t IndexCountPerInstance,
+    uint32_t InstanceCount,
+    uint32_t StartIndexLocation,
+    int32_t BaseVertexLocation,
+    uint32_t StartInstanceLocation) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL) {
+        return;
+    }
+    if (clm->real_obj == NULL) {
+        d3d12xs_cl_log("DrawIndexedInstanced", 13u, IndexCountPerInstance, InstanceCount,
+                       StartIndexLocation, "(no_real_cl)", true);
+        return;
+    }
+    d3d12xs_cl_mark_bound_rtvs_dirty(clm);
+    clm->has_gpu_write_cmds = 1u;
+    d3d12xs_cl_log("DrawIndexedInstanced", 13u, IndexCountPerInstance, InstanceCount,
+                   StartIndexLocation, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint32_t, uint32_t, uint32_t, int32_t, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[13])(
+        clm->real_obj, IndexCountPerInstance, InstanceCount,
+        StartIndexLocation, BaseVertexLocation, StartInstanceLocation);
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot14_dispatch(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t ThreadGroupCountX,
+    uint32_t ThreadGroupCountY,
+    uint32_t ThreadGroupCountZ) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL) {
+        return;
+    }
+    if (clm->real_obj == NULL) {
+        d3d12xs_cl_log("Dispatch", 14u, ThreadGroupCountX, ThreadGroupCountY,
+                       ThreadGroupCountZ, "(no_real_cl)", true);
+        return;
+    }
+    clm->has_gpu_write_cmds = 1u;
+    d3d12xs_cl_log("Dispatch", 14u, ThreadGroupCountX, ThreadGroupCountY,
+                   ThreadGroupCountZ, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t, uint32_t, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[14])(
+        clm->real_obj, ThreadGroupCountX, ThreadGroupCountY, ThreadGroupCountZ);
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot19_resolve_subresource(
+    ID3D12GraphicsCommandListX *self,
+    void *pDstResource,
+    uint32_t DstSubresource,
+    void *pSrcResource,
+    uint32_t SrcSubresource,
+    uint32_t Format) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    void *real_dst = d3d12xs_resource_get_real(pDstResource);
+    void *real_src = d3d12xs_resource_get_real(pSrcResource);
+    if (real_dst == NULL || real_src == NULL) {
+        d3d12xs_cl_log("ResolveSubresource", 19u, (uint64_t)(uintptr_t)pDstResource,
+                       (uint64_t)(uintptr_t)pSrcResource, Format, "(no_real_res)", true);
+        return;
+    }
+    d3d12xs_resource_mark_gpu_dirty(pDstResource);
+    clm->has_gpu_write_cmds = 1u;
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, void *, uint32_t, void *, uint32_t, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[19])(
+        clm->real_obj, real_dst, DstSubresource, real_src, SrcSubresource, Format);
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot21_rs_set_viewports(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t NumViewports,
+    const void *pViewports) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    if (NumViewports > 0u && pViewports == NULL) {
+        return;
+    }
+    d3d12xs_cl_log("RSSetViewports", 21u, NumViewports, (uint64_t)(uintptr_t)pViewports,
+                   0u, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t, const void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[21])(clm->real_obj, NumViewports, pViewports);
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot22_rs_set_scissor_rects(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t NumRects,
+    const void *pRects) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    if (NumRects > 0u && pRects == NULL) {
+        return;
+    }
+    d3d12xs_cl_log("RSSetScissorRects", 22u, NumRects, (uint64_t)(uintptr_t)pRects,
+                   0u, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t, const void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[22])(clm->real_obj, NumRects, pRects);
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot23_om_set_blend_factor(
+    ID3D12GraphicsCommandListX *self,
+    const float *BlendFactor) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    d3d12xs_cl_log("OMSetBlendFactor", 23u, (uint64_t)(uintptr_t)BlendFactor,
+                   0u, 0u, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, const float *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[23])(clm->real_obj, BlendFactor);
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot24_om_set_stencil_ref(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t StencilRef) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[24])(clm->real_obj, StencilRef);
+}
+
+/* Xbox slot 32 -> PC slot 28: SetDescriptorHeaps */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot32_set_descriptor_heaps(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t NumDescriptorHeaps,
+    void * const *ppDescriptorHeaps) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        d3d12xs_cl_log("SetDescriptorHeaps", 32u, NumDescriptorHeaps,
+                       (uint64_t)(uintptr_t)ppDescriptorHeaps, 0u, "(no_real_cl)", true);
+        return;
+    }
+    if (NumDescriptorHeaps > 0u && ppDescriptorHeaps == NULL) {
+        return;
+    }
+    void *real_heaps[16];
+    uint32_t real_count = 0u;
+    uint32_t limit = (NumDescriptorHeaps < 16u) ? NumDescriptorHeaps : 16u;
+    for (uint32_t i = 0u; i < limit; ++i) {
+        void *rh = d3d12xs_desc_heap_get_real(ppDescriptorHeaps[i]);
+        if (rh != NULL) {
+            real_heaps[real_count++] = rh;
+        } else {
+            d3d12xs_cl_log("SetDescriptorHeaps", 32u, NumDescriptorHeaps,
+                           (uint64_t)(uintptr_t)ppDescriptorHeaps[i], i, "(no_real_heap)", true);
+        }
+    }
+    d3d12xs_cl_log("SetDescriptorHeaps", 32u, NumDescriptorHeaps, real_count,
+                   (real_count > 0u) ? (uint64_t)(uintptr_t)real_heaps[0] : 0u,
+                   "(forwarded)", false);
+    if (real_count > 0u || NumDescriptorHeaps == 0u) {
+        typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t, void * const *);
+        void **vtbl = *(void ***)clm->real_obj;
+        ((pfn_real_t)vtbl[28])(clm->real_obj, real_count, real_heaps);
+    }
+}
+
+/* Xbox slot 33 -> PC slot 29: SetComputeRootSignature */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot33_set_compute_root_signature(
+    ID3D12GraphicsCommandListX *self,
+    void *pRootSignature) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    void *real_rs = (pRootSignature != NULL) ? d3d12xs_root_sig_get_real(pRootSignature) : NULL;
+    if (pRootSignature != NULL && real_rs == NULL) {
+        d3d12xs_cl_log("SetComputeRootSignature", 33u, (uint64_t)(uintptr_t)pRootSignature,
+                       0u, 0u, "(no_real_rs)", true);
+        return;
+    }
+    d3d12xs_cl_log("SetComputeRootSignature", 33u, (uint64_t)(uintptr_t)pRootSignature,
+                   (uint64_t)(uintptr_t)real_rs, 0u, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[29])(clm->real_obj, real_rs);
+}
+
+/* Xbox slot 34 -> PC slot 30: SetGraphicsRootSignature */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot34_set_graphics_root_signature(
+    ID3D12GraphicsCommandListX *self,
+    void *pRootSignature) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    void *real_rs = (pRootSignature != NULL) ? d3d12xs_root_sig_get_real(pRootSignature) : NULL;
+    if (pRootSignature != NULL && real_rs == NULL) {
+        d3d12xs_cl_log("SetGraphicsRootSignature", 34u, (uint64_t)(uintptr_t)pRootSignature,
+                       0u, 0u, "(no_real_rs)", true);
+        return;
+    }
+    d3d12xs_cl_log("SetGraphicsRootSignature", 34u, (uint64_t)(uintptr_t)pRootSignature,
+                   (uint64_t)(uintptr_t)real_rs, 0u, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[30])(clm->real_obj, real_rs);
+}
+
+/* Xbox slot 35 -> PC slot 31: SetComputeRootDescriptorTable */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot35_set_compute_root_descriptor_table(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t RootParameterIndex,
+    uint64_t BaseDescriptor) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    uint64_t real_gpu = d3d12xs_translate_gpu_desc_handle(BaseDescriptor, NULL);
+    if (BaseDescriptor != 0u && real_gpu == 0u) {
+        d3d12xs_cl_log("SetComputeRootDescriptorTable", 35u, RootParameterIndex,
+                       BaseDescriptor, 0u, "(bad_gpu_desc)", true);
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t, uint64_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[31])(clm->real_obj, RootParameterIndex, real_gpu);
+}
+
+/* Xbox slot 36 -> PC slot 32: SetGraphicsRootDescriptorTable */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot36_set_graphics_root_descriptor_table(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t RootParameterIndex,
+    uint64_t BaseDescriptor) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    uint64_t real_gpu = d3d12xs_translate_gpu_desc_handle(BaseDescriptor, NULL);
+    if (BaseDescriptor != 0u && real_gpu == 0u) {
+        d3d12xs_cl_log("SetGraphicsRootDescriptorTable", 36u, RootParameterIndex,
+                       BaseDescriptor, 0u, "(bad_gpu_desc)", true);
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t, uint64_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[32])(clm->real_obj, RootParameterIndex, real_gpu);
+}
+
+/* Xbox slot 37 -> PC slot 33: SetComputeRoot32BitConstant */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot37_set_compute_root_32bit_constant(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t RootParameterIndex,
+    uint32_t SrcData,
+    uint32_t DestOffsetIn32BitValues) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t, uint32_t, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[33])(clm->real_obj, RootParameterIndex, SrcData, DestOffsetIn32BitValues);
+}
+
+/* Xbox slot 38 -> PC slot 34: SetGraphicsRoot32BitConstant */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot38_set_graphics_root_32bit_constant(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t RootParameterIndex,
+    uint32_t SrcData,
+    uint32_t DestOffsetIn32BitValues) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t, uint32_t, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[34])(clm->real_obj, RootParameterIndex, SrcData, DestOffsetIn32BitValues);
+}
+
+/* Xbox slot 39 -> PC slot 35: SetComputeRoot32BitConstants */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot39_set_compute_root_32bit_constants(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t RootParameterIndex,
+    uint32_t Num32BitValuesToSet,
+    const void *pSrcData,
+    uint32_t DestOffsetIn32BitValues) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL || (Num32BitValuesToSet > 0u && pSrcData == NULL)) {
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint32_t, uint32_t, const void *, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[35])(
+        clm->real_obj, RootParameterIndex, Num32BitValuesToSet, pSrcData, DestOffsetIn32BitValues);
+}
+
+/* Xbox slot 40 -> PC slot 36: SetGraphicsRoot32BitConstants */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot40_set_graphics_root_32bit_constants(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t RootParameterIndex,
+    uint32_t Num32BitValuesToSet,
+    const void *pSrcData,
+    uint32_t DestOffsetIn32BitValues) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL || (Num32BitValuesToSet > 0u && pSrcData == NULL)) {
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint32_t, uint32_t, const void *, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[36])(
+        clm->real_obj, RootParameterIndex, Num32BitValuesToSet, pSrcData, DestOffsetIn32BitValues);
+}
+
+static void d3d12xs_cl_forward_root_va(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t xbox_slot,
+    uint32_t pc_slot,
+    const char *op_name,
+    uint32_t RootParameterIndex,
+    uint64_t BufferLocation) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    uint64_t real_va = (BufferLocation != 0u)
+        ? d3d12xs_translate_gpu_va(BufferLocation, NULL)
+        : 0u;
+    if (BufferLocation != 0u && real_va == 0u) {
+        d3d12xs_cl_log(op_name, xbox_slot, RootParameterIndex, BufferLocation,
+                       0u, "(unmapped_va)", true);
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t, uint64_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[pc_slot])(clm->real_obj, RootParameterIndex, real_va);
+}
+
+/* Xbox slots 41..46 -> PC slots 37..42: Root CBV/SRV/UAV */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot41_set_compute_root_cbv(
+    ID3D12GraphicsCommandListX *self, uint32_t idx, uint64_t va) {
+    d3d12xs_cl_forward_root_va(self, 41u, 37u, "SetComputeRootCBV", idx, va);
+}
+static void SCARLETT_D3D12XS_CALL cmd_list_slot42_set_graphics_root_cbv(
+    ID3D12GraphicsCommandListX *self, uint32_t idx, uint64_t va) {
+    d3d12xs_cl_forward_root_va(self, 42u, 38u, "SetGraphicsRootCBV", idx, va);
+}
+static void SCARLETT_D3D12XS_CALL cmd_list_slot43_set_compute_root_srv(
+    ID3D12GraphicsCommandListX *self, uint32_t idx, uint64_t va) {
+    d3d12xs_cl_forward_root_va(self, 43u, 39u, "SetComputeRootSRV", idx, va);
+}
+static void SCARLETT_D3D12XS_CALL cmd_list_slot44_set_graphics_root_srv(
+    ID3D12GraphicsCommandListX *self, uint32_t idx, uint64_t va) {
+    d3d12xs_cl_forward_root_va(self, 44u, 40u, "SetGraphicsRootSRV", idx, va);
+}
+static void SCARLETT_D3D12XS_CALL cmd_list_slot45_set_compute_root_uav(
+    ID3D12GraphicsCommandListX *self, uint32_t idx, uint64_t va) {
+    d3d12xs_cl_forward_root_va(self, 45u, 41u, "SetComputeRootUAV", idx, va);
+}
+static void SCARLETT_D3D12XS_CALL cmd_list_slot46_set_graphics_root_uav(
+    ID3D12GraphicsCommandListX *self, uint32_t idx, uint64_t va) {
+    d3d12xs_cl_forward_root_va(self, 46u, 42u, "SetGraphicsRootUAV", idx, va);
+}
+
+typedef struct scarlett_d3d12_ibv_s {
+    uint64_t BufferLocation;
+    uint32_t SizeInBytes;
+    uint32_t Format;
+} scarlett_d3d12_ibv_t;
+
+typedef struct scarlett_d3d12_vbv_s {
+    uint64_t BufferLocation;
+    uint32_t SizeInBytes;
+    uint32_t StrideInBytes;
+} scarlett_d3d12_vbv_t;
+
+typedef struct scarlett_d3d12_sobv_s {
+    uint64_t BufferLocation;
+    uint64_t SizeInBytes;
+    uint64_t BufferFilledSizeLocation;
+} scarlett_d3d12_sobv_t;
+
+/* Xbox slot 47 -> PC slot 43: IASetIndexBuffer */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot47_ia_set_index_buffer(
+    ID3D12GraphicsCommandListX *self,
+    const scarlett_d3d12_ibv_t *pView) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, const scarlett_d3d12_ibv_t *);
+    void **vtbl = *(void ***)clm->real_obj;
+    if (pView == NULL) {
+        ((pfn_real_t)vtbl[43])(clm->real_obj, NULL);
+        return;
+    }
+    scarlett_d3d12_ibv_t pc_view = *pView;
+    if (pc_view.BufferLocation != 0u) {
+        pc_view.BufferLocation = d3d12xs_translate_gpu_va(pc_view.BufferLocation, NULL);
+        if (pc_view.BufferLocation == 0u) {
+            d3d12xs_cl_log("IASetIndexBuffer", 47u, pView->BufferLocation,
+                           pView->SizeInBytes, pView->Format, "(unmapped_va)", true);
+            return;
+        }
+    }
+    ((pfn_real_t)vtbl[43])(clm->real_obj, &pc_view);
+}
+
+/* Xbox slot 48 -> PC slot 44: IASetVertexBuffers */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot48_ia_set_vertex_buffers(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t StartSlot,
+    uint32_t NumViews,
+    const scarlett_d3d12_vbv_t *pViews) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint32_t, uint32_t, const scarlett_d3d12_vbv_t *);
+    void **vtbl = *(void ***)clm->real_obj;
+    if (NumViews == 0u || pViews == NULL) {
+        ((pfn_real_t)vtbl[44])(clm->real_obj, StartSlot, 0u, NULL);
+        return;
+    }
+    scarlett_d3d12_vbv_t pc_views[32];
+    uint32_t cnt = (NumViews < 32u) ? NumViews : 32u;
+    for (uint32_t i = 0u; i < cnt; ++i) {
+        pc_views[i] = pViews[i];
+        if (pc_views[i].BufferLocation != 0u) {
+            uint64_t rva = d3d12xs_translate_gpu_va(pc_views[i].BufferLocation, NULL);
+            if (rva == 0u) {
+                d3d12xs_cl_log("IASetVertexBuffers", 48u, StartSlot + i,
+                               pc_views[i].BufferLocation, pc_views[i].SizeInBytes,
+                               "(unmapped_va)", true);
+            }
+            pc_views[i].BufferLocation = rva;
+        }
+    }
+    ((pfn_real_t)vtbl[44])(clm->real_obj, StartSlot, cnt, pc_views);
+}
+
+/* Xbox slot 49 -> PC slot 45: SOSetTargets */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot49_so_set_targets(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t StartSlot,
+    uint32_t NumViews,
+    const scarlett_d3d12_sobv_t *pViews) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint32_t, uint32_t, const scarlett_d3d12_sobv_t *);
+    void **vtbl = *(void ***)clm->real_obj;
+    if (NumViews == 0u || pViews == NULL) {
+        ((pfn_real_t)vtbl[45])(clm->real_obj, StartSlot, 0u, NULL);
+        return;
+    }
+    scarlett_d3d12_sobv_t pc_views[4];
+    uint32_t cnt = (NumViews < 4u) ? NumViews : 4u;
+    for (uint32_t i = 0u; i < cnt; ++i) {
+        pc_views[i] = pViews[i];
+        if (pc_views[i].BufferLocation != 0u) {
+            pc_views[i].BufferLocation = d3d12xs_translate_gpu_va(pc_views[i].BufferLocation, NULL);
+        }
+        if (pc_views[i].BufferFilledSizeLocation != 0u) {
+            pc_views[i].BufferFilledSizeLocation =
+                d3d12xs_translate_gpu_va(pc_views[i].BufferFilledSizeLocation, NULL);
+        }
+    }
+    ((pfn_real_t)vtbl[45])(clm->real_obj, StartSlot, cnt, pc_views);
+}
+
+/* Xbox slot 50 -> PC slot 46: OMSetRenderTargets */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot50_om_set_render_targets(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t NumRenderTargetDescriptors,
+    const uint64_t *pRenderTargetDescriptors,
+    uint32_t RTsSingleHandleToDescriptorRange,
+    const uint64_t *pDepthStencilDescriptor) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL) {
+        return;
+    }
+    uint32_t rt_count = (NumRenderTargetDescriptors <= 8u) ? NumRenderTargetDescriptors : 8u;
+    if (pRenderTargetDescriptors == NULL) {
+        rt_count = 0u;
+    }
+    clm->bound_rtv_count = rt_count;
+    d3d12xs_pe_zero(clm->bound_rtvs, sizeof(clm->bound_rtvs));
+
+    uint64_t real_rtvs[8];
+    uint32_t valid_rt_count = 0u;
+    bool rtv_err = false;
+    if (rt_count > 0u) {
+        if (RTsSingleHandleToDescriptorRange != 0u) {
+            uint64_t first = pRenderTargetDescriptors[0];
+            uint64_t real_first = d3d12xs_translate_cpu_desc_handle_range(first, rt_count, NULL);
+            if (real_first != 0u) {
+                real_rtvs[0] = real_first;
+                valid_rt_count = rt_count;
+                for (uint32_t i = 0u; i < rt_count; ++i) {
+                    clm->bound_rtvs[i] = d3d12xs_lookup_desc_resource_offset(first, i);
+                }
+            } else {
+                rtv_err = true;
+                d3d12xs_cl_log("OMSetRenderTargets", 50u, rt_count, first,
+                               RTsSingleHandleToDescriptorRange, "(bad_rtv_range)", true);
+            }
+        } else {
+            for (uint32_t i = 0u; i < rt_count; ++i) {
+                uint64_t h = pRenderTargetDescriptors[i];
+                uint64_t rh = d3d12xs_translate_cpu_desc_handle(h, NULL);
+                if (rh == 0u) {
+                    rtv_err = true;
+                    d3d12xs_cl_log("OMSetRenderTargets", 50u, i, h, rt_count,
+                                   "(bad_rtv_handle)", true);
+                    break;
+                }
+                real_rtvs[i] = rh;
+                ++valid_rt_count;
+                clm->bound_rtvs[i] = d3d12xs_lookup_desc_resource(h);
+            }
+        }
+    }
+
+    uint64_t real_dsv = 0u;
+    const uint64_t *real_dsv_ptr = NULL;
+    if (pDepthStencilDescriptor != NULL && *pDepthStencilDescriptor != 0u) {
+        real_dsv = d3d12xs_translate_cpu_desc_handle(*pDepthStencilDescriptor, NULL);
+        if (real_dsv != 0u) {
+            real_dsv_ptr = &real_dsv;
+        } else {
+            d3d12xs_cl_log("OMSetRenderTargets", 50u, *pDepthStencilDescriptor,
+                           rt_count, 0u, "(bad_dsv_handle)", true);
+        }
+    }
+
+    if (clm->real_obj == NULL) {
+        d3d12xs_cl_log("OMSetRenderTargets", 50u, rt_count, 0u, 0u, "(no_real_cl)", true);
+        return;
+    }
+    if (rtv_err) {
+        valid_rt_count = 0u;
+    }
+    d3d12xs_cl_log("OMSetRenderTargets", 50u, valid_rt_count,
+                   (valid_rt_count > 0u) ? real_rtvs[0] : 0u, real_dsv, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint32_t, const uint64_t *, uint32_t, const uint64_t *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[46])(
+        clm->real_obj,
+        valid_rt_count,
+        (valid_rt_count > 0u) ? real_rtvs : NULL,
+        RTsSingleHandleToDescriptorRange,
+        real_dsv_ptr);
+}
+
+/* Xbox slot 51 -> PC slot 47: ClearDepthStencilView */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot51_clear_dsv(
+    ID3D12GraphicsCommandListX *self,
+    uint64_t DepthStencilView,
+    uint32_t ClearFlags,
+    float Depth,
+    uint8_t Stencil,
+    uint32_t NumRects,
+    const void *pRects) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    uint64_t real_dsv = d3d12xs_translate_cpu_desc_handle(DepthStencilView, NULL);
+    if (real_dsv == 0u) {
+        d3d12xs_cl_log("ClearDepthStencilView", 51u, DepthStencilView, ClearFlags,
+                       NumRects, "(bad_dsv_handle)", true);
+        return;
+    }
+    clm->has_gpu_write_cmds = 1u;
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint64_t, uint32_t, float, uint8_t, uint32_t, const void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[47])(
+        clm->real_obj, real_dsv, ClearFlags, Depth, Stencil, NumRects, pRects);
+}
+
+/* Xbox slot 52 -> PC slot 48: ClearRenderTargetView */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot52_clear_rtv(
+    ID3D12GraphicsCommandListX *self,
+    uint64_t RenderTargetView,
+    const float *ColorRGBA,
+    uint32_t NumRects,
+    const void *pRects) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL) {
+        return;
+    }
+    uint64_t real_rtv = d3d12xs_translate_cpu_desc_handle(RenderTargetView, NULL);
+    if (real_rtv == 0u) {
+        d3d12xs_cl_log("ClearRenderTargetView", 52u, RenderTargetView,
+                       (uint64_t)(uintptr_t)ColorRGBA, NumRects, "(bad_rtv_handle)", true);
+        return;
+    }
+    void *rtv_res = d3d12xs_lookup_desc_resource(RenderTargetView);
+    if (rtv_res != NULL) {
+        d3d12xs_resource_mark_gpu_dirty(rtv_res);
+    }
+    if (clm->real_obj == NULL) {
+        d3d12xs_cl_log("ClearRenderTargetView", 52u, RenderTargetView, real_rtv,
+                       (uint64_t)(uintptr_t)rtv_res, "(no_real_cl)", true);
+        return;
+    }
+    clm->has_gpu_write_cmds = 1u;
+    d3d12xs_cl_log("ClearRenderTargetView", 52u, RenderTargetView, real_rtv,
+                   (uint64_t)(uintptr_t)rtv_res, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint64_t, const float *, uint32_t, const void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[48])(clm->real_obj, real_rtv, ColorRGBA, NumRects, pRects);
+}
+
+/* Xbox slot 53 -> PC slot 49: ClearUnorderedAccessViewUint */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot53_clear_uav_uint(
+    ID3D12GraphicsCommandListX *self,
+    uint64_t ViewGPUHandleInCurrentHeap,
+    uint64_t ViewCPUHandle,
+    void *pResource,
+    const uint32_t Values[4],
+    uint32_t NumRects,
+    const void *pRects) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    uint64_t real_gpu = d3d12xs_translate_gpu_desc_handle(ViewGPUHandleInCurrentHeap, NULL);
+    uint64_t real_cpu = d3d12xs_translate_cpu_desc_handle(ViewCPUHandle, NULL);
+    void *real_res = d3d12xs_resource_get_real(pResource);
+    if (real_gpu == 0u || real_cpu == 0u || real_res == NULL) {
+        d3d12xs_cl_log("ClearUnorderedAccessViewUint", 53u, ViewGPUHandleInCurrentHeap,
+                       ViewCPUHandle, (uint64_t)(uintptr_t)pResource, "(bad_args)", true);
+        return;
+    }
+    d3d12xs_resource_mark_gpu_dirty(pResource);
+    clm->has_gpu_write_cmds = 1u;
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint64_t, uint64_t, void *, const uint32_t *, uint32_t, const void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[49])(
+        clm->real_obj, real_gpu, real_cpu, real_res, Values, NumRects, pRects);
+}
+
+/* Xbox slot 54 -> PC slot 50: ClearUnorderedAccessViewFloat */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot54_clear_uav_float(
+    ID3D12GraphicsCommandListX *self,
+    uint64_t ViewGPUHandleInCurrentHeap,
+    uint64_t ViewCPUHandle,
+    void *pResource,
+    const float Values[4],
+    uint32_t NumRects,
+    const void *pRects) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    uint64_t real_gpu = d3d12xs_translate_gpu_desc_handle(ViewGPUHandleInCurrentHeap, NULL);
+    uint64_t real_cpu = d3d12xs_translate_cpu_desc_handle(ViewCPUHandle, NULL);
+    void *real_res = d3d12xs_resource_get_real(pResource);
+    if (real_gpu == 0u || real_cpu == 0u || real_res == NULL) {
+        d3d12xs_cl_log("ClearUnorderedAccessViewFloat", 54u, ViewGPUHandleInCurrentHeap,
+                       ViewCPUHandle, (uint64_t)(uintptr_t)pResource, "(bad_args)", true);
+        return;
+    }
+    d3d12xs_resource_mark_gpu_dirty(pResource);
+    clm->has_gpu_write_cmds = 1u;
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(
+        void *, uint64_t, uint64_t, void *, const float *, uint32_t, const void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[50])(
+        clm->real_obj, real_gpu, real_cpu, real_res, Values, NumRects, pRects);
+}
+
+/* Xbox slot 55 -> PC slot 51: DiscardResource */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot55_discard_resource(
+    ID3D12GraphicsCommandListX *self,
+    void *pResource,
+    const void *pRegion) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    void *real_res = d3d12xs_resource_get_real(pResource);
+    if (real_res == NULL) {
+        return;
+    }
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, void *, const void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[51])(clm->real_obj, real_res, pRegion);
+}
+
+/* Xbox slot 70 -> PC slot 62: OMSetDepthBounds */
+static void SCARLETT_D3D12XS_CALL cmd_list_slot70_om_set_depth_bounds(
+    ID3D12GraphicsCommandListX *self,
+    float Min,
+    float Max) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
+    }
+    d3d12xs_cl_log("OMSetDepthBounds", 70u, (uint64_t)(uintptr_t)self, 0u, 0u,
+                   "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, float, float);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[62])(clm->real_obj, Min, Max);
+}
+
+/* Xbox slots 72, 74, 75: Scarlett-specific synchronization/state methods (no PC vtable match) */
+static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_slot72_xbox_noop(
+    ID3D12GraphicsCommandListX *self, uint64_t a0, uint64_t a1, uint64_t a2) {
+    d3d12xs_cl_log("XboxSlot72", 72u, a0, a1, a2, "(xbox_noop)", false);
+    return (self != NULL) ? SCARLETT_OK : SCARLETT_E_POINTER;
+}
+static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_slot74_xbox_noop(
+    ID3D12GraphicsCommandListX *self, uint64_t a0, uint64_t a1, uint64_t a2) {
+    d3d12xs_cl_log("XboxSlot74", 74u, a0, a1, a2, "(xbox_noop)", false);
+    return (self != NULL) ? SCARLETT_OK : SCARLETT_E_POINTER;
+}
+static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_slot75_xbox_noop(
+    ID3D12GraphicsCommandListX *self, uint64_t a0, uint64_t a1, uint64_t a2) {
+    d3d12xs_cl_log("XboxSlot75", 75u, a0, a1, a2, "(xbox_noop)", false);
+    return (self != NULL) ? SCARLETT_OK : SCARLETT_E_POINTER;
+}
+
 D3D12XS_DEFINE_SLOT_STUB(cmd_list, "ID3D12GraphicsCommandListX", 3, "3")
 D3D12XS_DEFINE_SLOT_STUB(cmd_list, "ID3D12GraphicsCommandListX", 4, "4")
 D3D12XS_DEFINE_SLOT_STUB(cmd_list, "ID3D12GraphicsCommandListX", 5, "5")
 D3D12XS_DEFINE_SLOT_STUB(cmd_list, "ID3D12GraphicsCommandListX", 6, "6")
 D3D12XS_DEFINE_SLOT_STUB(cmd_list, "ID3D12GraphicsCommandListX", 7, "7")
 
-D3D12XS_DEFINE_CL_TRACE(11) D3D12XS_DEFINE_CL_TRACE(12) D3D12XS_DEFINE_CL_TRACE(13) D3D12XS_DEFINE_CL_TRACE(14)
-D3D12XS_DEFINE_CL_TRACE(18) D3D12XS_DEFINE_CL_TRACE(19) D3D12XS_DEFINE_CL_TRACE(21) D3D12XS_DEFINE_CL_TRACE(22)
-D3D12XS_DEFINE_CL_TRACE(23) D3D12XS_DEFINE_CL_TRACE(24) D3D12XS_DEFINE_CL_TRACE(25) D3D12XS_DEFINE_CL_TRACE(26)
-D3D12XS_DEFINE_CL_TRACE(27) D3D12XS_DEFINE_CL_TRACE(28) D3D12XS_DEFINE_CL_TRACE(29) D3D12XS_DEFINE_CL_TRACE(30)
-D3D12XS_DEFINE_CL_TRACE(31) D3D12XS_DEFINE_CL_TRACE(32) D3D12XS_DEFINE_CL_TRACE(33) D3D12XS_DEFINE_CL_TRACE(34)
-D3D12XS_DEFINE_CL_TRACE(35) D3D12XS_DEFINE_CL_TRACE(36) D3D12XS_DEFINE_CL_TRACE(37) D3D12XS_DEFINE_CL_TRACE(38)
-D3D12XS_DEFINE_CL_TRACE(39) D3D12XS_DEFINE_CL_TRACE(40) D3D12XS_DEFINE_CL_TRACE(41) D3D12XS_DEFINE_CL_TRACE(42)
-D3D12XS_DEFINE_CL_TRACE(43) D3D12XS_DEFINE_CL_TRACE(44) D3D12XS_DEFINE_CL_TRACE(45) D3D12XS_DEFINE_CL_TRACE(46)
-D3D12XS_DEFINE_CL_TRACE(47) D3D12XS_DEFINE_CL_TRACE(48) D3D12XS_DEFINE_CL_TRACE(49) D3D12XS_DEFINE_CL_TRACE(50)
-D3D12XS_DEFINE_CL_TRACE(51) D3D12XS_DEFINE_CL_TRACE(52) D3D12XS_DEFINE_CL_TRACE(53) D3D12XS_DEFINE_CL_TRACE(54)
-D3D12XS_DEFINE_CL_TRACE(55) D3D12XS_DEFINE_CL_TRACE(56) D3D12XS_DEFINE_CL_TRACE(57) D3D12XS_DEFINE_CL_TRACE(58)
+D3D12XS_DEFINE_CL_TRACE(18)
+D3D12XS_DEFINE_CL_TRACE(25) D3D12XS_DEFINE_CL_TRACE(26) D3D12XS_DEFINE_CL_TRACE(27)
+D3D12XS_DEFINE_CL_TRACE(28) D3D12XS_DEFINE_CL_TRACE(29) D3D12XS_DEFINE_CL_TRACE(30) D3D12XS_DEFINE_CL_TRACE(31)
+D3D12XS_DEFINE_CL_TRACE(56) D3D12XS_DEFINE_CL_TRACE(57) D3D12XS_DEFINE_CL_TRACE(58)
 D3D12XS_DEFINE_CL_TRACE(60) D3D12XS_DEFINE_CL_TRACE(61) D3D12XS_DEFINE_CL_TRACE(62) D3D12XS_DEFINE_CL_TRACE(63)
 D3D12XS_DEFINE_CL_TRACE(64) D3D12XS_DEFINE_CL_TRACE(65) D3D12XS_DEFINE_CL_TRACE(66) D3D12XS_DEFINE_CL_TRACE(67)
-D3D12XS_DEFINE_CL_TRACE(68) D3D12XS_DEFINE_CL_TRACE(69) D3D12XS_DEFINE_CL_TRACE(70) D3D12XS_DEFINE_CL_TRACE(72)
-D3D12XS_DEFINE_CL_TRACE(73) D3D12XS_DEFINE_CL_TRACE(74) D3D12XS_DEFINE_CL_TRACE(75) D3D12XS_DEFINE_CL_TRACE(76)
-D3D12XS_DEFINE_CL_TRACE(77) D3D12XS_DEFINE_CL_TRACE(78) D3D12XS_DEFINE_CL_TRACE(79) D3D12XS_DEFINE_CL_TRACE(80)
+D3D12XS_DEFINE_CL_TRACE(68) D3D12XS_DEFINE_CL_TRACE(69) D3D12XS_DEFINE_CL_TRACE(73)
+D3D12XS_DEFINE_CL_TRACE(76) D3D12XS_DEFINE_CL_TRACE(77) D3D12XS_DEFINE_CL_TRACE(78) D3D12XS_DEFINE_CL_TRACE(79)
+D3D12XS_DEFINE_CL_TRACE(80)
 D3D12XS_DEFINE_CL_TRACE(127) D3D12XS_DEFINE_CL_TRACE(128) D3D12XS_DEFINE_CL_TRACE(129) D3D12XS_DEFINE_CL_TRACE(130)
 D3D12XS_DEFINE_CL_TRACE(133) D3D12XS_DEFINE_CL_TRACE(134) D3D12XS_DEFINE_CL_TRACE(135) D3D12XS_DEFINE_CL_TRACE(136)
 D3D12XS_DEFINE_CL_TRACE(137) D3D12XS_DEFINE_CL_TRACE(138) D3D12XS_DEFINE_CL_TRACE(140) D3D12XS_DEFINE_CL_TRACE(141)
@@ -3203,20 +4087,20 @@ static const ID3D12GraphicsCommandListXVtbl g_cmd_list_vtbl = {
         (void *)cmd_list_get_type,              /* slot 8 (+0x40) */
         (void *)cmd_list_close,                 /* slot 9 (+0x48) */
         (void *)cmd_list_reset,                 /* slot 10 (+0x50) */
-        (void *)cmd_list_trace_11,              /* slot 11 */
-        (void *)cmd_list_trace_12,              /* slot 12 */
-        (void *)cmd_list_trace_13,              /* slot 13 */
-        (void *)cmd_list_trace_14,              /* slot 14 */
-        (void *)cmd_list_slot15_copy_buffer_region,  /* slot 15 */
-        (void *)cmd_list_slot16_copy_texture_region, /* slot 16 */
-        (void *)cmd_list_slot17_copy_resource,       /* slot 17 */
+        (void *)cmd_list_slot11_clear_state,    /* slot 11 -> PC 11 */
+        (void *)cmd_list_slot12_draw_instanced, /* slot 12 -> PC 12 */
+        (void *)cmd_list_slot13_draw_indexed_instanced, /* slot 13 -> PC 13 */
+        (void *)cmd_list_slot14_dispatch,       /* slot 14 -> PC 14 */
+        (void *)cmd_list_slot15_copy_buffer_region,  /* slot 15 -> PC 15 */
+        (void *)cmd_list_slot16_copy_texture_region, /* slot 16 -> PC 16 */
+        (void *)cmd_list_slot17_copy_resource,       /* slot 17 -> PC 17 */
         (void *)cmd_list_trace_18,              /* slot 18 */
-        (void *)cmd_list_trace_19,              /* slot 19 */
+        (void *)cmd_list_slot19_resolve_subresource, /* slot 19 -> PC 19 */
         (void *)cmd_list_slot20_refill,         /* slot 20 (+0xa0) */
-        (void *)cmd_list_trace_21,              /* slot 21 */
-        (void *)cmd_list_trace_22,              /* slot 22 */
-        (void *)cmd_list_trace_23,              /* slot 23 */
-        (void *)cmd_list_trace_24,              /* slot 24 */
+        (void *)cmd_list_slot21_rs_set_viewports,     /* slot 21 -> PC 21 */
+        (void *)cmd_list_slot22_rs_set_scissor_rects, /* slot 22 -> PC 22 */
+        (void *)cmd_list_slot23_om_set_blend_factor,  /* slot 23 -> PC 23 */
+        (void *)cmd_list_slot24_om_set_stencil_ref,   /* slot 24 -> PC 24 */
         (void *)cmd_list_trace_25,              /* slot 25 */
         (void *)cmd_list_trace_26,              /* slot 26 */
         (void *)cmd_list_trace_27,              /* slot 27 */
@@ -3224,30 +4108,30 @@ static const ID3D12GraphicsCommandListXVtbl g_cmd_list_vtbl = {
         (void *)cmd_list_trace_29,              /* slot 29 */
         (void *)cmd_list_trace_30,              /* slot 30 */
         (void *)cmd_list_trace_31,              /* slot 31 */
-        (void *)cmd_list_trace_32,              /* slot 32 */
-        (void *)cmd_list_trace_33,              /* slot 33 */
-        (void *)cmd_list_trace_34,              /* slot 34 */
-        (void *)cmd_list_trace_35,              /* slot 35 */
-        (void *)cmd_list_trace_36,              /* slot 36 */
-        (void *)cmd_list_trace_37,              /* slot 37 */
-        (void *)cmd_list_trace_38,              /* slot 38 */
-        (void *)cmd_list_trace_39,              /* slot 39 */
-        (void *)cmd_list_trace_40,              /* slot 40 */
-        (void *)cmd_list_trace_41,              /* slot 41 */
-        (void *)cmd_list_trace_42,              /* slot 42 */
-        (void *)cmd_list_trace_43,              /* slot 43 */
-        (void *)cmd_list_trace_44,              /* slot 44 */
-        (void *)cmd_list_trace_45,              /* slot 45 */
-        (void *)cmd_list_trace_46,              /* slot 46 */
-        (void *)cmd_list_trace_47,              /* slot 47 */
-        (void *)cmd_list_trace_48,              /* slot 48 */
-        (void *)cmd_list_trace_49,              /* slot 49 */
-        (void *)cmd_list_trace_50,              /* slot 50 */
-        (void *)cmd_list_trace_51,              /* slot 51 */
-        (void *)cmd_list_trace_52,              /* slot 52 */
-        (void *)cmd_list_trace_53,              /* slot 53 */
-        (void *)cmd_list_trace_54,              /* slot 54 */
-        (void *)cmd_list_trace_55,              /* slot 55 */
+        (void *)cmd_list_slot32_set_descriptor_heaps,            /* slot 32 -> PC 28 */
+        (void *)cmd_list_slot33_set_compute_root_signature,      /* slot 33 -> PC 29 */
+        (void *)cmd_list_slot34_set_graphics_root_signature,     /* slot 34 -> PC 30 */
+        (void *)cmd_list_slot35_set_compute_root_descriptor_table,  /* slot 35 -> PC 31 */
+        (void *)cmd_list_slot36_set_graphics_root_descriptor_table, /* slot 36 -> PC 32 */
+        (void *)cmd_list_slot37_set_compute_root_32bit_constant,    /* slot 37 -> PC 33 */
+        (void *)cmd_list_slot38_set_graphics_root_32bit_constant,   /* slot 38 -> PC 34 */
+        (void *)cmd_list_slot39_set_compute_root_32bit_constants,   /* slot 39 -> PC 35 */
+        (void *)cmd_list_slot40_set_graphics_root_32bit_constants,  /* slot 40 -> PC 36 */
+        (void *)cmd_list_slot41_set_compute_root_cbv,            /* slot 41 -> PC 37 */
+        (void *)cmd_list_slot42_set_graphics_root_cbv,           /* slot 42 -> PC 38 */
+        (void *)cmd_list_slot43_set_compute_root_srv,            /* slot 43 -> PC 39 */
+        (void *)cmd_list_slot44_set_graphics_root_srv,           /* slot 44 -> PC 40 */
+        (void *)cmd_list_slot45_set_compute_root_uav,            /* slot 45 -> PC 41 */
+        (void *)cmd_list_slot46_set_graphics_root_uav,           /* slot 46 -> PC 42 */
+        (void *)cmd_list_slot47_ia_set_index_buffer,             /* slot 47 -> PC 43 */
+        (void *)cmd_list_slot48_ia_set_vertex_buffers,           /* slot 48 -> PC 44 */
+        (void *)cmd_list_slot49_so_set_targets,                  /* slot 49 -> PC 45 */
+        (void *)cmd_list_slot50_om_set_render_targets,           /* slot 50 -> PC 46 */
+        (void *)cmd_list_slot51_clear_dsv,                       /* slot 51 -> PC 47 */
+        (void *)cmd_list_slot52_clear_rtv,                       /* slot 52 -> PC 48 */
+        (void *)cmd_list_slot53_clear_uav_uint,                  /* slot 53 -> PC 49 */
+        (void *)cmd_list_slot54_clear_uav_float,                 /* slot 54 -> PC 50 */
+        (void *)cmd_list_slot55_discard_resource,                /* slot 55 -> PC 51 */
         (void *)cmd_list_trace_56,              /* slot 56 */
         (void *)cmd_list_trace_57,              /* slot 57 */
         (void *)cmd_list_trace_58,              /* slot 58 */
@@ -3262,12 +4146,12 @@ static const ID3D12GraphicsCommandListXVtbl g_cmd_list_vtbl = {
         (void *)cmd_list_trace_67,              /* slot 67 */
         (void *)cmd_list_trace_68,              /* slot 68 */
         (void *)cmd_list_trace_69,              /* slot 69 */
-        (void *)cmd_list_trace_70,              /* slot 70 */
+        (void *)cmd_list_slot70_om_set_depth_bounds, /* slot 70 -> PC 62 */
         (void *)cmd_list_slot71_write_gpu_memory_label_x, /* slot 71 (+0x238) */
-        (void *)cmd_list_trace_72,              /* slot 72 */
+        (void *)cmd_list_slot72_xbox_noop,      /* slot 72 */
         (void *)cmd_list_trace_73,              /* slot 73 */
-        (void *)cmd_list_trace_74,              /* slot 74 */
-        (void *)cmd_list_trace_75,              /* slot 75 */
+        (void *)cmd_list_slot74_xbox_noop,      /* slot 74 */
+        (void *)cmd_list_slot75_xbox_noop,      /* slot 75 */
         (void *)cmd_list_trace_76,              /* slot 76 */
         (void *)cmd_list_trace_77,              /* slot 77 */
         (void *)cmd_list_trace_78,              /* slot 78 */
@@ -3406,6 +4290,143 @@ static inline d3d12xs_desc_heap_meta_t *d3d12xs_get_desc_heap_meta(const void *p
     return &g_desc_heap_meta[idx];
 }
 
+static void *d3d12xs_desc_heap_get_real(const void *ptr) {
+    d3d12xs_desc_heap_meta_t *hm = d3d12xs_get_desc_heap_meta(ptr);
+    return (hm != NULL && hm->in_use != 0u) ? hm->real_obj : NULL;
+}
+
+#define SCARLETT_D3D12XS_DESC_RES_MAP_CAP 16384u
+typedef struct d3d12xs_desc_res_entry_s {
+    uint64_t cpu_handle;
+    void *res;
+} d3d12xs_desc_res_entry_t;
+
+static d3d12xs_desc_res_entry_t *g_desc_res_map = NULL;
+static uint32_t g_desc_res_map_init_state = 0u;
+static uint32_t g_desc_res_map_lock = 0u;
+
+static bool d3d12xs_ensure_desc_res_map(void) {
+    if (__atomic_load_n(&g_desc_res_map_init_state, __ATOMIC_ACQUIRE) == 2u) {
+        return g_desc_res_map != NULL;
+    }
+    uint32_t expected = 0u;
+    if (__atomic_compare_exchange_n(
+            &g_desc_res_map_init_state, &expected, 1u,
+            false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        g_desc_res_map = (d3d12xs_desc_res_entry_t *)d3d12xs_pe_alloc_zero(
+            (size_t)SCARLETT_D3D12XS_DESC_RES_MAP_CAP * sizeof(d3d12xs_desc_res_entry_t));
+        __atomic_store_n(&g_desc_res_map_init_state, 2u, __ATOMIC_RELEASE);
+    } else {
+        while (__atomic_load_n(&g_desc_res_map_init_state, __ATOMIC_ACQUIRE) != 2u) {
+        }
+    }
+    return g_desc_res_map != NULL;
+}
+
+static inline uint32_t d3d12xs_desc_res_hash(uint64_t handle) {
+    uint64_t x = handle * UINT64_C(0x9E3779B97F4A7C15);
+    return (uint32_t)((x ^ (x >> 32u)) & (SCARLETT_D3D12XS_DESC_RES_MAP_CAP - 1u));
+}
+
+static void d3d12xs_record_desc_resource(uint64_t xbox_cpu_handle, void *res) {
+    if (xbox_cpu_handle == 0u || !d3d12xs_ensure_desc_res_map()) {
+        return;
+    }
+    while (__atomic_exchange_n(&g_desc_res_map_lock, 1u, __ATOMIC_ACQUIRE) != 0u) {
+    }
+    uint32_t slot = d3d12xs_desc_res_hash(xbox_cpu_handle);
+    for (uint32_t probe = 0u; probe < 64u; ++probe) {
+        uint32_t idx = (slot + probe) & (SCARLETT_D3D12XS_DESC_RES_MAP_CAP - 1u);
+        uint64_t cur = g_desc_res_map[idx].cpu_handle;
+        if (cur == 0u || cur == xbox_cpu_handle) {
+            g_desc_res_map[idx].cpu_handle = xbox_cpu_handle;
+            g_desc_res_map[idx].res = res;
+            __atomic_store_n(&g_desc_res_map_lock, 0u, __ATOMIC_RELEASE);
+            return;
+        }
+    }
+    /* Evict hash head on saturation */
+    g_desc_res_map[slot].cpu_handle = xbox_cpu_handle;
+    g_desc_res_map[slot].res = res;
+    __atomic_store_n(&g_desc_res_map_lock, 0u, __ATOMIC_RELEASE);
+}
+
+static void *d3d12xs_lookup_desc_resource(uint64_t xbox_cpu_handle) {
+    if (xbox_cpu_handle == 0u ||
+        __atomic_load_n(&g_desc_res_map_init_state, __ATOMIC_ACQUIRE) != 2u ||
+        g_desc_res_map == NULL) {
+        return NULL;
+    }
+    while (__atomic_exchange_n(&g_desc_res_map_lock, 1u, __ATOMIC_ACQUIRE) != 0u) {
+    }
+    void *found = NULL;
+    uint32_t slot = d3d12xs_desc_res_hash(xbox_cpu_handle);
+    for (uint32_t probe = 0u; probe < 64u; ++probe) {
+        uint32_t idx = (slot + probe) & (SCARLETT_D3D12XS_DESC_RES_MAP_CAP - 1u);
+        uint64_t cur = g_desc_res_map[idx].cpu_handle;
+        if (cur == 0u) {
+            break;
+        }
+        if (cur == xbox_cpu_handle) {
+            found = g_desc_res_map[idx].res;
+            break;
+        }
+    }
+    __atomic_store_n(&g_desc_res_map_lock, 0u, __ATOMIC_RELEASE);
+    return (d3d12xs_get_res_meta(found) != NULL) ? found : NULL;
+}
+
+static void *d3d12xs_lookup_desc_resource_offset(uint64_t xbox_cpu_handle, uint32_t index) {
+    if (xbox_cpu_handle == 0u) {
+        return NULL;
+    }
+    if (index == 0u) {
+        return d3d12xs_lookup_desc_resource(xbox_cpu_handle);
+    }
+    for (size_t i = 0u; i < SCARLETT_D3D12XS_MAX_COM_DESC_HEAPS; ++i) {
+        d3d12xs_desc_heap_meta_t *hm = &g_desc_heap_meta[i];
+        if (hm->in_use == 0u || hm->cpu_start_addr == 0u) {
+            continue;
+        }
+        uint64_t inc = (hm->xbox_inc_size > 0u) ? (uint64_t)hm->xbox_inc_size : 32u;
+        uint64_t span = (uint64_t)hm->desc.NumDescriptors * inc;
+        if (xbox_cpu_handle >= hm->cpu_start_addr && xbox_cpu_handle < hm->cpu_start_addr + span) {
+            return d3d12xs_lookup_desc_resource(xbox_cpu_handle + (uint64_t)index * inc);
+        }
+    }
+    return NULL;
+}
+
+static void d3d12xs_copy_desc_resource_range(
+    uint64_t dst_cpu_start, uint64_t src_cpu_start, uint32_t count) {
+    if (dst_cpu_start == 0u || src_cpu_start == 0u || count == 0u) {
+        return;
+    }
+    uint64_t dst_inc = 32u;
+    uint64_t src_inc = 32u;
+    for (size_t i = 0u; i < SCARLETT_D3D12XS_MAX_COM_DESC_HEAPS; ++i) {
+        d3d12xs_desc_heap_meta_t *hm = &g_desc_heap_meta[i];
+        if (hm->in_use == 0u || hm->cpu_start_addr == 0u) {
+            continue;
+        }
+        uint64_t inc = (hm->xbox_inc_size > 0u) ? (uint64_t)hm->xbox_inc_size : 32u;
+        uint64_t span = (uint64_t)hm->desc.NumDescriptors * inc;
+        if (dst_cpu_start >= hm->cpu_start_addr && dst_cpu_start < hm->cpu_start_addr + span) {
+            dst_inc = inc;
+        }
+        if (src_cpu_start >= hm->cpu_start_addr && src_cpu_start < hm->cpu_start_addr + span) {
+            src_inc = inc;
+        }
+    }
+    uint32_t lim = (count < 64u) ? count : 64u;
+    for (uint32_t k = 0u; k < lim; ++k) {
+        void *res = d3d12xs_lookup_desc_resource(src_cpu_start + (uint64_t)k * src_inc);
+        if (res != NULL) {
+            d3d12xs_record_desc_resource(dst_cpu_start + (uint64_t)k * dst_inc, res);
+        }
+    }
+}
+
 static uint64_t d3d12xs_translate_cpu_desc_handle_range(
     uint64_t xbox_cpu_handle, uint32_t count, uint32_t *out_heap_type) {
     if (xbox_cpu_handle == 0u) {
@@ -3457,7 +4478,7 @@ static uint64_t d3d12xs_translate_cpu_desc_handle(
     return d3d12xs_translate_cpu_desc_handle_range(xbox_cpu_handle, 1u, out_heap_type);
 }
 
-static __attribute__((unused)) uint64_t d3d12xs_translate_gpu_desc_handle(
+static uint64_t d3d12xs_translate_gpu_desc_handle(
     uint64_t xbox_gpu_handle, uint32_t *out_heap_type) {
     if (xbox_gpu_handle == 0u) {
         return 0u;
@@ -3684,7 +4705,7 @@ typedef struct d3d12xs_res_meta_s {
     uint32_t owns_va;
     uint32_t gpu_dirty;
     uint32_t current_state;
-    uint32_t reserved0;
+    uint32_t last_readback_exec_seq;
     void *real_obj;
     ID3D12DeviceX *owner_device;
 } d3d12xs_res_meta_t;
@@ -4180,6 +5201,9 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL com_slot12_create_command_list(
     clm->unix_cmd_list_handle = cmd_list_handle;
     clm->list_type = type;
     clm->label_write_count = 0u;
+    clm->bound_rtv_count = 0u;
+    clm->has_gpu_write_cmds = 0u;
+    d3d12xs_pe_zero(clm->bound_rtvs, sizeof(clm->bound_rtvs));
     clm->real_obj = NULL;
     d3d12xs_pm4_assign_slice(cl, clm, cl_idx);
     if (self->real_device != NULL) {
@@ -4477,6 +5501,7 @@ static void SCARLETT_D3D12XS_CALL com_slot18_create_srv(
             (uint64_t)(uintptr_t)pResource, (uint64_t)(uintptr_t)real_res,
             DestDescriptor, real_dest, SCARLETT_OK, "(forwarded)");
     }
+    d3d12xs_record_desc_resource(DestDescriptor, pResource);
     typedef void (SCARLETT_D3D12XS_CALL *pfn_real_srv_t)(void *, void *, const void *, uint64_t);
     void **vtbl = *(void ***)self->real_device;
     ((pfn_real_srv_t)vtbl[18])(self->real_device, real_res, pDesc, real_dest);
@@ -4520,6 +5545,7 @@ static void SCARLETT_D3D12XS_CALL com_slot19_create_uav(
             (uint64_t)(uintptr_t)pResource, (uint64_t)(uintptr_t)real_res,
             DestDescriptor, real_dest, SCARLETT_OK, "(forwarded)");
     }
+    d3d12xs_record_desc_resource(DestDescriptor, pResource);
     typedef void (SCARLETT_D3D12XS_CALL *pfn_real_uav_t)(void *, void *, void *, const void *, uint64_t);
     void **vtbl = *(void ***)self->real_device;
     ((pfn_real_uav_t)vtbl[19])(self->real_device, real_res, real_ctr, pDesc, real_dest);
@@ -4562,6 +5588,7 @@ static void SCARLETT_D3D12XS_CALL com_slot20_create_rtv(
             (uint64_t)(uintptr_t)pResource, (uint64_t)(uintptr_t)real_res,
             DestDescriptor, real_dest, SCARLETT_OK, "(forwarded)");
     }
+    d3d12xs_record_desc_resource(DestDescriptor, pResource);
     typedef void (SCARLETT_D3D12XS_CALL *pfn_real_rtv_t)(void *, void *, const void *, uint64_t);
     void **vtbl = *(void ***)self->real_device;
     ((pfn_real_rtv_t)vtbl[20])(self->real_device, real_res, pDesc, real_dest);
@@ -4604,6 +5631,7 @@ static void SCARLETT_D3D12XS_CALL com_slot21_create_dsv(
             (uint64_t)(uintptr_t)pResource, (uint64_t)(uintptr_t)real_res,
             DestDescriptor, real_dest, SCARLETT_OK, "(forwarded)");
     }
+    d3d12xs_record_desc_resource(DestDescriptor, pResource);
     typedef void (SCARLETT_D3D12XS_CALL *pfn_real_dsv_t)(void *, void *, const void *, uint64_t);
     void **vtbl = *(void ***)self->real_device;
     ((pfn_real_dsv_t)vtbl[21])(self->real_device, real_res, pDesc, real_dest);
@@ -4709,6 +5737,16 @@ static void SCARLETT_D3D12XS_CALL com_slot23_copy_descriptors(
             (uint64_t)NumDestDescriptorRanges, (uint64_t)NumSrcDescriptorRanges,
             real_dsts[0], real_srcs[0], SCARLETT_OK, "(forwarded)");
     }
+    if (NumDestDescriptorRanges == NumSrcDescriptorRanges) {
+        for (uint32_t i = 0u; i < NumDestDescriptorRanges; ++i) {
+            uint32_t dc = (pDestDescriptorRangeSizes != NULL) ? pDestDescriptorRangeSizes[i] : 1u;
+            uint32_t sc = (pSrcDescriptorRangeSizes != NULL) ? pSrcDescriptorRangeSizes[i] : 1u;
+            if (dc == sc && dc > 0u) {
+                d3d12xs_copy_desc_resource_range(
+                    pDestDescriptorRangeStarts[i], pSrcDescriptorRangeStarts[i], dc);
+            }
+        }
+    }
     typedef void (SCARLETT_D3D12XS_CALL *pfn_real_cd_t)(
         void *, uint32_t, const uint64_t *, const uint32_t *,
         uint32_t, const uint64_t *, const uint32_t *, uint32_t);
@@ -4750,6 +5788,8 @@ static void SCARLETT_D3D12XS_CALL com_slot24_copy_descriptors_simple(
                         (uint64_t)NumDescriptors, rdst, rsrc,
                         (uint64_t)DescriptorHeapsType, SCARLETT_OK, "(forwarded)");
                 }
+                d3d12xs_copy_desc_resource_range(
+                    DestDescriptorRangeStart, SrcDescriptorRangeStart, NumDescriptors);
                 typedef void (SCARLETT_D3D12XS_CALL *pfn_real_cds_t)(
                     void *, uint32_t, uint64_t, uint64_t, uint32_t);
                 void **vtbl = *(void ***)self->real_device;
@@ -4945,6 +5985,9 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL com_slot73_create_command_list(
     clm->unix_cmd_list_handle = cmd_list_handle;
     clm->list_type = 0u;
     clm->label_write_count = 0u;
+    clm->bound_rtv_count = 0u;
+    clm->has_gpu_write_cmds = 0u;
+    d3d12xs_pe_zero(clm->bound_rtvs, sizeof(clm->bound_rtvs));
     clm->real_obj = NULL;
     d3d12xs_pm4_assign_slice(cl, clm, cl_idx);
     if (self->real_device != NULL) {
@@ -5231,6 +6274,11 @@ static inline bool d3d12xs_is_com_root_sig(const void *ptr) {
     return d3d12xs_get_root_sig_meta(ptr) != NULL;
 }
 
+static void *d3d12xs_root_sig_get_real(const void *ptr) {
+    d3d12xs_root_sig_meta_t *rm = d3d12xs_get_root_sig_meta(ptr);
+    return (rm != NULL && rm->in_use != 0u) ? rm->real_obj : NULL;
+}
+
 static scarlett_hresult_t SCARLETT_D3D12XS_CALL root_sig_query_interface(
     ID3D12RootSignatureX *self,
     const scarlett_guid_t *riid,
@@ -5409,6 +6457,11 @@ static inline d3d12xs_pso_meta_t *d3d12xs_get_pso_meta(const void *ptr) {
         }
     }
     return NULL;
+}
+
+static void *d3d12xs_pso_get_real(const void *ptr) {
+    d3d12xs_pso_meta_t *pm = d3d12xs_get_pso_meta(ptr);
+    return (pm != NULL && pm->in_use != 0u) ? pm->real_obj : NULL;
 }
 
 #if !defined(_WIN32) && !defined(__MINGW32__)
@@ -8778,6 +9831,47 @@ SCARLETT_D3D12XS_API scarlett_hresult_t SCARLETT_D3D12XS_CALL D3D12XboxWaitFrame
     return p->out_status;
 }
 
+static void d3d12xs_readback_log(
+    const char *tag,
+    uint64_t a0,
+    uint64_t a1,
+    uint32_t w,
+    uint32_t h,
+    uint32_t fmt,
+    uint32_t nonzero,
+    bool force) {
+    static uint32_t g_rb_log_seq = 0u;
+    uint32_t seq = __atomic_add_fetch(&g_rb_log_seq, 1u, __ATOMIC_RELAXED);
+    if (!force && seq > 8u && (seq % 60u) != 0u) {
+        return;
+    }
+    if (force && seq > 8u) {
+        return;
+    }
+    char buf[280];
+    char *p = buf;
+    char *end = buf + sizeof(buf);
+    p = d3d12xs_pe_append_str(p, end, "[scarlett-readback] ");
+    p = d3d12xs_pe_append_str(p, end, tag);
+    p = d3d12xs_pe_append_str(p, end, " seq=");
+    p = d3d12xs_pe_append_u32(p, end, seq);
+    p = d3d12xs_pe_append_str(p, end, " a0=0x");
+    p = d3d12xs_pe_append_hex_padded(p, end, a0, 16);
+    p = d3d12xs_pe_append_str(p, end, " a1=0x");
+    p = d3d12xs_pe_append_hex_padded(p, end, a1, 16);
+    p = d3d12xs_pe_append_str(p, end, " ");
+    p = d3d12xs_pe_append_u32(p, end, w);
+    p = d3d12xs_pe_append_str(p, end, "x");
+    p = d3d12xs_pe_append_u32(p, end, h);
+    p = d3d12xs_pe_append_str(p, end, " fmt=");
+    p = d3d12xs_pe_append_u32(p, end, fmt);
+    p = d3d12xs_pe_append_str(p, end, " nz=");
+    p = d3d12xs_pe_append_u32(p, end, nonzero);
+    p = d3d12xs_pe_append_str(p, end, "\n");
+    *p = '\0';
+    d3d12xs_pe_ods(buf);
+}
+
 static bool d3d12xs_readback_plane0_if_dirty(
     d3d12xs_cmd_queue_meta_t *qm,
     const D3D12XBOX_PRESENT_PLANE_PARAMETERS *planes,
@@ -8793,8 +9887,19 @@ static bool d3d12xs_readback_plane0_if_dirty(
         raw_res = planes[0].ppResources[0];
     }
     d3d12xs_res_meta_t *rm = d3d12xs_get_res_meta(raw_res);
-    if (rm == NULL || rm->real_obj == NULL || rm->gpu_va <= 0x10000u ||
-        __atomic_load_n(&rm->gpu_dirty, __ATOMIC_ACQUIRE) == 0u) {
+    if (rm == NULL || rm->gpu_va <= 0x10000u) {
+        return false;
+    }
+    uint32_t cur_exec = __atomic_load_n(&g_gpu_exec_seq, __ATOMIC_ACQUIRE);
+    if (rm->real_obj == NULL) {
+        if (cur_exec > 0u) {
+            d3d12xs_readback_log("no_real_res", (uint64_t)(uintptr_t)raw_res, rm->gpu_va,
+                                 (uint32_t)rm->desc.Width, rm->desc.Height, rm->desc.Format, 0u, true);
+        }
+        return false;
+    }
+    bool dirty = (__atomic_load_n(&rm->gpu_dirty, __ATOMIC_ACQUIRE) != 0u);
+    if (!dirty && (cur_exec == 0u || cur_exec == rm->last_readback_exec_seq)) {
         return false;
     }
 #if defined(_WIN32) || defined(__MINGW32__)
@@ -8804,6 +9909,7 @@ static bool d3d12xs_readback_plane0_if_dirty(
     if (fn_cea == NULL || fn_wfso == NULL) {
         return false;
     }
+#endif
     static uint32_t g_rb_lock = 0u;
     static void *g_rb_dev = NULL;
     static void *g_rb_alloc = NULL;
@@ -8834,10 +9940,11 @@ static bool d3d12xs_readback_plane0_if_dirty(
             void *, uint32_t, uint32_t, void *, void *, const scarlett_guid_t *, void **);
         typedef scarlett_hresult_t (SCARLETT_D3D12XS_CALL *pfn_cf_t)(
             void *, uint64_t, uint32_t, const scarlett_guid_t *, void **);
-        if (scarlett_succeeded(((pfn_cca_t)dev_vtbl[9])(real_dev, 0u, &kIidID3D12CommandAllocator, &g_rb_alloc)) &&
+        if (dev_vtbl[9] != NULL && dev_vtbl[12] != NULL && dev_vtbl[36] != NULL &&
+            scarlett_succeeded(((pfn_cca_t)dev_vtbl[9])(real_dev, 0u, &kIidID3D12CommandAllocator, &g_rb_alloc)) &&
             g_rb_alloc != NULL) {
             if (scarlett_succeeded(((pfn_ccl_t)dev_vtbl[12])(
-                    real_dev, 0u, 0u, g_rb_alloc, NULL, &kIidID3D12GraphicsCommandList, &g_rb_list)) &&
+                    real_dev, 0u, 0u, g_rb_alloc, NULL, &kIidID3D12GraphicsCommandList_Std, &g_rb_list)) &&
                 g_rb_list != NULL) {
                 typedef scarlett_hresult_t (SCARLETT_D3D12XS_CALL *pfn_close_t)(void *);
                 ((pfn_close_t)(*(void ***)g_rb_list)[9])(g_rb_list);
@@ -8845,10 +9952,17 @@ static bool d3d12xs_readback_plane0_if_dirty(
             (void)((pfn_cf_t)dev_vtbl[36])(real_dev, 0u, 0u, &kIidID3D12Fence, &g_rb_fence);
         }
         if (g_rb_event == NULL) {
+#if defined(_WIN32) || defined(__MINGW32__)
             g_rb_event = fn_cea(NULL, 0, 0, NULL);
+#else
+            g_rb_event = (void *)(uintptr_t)1u;
+#endif
         }
     }
     if (g_rb_alloc == NULL || g_rb_list == NULL || g_rb_fence == NULL || g_rb_event == NULL) {
+        d3d12xs_readback_log("rb_init_fail", (uint64_t)(uintptr_t)g_rb_alloc,
+                             (uint64_t)(uintptr_t)g_rb_list,
+                             (uint32_t)rm->desc.Width, rm->desc.Height, rm->desc.Format, 0u, true);
         __atomic_store_n(&g_rb_lock, 0u, __ATOMIC_RELEASE);
         return false;
     }
@@ -8860,7 +9974,7 @@ static bool d3d12xs_readback_plane0_if_dirty(
     uint64_t total_bytes = 0u;
     if (rm->desc.Dimension == 1u) {
         total_bytes = rm->alloc_size;
-    } else {
+    } else if (dev_vtbl[38] != NULL) {
         scarlett_d3d12_resource_desc_t pc_desc;
         d3d12xs_pe_memcpy(&pc_desc, &rm->desc, sizeof(pc_desc));
         pc_desc.Alignment = 0u;
@@ -8876,6 +9990,8 @@ static bool d3d12xs_readback_plane0_if_dirty(
             real_dev, &pc_desc, 0u, 1u, 0u, &fp, &fp_rows, &fp_row_bytes, &total_bytes);
     }
     if (total_bytes == 0u || total_bytes > (UINT64_C(256) << 20)) {
+        d3d12xs_readback_log("gcf_zero", total_bytes, rm->alloc_size,
+                             (uint32_t)rm->desc.Width, rm->desc.Height, rm->desc.Format, 0u, true);
         __atomic_store_n(&g_rb_lock, 0u, __ATOMIC_RELEASE);
         return false;
     }
@@ -8921,6 +10037,8 @@ static bool d3d12xs_readback_plane0_if_dirty(
         }
     }
     if (g_rb_res == NULL) {
+        d3d12xs_readback_log("rb_res_fail", total_bytes, 0u,
+                             (uint32_t)rm->desc.Width, rm->desc.Height, rm->desc.Format, 0u, true);
         __atomic_store_n(&g_rb_lock, 0u, __ATOMIC_RELEASE);
         return false;
     }
@@ -8931,6 +10049,7 @@ static bool d3d12xs_readback_plane0_if_dirty(
     typedef void (SCARLETT_D3D12XS_CALL *pfn_cbr_t)(void *, void *, uint64_t, void *, uint64_t, uint64_t);
     typedef void (SCARLETT_D3D12XS_CALL *pfn_ctr_t)(
         void *, const void *, uint32_t, uint32_t, uint32_t, const void *, const void *);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_bar_t)(void *, uint32_t, const void *);
     typedef void (SCARLETT_D3D12XS_CALL *pfn_ecl_t)(void *, uint32_t, void * const *);
     typedef scarlett_hresult_t (SCARLETT_D3D12XS_CALL *pfn_qsig_t)(void *, void *, uint64_t);
     typedef uint64_t (SCARLETT_D3D12XS_CALL *pfn_fgcv_t)(void *);
@@ -8946,8 +10065,31 @@ static bool d3d12xs_readback_plane0_if_dirty(
 
     if (scarlett_failed(((pfn_ares_t)avtbl[8])(g_rb_alloc)) ||
         scarlett_failed(((pfn_lres_t)lvtbl[10])(g_rb_list, g_rb_alloc, NULL))) {
+        d3d12xs_readback_log("reset_fail", 0u, 0u,
+                             (uint32_t)rm->desc.Width, rm->desc.Height, rm->desc.Format, 0u, true);
         __atomic_store_n(&g_rb_lock, 0u, __ATOMIC_RELEASE);
         return false;
+    }
+
+    uint32_t saved_state = __atomic_load_n(&rm->current_state, __ATOMIC_ACQUIRE);
+    bool did_barrier = false;
+    if (rm->desc.Dimension != 1u && lvtbl[26] != NULL && saved_state != 0x800u) {
+        struct {
+            uint32_t Type;
+            uint32_t Flags;
+            void *pResource;
+            uint32_t Subresource;
+            uint32_t StateBefore;
+            uint32_t StateAfter;
+        } b;
+        b.Type = 0u;
+        b.Flags = 0u;
+        b.pResource = rm->real_obj;
+        b.Subresource = 0xFFFFFFFFu;
+        b.StateBefore = saved_state;
+        b.StateAfter = 0x800u; /* D3D12_RESOURCE_STATE_COPY_SOURCE */
+        ((pfn_bar_t)lvtbl[26])(g_rb_list, 1u, &b);
+        did_barrier = true;
     }
 
     if (rm->desc.Dimension == 1u) {
@@ -8965,6 +10107,25 @@ static bool d3d12xs_readback_plane0_if_dirty(
         src_loc.SubresourceIndex = 0u;
         ((pfn_ctr_t)lvtbl[16])(g_rb_list, &dst_loc, 0u, 0u, 0u, &src_loc, NULL);
     }
+
+    if (did_barrier) {
+        struct {
+            uint32_t Type;
+            uint32_t Flags;
+            void *pResource;
+            uint32_t Subresource;
+            uint32_t StateBefore;
+            uint32_t StateAfter;
+        } b;
+        b.Type = 0u;
+        b.Flags = 0u;
+        b.pResource = rm->real_obj;
+        b.Subresource = 0xFFFFFFFFu;
+        b.StateBefore = 0x800u;
+        b.StateAfter = saved_state;
+        ((pfn_bar_t)lvtbl[26])(g_rb_list, 1u, &b);
+    }
+
     if (scarlett_failed(((pfn_lclose_t)lvtbl[9])(g_rb_list))) {
         __atomic_store_n(&g_rb_lock, 0u, __ATOMIC_RELEASE);
         return false;
@@ -8973,10 +10134,14 @@ static bool d3d12xs_readback_plane0_if_dirty(
     void *lists[1] = { g_rb_list };
     ((pfn_ecl_t)qvtbl[10])(qm->real_obj, 1u, lists);
     uint64_t next_val = ++g_rb_fence_val;
-    if (scarlett_succeeded(((pfn_qsig_t)qvtbl[14])(qm->real_obj, g_rb_fence, next_val))) {
-        if (((pfn_fgcv_t)fvtbl[8])(g_rb_fence) < next_val) {
-            if (scarlett_succeeded(((pfn_fseoc_t)fvtbl[9])(g_rb_fence, next_val, g_rb_event))) {
+    if (qvtbl[14] != NULL &&
+        scarlett_succeeded(((pfn_qsig_t)qvtbl[14])(qm->real_obj, g_rb_fence, next_val))) {
+        if (fvtbl[8] != NULL && ((pfn_fgcv_t)fvtbl[8])(g_rb_fence) < next_val) {
+            if (fvtbl[9] != NULL &&
+                scarlett_succeeded(((pfn_fseoc_t)fvtbl[9])(g_rb_fence, next_val, g_rb_event))) {
+#if defined(_WIN32) || defined(__MINGW32__)
                 (void)fn_wfso(g_rb_event, 2000u);
+#endif
             }
         }
     }
@@ -8985,6 +10150,8 @@ static bool d3d12xs_readback_plane0_if_dirty(
     struct { uint64_t Begin; uint64_t End; } read_range = { 0u, total_bytes };
     struct { uint64_t Begin; uint64_t End; } empty_range = { 0u, 0u };
     void *mapped = NULL;
+    uint32_t sample_nz = 0u;
+    uint32_t first_px = 0u;
     if (scarlett_succeeded(((pfn_map_t)rvtbl[8])(g_rb_res, 0u, &read_range, &mapped)) &&
         mapped != NULL) {
         uint8_t *uma_dst = (uint8_t *)(uintptr_t)rm->gpu_va;
@@ -9020,20 +10187,40 @@ static bool d3d12xs_readback_plane0_if_dirty(
                         src_bytes + (size_t)y * (size_t)src_pitch,
                         copy_row);
                 }
+                const uint32_t step_y = (rows > 16u) ? (rows / 16u) : 1u;
+                const uint32_t row_dwords = (uint32_t)(copy_row / 4u);
+                const uint32_t step_x = (row_dwords > 16u) ? (row_dwords / 16u) : 1u;
+                for (uint32_t y = 0u; y < rows; y += step_y) {
+                    const uint32_t *r32 = (const uint32_t *)(uma_dst + (size_t)y * (size_t)uma_pitch);
+                    for (uint32_t x = 0u; x < row_dwords; x += step_x) {
+                        uint32_t v = r32[x];
+                        if ((v & 0x00FFFFFFu) != 0u) {
+                            if (first_px == 0u) {
+                                first_px = v;
+                            }
+                            ++sample_nz;
+                        }
+                    }
+                }
                 ok = true;
+            } else {
+                d3d12xs_readback_log("not_writable", rm->gpu_va, (uint64_t)rows * (uint64_t)uma_pitch,
+                                     (uint32_t)rm->desc.Width, rm->desc.Height, rm->desc.Format, 0u, true);
             }
         }
         ((pfn_unmap_t)rvtbl[9])(g_rb_res, 0u, &empty_range);
+    } else {
+        d3d12xs_readback_log("map_fail", total_bytes, 0u,
+                             (uint32_t)rm->desc.Width, rm->desc.Height, rm->desc.Format, 0u, true);
     }
     if (ok) {
         __atomic_store_n(&rm->gpu_dirty, 0u, __ATOMIC_RELEASE);
+        rm->last_readback_exec_seq = cur_exec;
+        d3d12xs_readback_log("ok", rm->gpu_va, first_px,
+                             (uint32_t)rm->desc.Width, rm->desc.Height, rm->desc.Format, sample_nz, false);
     }
     __atomic_store_n(&g_rb_lock, 0u, __ATOMIC_RELEASE);
     return ok;
-#else
-    (void)rm;
-    return false;
-#endif
 }
 
 SCARLETT_D3D12XS_API scarlett_hresult_t SCARLETT_D3D12XS_CALL D3D12XboxPresentX(
