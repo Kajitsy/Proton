@@ -62,6 +62,11 @@
 
 extern "C" uint64_t scarlett_d3d12xs_test_translate_gpu_desc_handle(
     uint64_t xbox_gpu_handle, uint32_t *out_heap_type);
+extern "C" bool scarlett_d3d12xs_test_get_pso_info(
+    const void *pso,
+    void **out_real_obj,
+    uint32_t *out_spirv_bytes,
+    uint32_t *out_is_compute);
 
 namespace {
 
@@ -1471,6 +1476,543 @@ bool test_11_descriptor_heap_abi_and_bounds() {
     return true;
 }
 
+/* ============================================================================
+ * Test 12: Dynamic PSO/StateObject Capacity, Shader Lift, Resource Flags & Slot61
+ * ============================================================================ */
+namespace mock_vkd3d_m3 {
+
+struct MockResource {
+    void * const *lpVtbl;
+    uint64_t gpu_va;
+    uint32_t ref_count;
+};
+
+struct MockRootSig {
+    void * const *lpVtbl;
+    uint32_t ref_count;
+};
+
+struct MockPso {
+    void * const *lpVtbl;
+    uint32_t ref_count;
+};
+
+struct MockResDesc {
+    uint32_t Dimension;
+    uint64_t Alignment;
+    uint64_t Width;
+    uint32_t Height;
+    uint16_t DepthOrArraySize;
+    uint16_t MipLevels;
+    uint32_t Format;
+    uint32_t SampleCount;
+    uint32_t SampleQuality;
+    uint32_t Layout;
+    uint32_t Flags;
+};
+
+struct MockDevice {
+    void * const *lpVtbl;
+    uint32_t create_rs_calls;
+    uint32_t create_compute_pso_calls;
+    uint32_t create_stream_pso_calls;
+    uint32_t create_res_calls;
+    uint32_t create_res_rejected;
+    uint32_t create_dsv_calls;
+    uint32_t create_srv_calls;
+    uint32_t create_sampler_calls;
+    uint64_t last_sampler_dest;
+    uint32_t last_sampler_words[13];
+    uint32_t last_accepted_flags;
+    uint32_t last_accepted_samples;
+    bool last_pso_had_real_rs;
+    bool last_pso_had_clean_dxbc;
+    MockRootSig rs_pool[4];
+    uint32_t rs_count;
+    MockPso pso_pool[8];
+    uint32_t pso_count;
+    MockResource res_pool[8];
+    uint32_t res_count;
+    mock_vkd3d_dh::MockRealDescHeap dh_pool[4];
+    uint32_t dh_count;
+};
+
+uint32_t mock_obj_release(void *iface) {
+    (void)iface;
+    return 0u;
+}
+
+uint64_t mock_res_get_va(void *iface) {
+    return static_cast<MockResource *>(iface)->gpu_va;
+}
+
+void * const kMockObjVtbl[16] = {
+    nullptr, nullptr, reinterpret_cast<void *>(mock_obj_release),
+    nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, reinterpret_cast<void *>(mock_res_get_va),
+};
+
+scarlett_hresult_t mock_create_dh(
+    void *iface, const mock_vkd3d_dh::MockDescHeapDesc *desc, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    if (desc == nullptr || pp == nullptr || d->dh_count >= 4u) {
+        return SCARLETT_E_INVALIDARG;
+    }
+    auto *h = &d->dh_pool[d->dh_count];
+    h->lpVtbl = mock_vkd3d_dh::kMockDhVtbl;
+    h->cpu_va = UINT64_C(0x710000000000) + static_cast<uint64_t>(d->dh_count) * UINT64_C(0x10000000);
+    h->gpu_va = UINT64_C(0x810000000000) + static_cast<uint64_t>(d->dh_count) * UINT64_C(0x10000000);
+    h->ref_count = 1u;
+    ++d->dh_count;
+    *pp = h;
+    return SCARLETT_OK;
+}
+
+uint32_t mock_get_inc(void *, uint32_t) {
+    return 64u;
+}
+
+scarlett_hresult_t mock_create_rs(
+    void *iface, uint32_t, const void *, size_t, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    ++d->create_rs_calls;
+    if (d->rs_count >= 4u) {
+        return SCARLETT_E_OUTOFMEMORY;
+    }
+    auto *rs = &d->rs_pool[d->rs_count++];
+    rs->lpVtbl = kMockObjVtbl;
+    rs->ref_count = 1u;
+    *pp = rs;
+    return SCARLETT_OK;
+}
+
+static bool has_clean_dxbc(const void *ptr, uint64_t len) {
+    if (ptr == nullptr || len < 36u) {
+        return false;
+    }
+    const auto *b = static_cast<const uint8_t *>(ptr);
+    if (b[0] != 'D' || b[1] != 'X' || b[2] != 'B' || b[3] != 'C') {
+        return false;
+    }
+    uint32_t nchunks = read_le32(b + 28u);
+    if (nchunks == 0u || 32u + nchunks * 4u > len) {
+        return false;
+    }
+    for (uint32_t i = 0u; i < nchunks; ++i) {
+        uint32_t off = read_le32(b + 32u + i * 4u);
+        if (off + 8u > len) {
+            return false;
+        }
+        uint32_t fourcc = read_le32(b + off);
+        if (fourcc == 0x584F4258u || fourcc == 0x4D325358u) {
+            return false;
+        }
+    }
+    return true;
+}
+
+scarlett_hresult_t mock_create_compute_pso(
+    void *iface, const void *pDesc, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    ++d->create_compute_pso_calls;
+    if (pDesc == nullptr || pp == nullptr || d->pso_count >= 8u) {
+        return SCARLETT_E_INVALIDARG;
+    }
+    const auto *b = static_cast<const uint8_t *>(pDesc);
+    const void *rs = *reinterpret_cast<void * const *>(b + 0x00u);
+    const void *cs = *reinterpret_cast<void * const *>(b + 0x08u);
+    uint64_t cs_len = *reinterpret_cast<const uint64_t *>(b + 0x10u);
+    d->last_pso_had_real_rs = (rs == &d->rs_pool[0]);
+    d->last_pso_had_clean_dxbc = has_clean_dxbc(cs, cs_len);
+    if (!d->last_pso_had_real_rs || !d->last_pso_had_clean_dxbc) {
+        return SCARLETT_E_INVALIDARG;
+    }
+    auto *pso = &d->pso_pool[d->pso_count++];
+    pso->lpVtbl = kMockObjVtbl;
+    pso->ref_count = 1u;
+    *pp = pso;
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t mock_create_stream_pso(
+    void *iface, const void *pStreamDesc, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    ++d->create_stream_pso_calls;
+    if (pStreamDesc == nullptr || pp == nullptr || d->pso_count >= 8u) {
+        return SCARLETT_E_INVALIDARG;
+    }
+    const auto *sd = static_cast<const uint64_t *>(pStreamDesc);
+    uint64_t sz = sd[0];
+    const auto *stream = reinterpret_cast<const uint8_t *>(static_cast<uintptr_t>(sd[1]));
+    if (sz < 24u || stream == nullptr) {
+        return SCARLETT_E_INVALIDARG;
+    }
+    bool found_rs = false;
+    bool found_dxbc = false;
+    const auto *sq = reinterpret_cast<const uint64_t *>(stream);
+    for (size_t i = 0u; i < sz / 8u; ++i) {
+        if (sq[i] == reinterpret_cast<uint64_t>(&d->rs_pool[0])) {
+            found_rs = true;
+        }
+        if (i + 1u < sz / 8u && sq[i] > 0x10000u && sq[i + 1u] >= 36u && sq[i + 1u] < 65536u) {
+            const void *p = reinterpret_cast<const void *>(static_cast<uintptr_t>(sq[i]));
+            if (has_clean_dxbc(p, sq[i + 1u])) {
+                found_dxbc = true;
+            }
+        }
+    }
+    d->last_pso_had_real_rs = found_rs;
+    d->last_pso_had_clean_dxbc = found_dxbc;
+    if (!found_rs || !found_dxbc) {
+        return SCARLETT_E_INVALIDARG;
+    }
+    auto *pso = &d->pso_pool[d->pso_count++];
+    pso->lpVtbl = kMockObjVtbl;
+    pso->ref_count = 1u;
+    *pp = pso;
+    return SCARLETT_OK;
+}
+
+scarlett_hresult_t mock_create_committed_res(
+    void *iface, const void *, uint32_t, const MockResDesc *desc,
+    uint32_t, const void *, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockDevice *>(iface);
+    ++d->create_res_calls;
+    if (desc == nullptr || pp == nullptr || d->res_count >= 8u) {
+        return SCARLETT_E_INVALIDARG;
+    }
+    /* Reject invalid PC D3D12 flag combinations just like vkd3d-proton */
+    const uint32_t f = desc->Flags;
+    const bool is_ds = (f & 0x02u) != 0u;
+    const bool valid_ds_fmt = (desc->Format == 19u || desc->Format == 20u ||
+                               desc->Format == 39u || desc->Format == 40u ||
+                               desc->Format == 44u || desc->Format == 45u ||
+                               desc->Format == 54u || desc->Format == 55u);
+    if ((is_ds && (f & (0x01u | 0x04u | 0x20u)) != 0u) ||
+        (is_ds && !valid_ds_fmt) ||
+        (!is_ds && (f & 0x08u) != 0u) ||
+        (desc->SampleCount > 1u && ((f & (0x04u | 0x20u)) != 0u || desc->MipLevels > 1u))) {
+        ++d->create_res_rejected;
+        *pp = nullptr;
+        return SCARLETT_E_INVALIDARG;
+    }
+    d->last_accepted_flags = f;
+    d->last_accepted_samples = desc->SampleCount;
+    auto *r = &d->res_pool[d->res_count];
+    r->lpVtbl = kMockObjVtbl;
+    r->gpu_va = UINT64_C(0x900000000000) + static_cast<uint64_t>(d->res_count) * 0x100000u;
+    r->ref_count = 1u;
+    ++d->res_count;
+    *pp = r;
+    return SCARLETT_OK;
+}
+
+void mock_create_srv(void *iface, void *res, const void *, uint64_t) {
+    auto *d = static_cast<MockDevice *>(iface);
+    if (res != nullptr) {
+        ++d->create_srv_calls;
+    }
+}
+
+void mock_create_dsv(void *iface, void *res, const void *, uint64_t) {
+    auto *d = static_cast<MockDevice *>(iface);
+    if (res != nullptr) {
+        ++d->create_dsv_calls;
+    }
+}
+
+void mock_create_sampler(void *iface, const void *pDesc, uint64_t dest) {
+    auto *d = static_cast<MockDevice *>(iface);
+    ++d->create_sampler_calls;
+    d->last_sampler_dest = dest;
+    if (pDesc != nullptr) {
+        std::memcpy(d->last_sampler_words, pDesc, sizeof(d->last_sampler_words));
+    }
+}
+
+void * build_vtbl_entry(size_t idx) {
+    switch (idx) {
+        case 11: return reinterpret_cast<void *>(mock_create_compute_pso);
+        case 14: return reinterpret_cast<void *>(mock_create_dh);
+        case 15: return reinterpret_cast<void *>(mock_get_inc);
+        case 16: return reinterpret_cast<void *>(mock_create_rs);
+        case 18: return reinterpret_cast<void *>(mock_create_srv);
+        case 21: return reinterpret_cast<void *>(mock_create_dsv);
+        case 22: return reinterpret_cast<void *>(mock_create_sampler);
+        case 27: return reinterpret_cast<void *>(mock_create_committed_res);
+        case 47: return reinterpret_cast<void *>(mock_create_stream_pso);
+        default: return nullptr;
+    }
+}
+
+struct VtblHolder {
+    void *slots[56];
+    VtblHolder() {
+        for (size_t i = 0; i < 56; ++i) {
+            slots[i] = build_vtbl_entry(i);
+        }
+    }
+};
+
+const VtblHolder kMockDevVtblHolder;
+
+} // namespace mock_vkd3d_m3
+
+bool test_12_pso_capacity_shader_lift_res_flags_and_slot61() {
+    void *dev_raw = nullptr;
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
+    void *saved_real = dev->real_device;
+
+    mock_vkd3d_m3::MockDevice mock_dev{};
+    mock_dev.lpVtbl = mock_vkd3d_m3::kMockDevVtblHolder.slots;
+    dev->real_device = &mock_dev;
+
+    auto *dev_vtbl = reinterpret_cast<void * const *>(dev->lpVtbl);
+    const scarlett_guid_t iid_pso = {
+        0x765A30F3u, 0xF624u, 0x4C6Fu,
+        {0xA8u, 0x28u, 0xACu, 0xE9u, 0x48u, 0x62u, 0x24u, 0x45u}};
+    const scarlett_guid_t iid_so = {
+        0x47016943u, 0xFCA8u, 0x4594u,
+        {0x93u, 0xEAu, 0xAFu, 0x25u, 0x8Bu, 0x55u, 0x34u, 0x6Du}};
+    const scarlett_guid_t iid_rs = {
+        0xC54A6B66u, 0x72DFu, 0x4EE8u,
+        {0x8Bu, 0xE5u, 0xA9u, 0x46u, 0xA1u, 0x42u, 0x92u, 0x14u}};
+    const scarlett_guid_t iid_dh = {
+        0x8EFB471Du, 0x616Cu, 0x4F49u,
+        {0x90u, 0xF7u, 0x12u, 0x7Bu, 0xB7u, 0x63u, 0xFAu, 0x51u}};
+    const scarlett_guid_t iid_res = {
+        0x696442BEu, 0xA72Eu, 0x4059u,
+        {0xBCu, 0x79u, 0x5Bu, 0x5Cu, 0x98u, 0x04u, 0x0Fu, 0xADu}};
+
+    /* 1. Dynamic PSO & StateObject capacity > 16,384 (20,000 each) */
+    using PfnCreatePSO = scarlett_hresult_t (*)(
+        ID3D12DeviceX *, const void *, const scarlett_guid_t *, void **);
+    using PfnSlot55 = scarlett_hresult_t (*)(
+        ID3D12DeviceX *, uint64_t, uint64_t, uint64_t, const scarlett_guid_t *, void **);
+    using PfnRelease = uint32_t (*)(void *);
+
+    constexpr size_t kScaleCount = 20000u;
+    std::vector<void *> pso_objs(kScaleCount, nullptr);
+    std::vector<void *> so_objs(kScaleCount, nullptr);
+    for (size_t i = 0u; i < kScaleCount; ++i) {
+        CHECK_HR(reinterpret_cast<PfnSlot55>(dev_vtbl[55])(
+                     dev, 0u, 1u, 0u, &iid_pso, &pso_objs[i]),
+                 SCARLETT_OK);
+        CHECK(pso_objs[i] != nullptr);
+        CHECK_HR(reinterpret_cast<PfnCreatePSO>(dev_vtbl[57])(
+                     dev, nullptr, &iid_so, &so_objs[i]),
+                 SCARLETT_OK);
+        CHECK(so_objs[i] != nullptr);
+    }
+    CHECK(pso_objs[0] != pso_objs[19999]);
+    CHECK(so_objs[0] != so_objs[19999]);
+    for (size_t i = 0u; i < kScaleCount; ++i) {
+        auto *pv = *reinterpret_cast<void * const * const *>(pso_objs[i]);
+        auto *sv = *reinterpret_cast<void * const * const *>(so_objs[i]);
+        CHECK(reinterpret_cast<PfnRelease>(pv[2])(pso_objs[i]) == 0u);
+        CHECK(reinterpret_cast<PfnRelease>(sv[2])(so_objs[i]) == 0u);
+    }
+
+    /* 2. Shader extraction & lifting across slots 55, 57, 62, 67, 86 */
+    using PfnCreateRS = scarlett_hresult_t (*)(
+        ID3D12DeviceX *, uint32_t, const void *, uint64_t, const scarlett_guid_t *, void **);
+    const std::vector<uint8_t> kDummyRts0(32u, 0u);
+    auto rs_blob = build_synthetic_dxbc({{{'R','T','S','0'}, kDummyRts0}});
+    void *rs_raw = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreateRS>(dev_vtbl[16])(
+                 dev, 0u, rs_blob.data(), rs_blob.size(), &iid_rs, &rs_raw),
+             SCARLETT_OK);
+    CHECK(rs_raw != nullptr && mock_dev.create_rs_calls == 1u);
+
+    const std::vector<uint8_t> kXboxChunk = {'X','B','O','X',1,2,3,4};
+    const std::vector<uint8_t> kDxilChunk = {'B','C',0xC0u,0xDEu,1,0,0,0};
+    auto xbox_dxbc = build_synthetic_dxbc({
+        {{'X','B','O','X'}, kXboxChunk},
+        {{'D','X','I','L'}, kDxilChunk},
+    });
+
+    std::vector<uint8_t> xs2_blob(52u, 0u);
+    write_le32(xs2_blob, 0u, 0x00325358u);      /* 'XS2\0' */
+    write_le32(xs2_blob, 4u, (2u << 16u) | 1u); /* version=1, stage=2 (CS) */
+    write_le32(xs2_blob, 8u, (4u << 16u) | 64u);
+    write_le32(xs2_blob, 12u, 4u);
+    write_le32(xs2_blob, 20u, 1u);
+    write_le32(xs2_blob, 24u, 1u);
+    write_le32(xs2_blob, 28u, 1u);
+    write_le32(xs2_blob, 40u, 48u);
+    write_le32(xs2_blob, 44u, 4u);
+    write_le32(xs2_blob, 48u, 0xBF810000u);
+
+    /* 2a. Slot 86: D3D12_PIPELINE_STATE_STREAM_DESC with RootSig + DXBC -> real_device->vtbl[47] */
+    struct alignas(8) StreamBuf {
+        uint64_t type0;
+        void *rs;
+        uint64_t type1;
+        const void *shader_ptr;
+        uint64_t shader_len;
+    } stream_buf{0u, rs_raw, 1u, xbox_dxbc.data(), xbox_dxbc.size()};
+    struct StreamDesc {
+        uint64_t size;
+        void *ptr;
+    } stream_desc{sizeof(stream_buf), &stream_buf};
+    void *pso86 = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreatePSO>(dev_vtbl[86])(
+                 dev, &stream_desc, &iid_pso, &pso86),
+             SCARLETT_OK);
+    void *pso86_real = nullptr;
+    uint32_t pso86_spv = 0u;
+    CHECK(scarlett_d3d12xs_test_get_pso_info(pso86, &pso86_real, &pso86_spv, nullptr));
+    CHECK(pso86_real != nullptr);
+    CHECK(mock_dev.create_stream_pso_calls == 1u);
+    CHECK(mock_dev.last_pso_had_real_rs && mock_dev.last_pso_had_clean_dxbc);
+
+    /* 2b. Slot 62: Compute PSO with RootSig + DXBC -> real_device->vtbl[11] */
+    using PfnSlot62 = scarlett_hresult_t (*)(
+        ID3D12DeviceX *, const void *, uint64_t, uint64_t, const scarlett_guid_t *, void **);
+    struct ComputeXboxDesc {
+        void *rs;
+        const void *cs;
+        uint64_t cs_len;
+    } comp_desc{rs_raw, xbox_dxbc.data(), xbox_dxbc.size()};
+    void *pso62 = nullptr;
+    CHECK_HR(reinterpret_cast<PfnSlot62>(dev_vtbl[62])(
+                 dev, &comp_desc, 0u, 0u, &iid_pso, &pso62),
+             SCARLETT_OK);
+    void *pso62_real = nullptr;
+    uint32_t pso62_is_comp = 0u;
+    CHECK(scarlett_d3d12xs_test_get_pso_info(pso62, &pso62_real, nullptr, &pso62_is_comp));
+    CHECK(pso62_real != nullptr && pso62_is_comp == 1u);
+    CHECK(mock_dev.create_compute_pso_calls == 1u);
+
+    /* 2c. Slot 55: Xbox graphics struct with root sigs at q0/q1 and XS2 shader at +0x100 (>0x80!) */
+    uint64_t slot55_desc[64]{};
+    slot55_desc[0] = reinterpret_cast<uint64_t>(rs_raw);
+    slot55_desc[1] = reinterpret_cast<uint64_t>(rs_raw);
+    slot55_desc[2] = reinterpret_cast<uint64_t>(slot55_desc);
+    slot55_desc[32] = reinterpret_cast<uint64_t>(xs2_blob.data());
+    slot55_desc[33] = xs2_blob.size();
+    void *pso55 = nullptr;
+    CHECK_HR(reinterpret_cast<PfnSlot55>(dev_vtbl[55])(
+                 dev, reinterpret_cast<uint64_t>(slot55_desc), 1u, 0u, &iid_pso, &pso55),
+             SCARLETT_OK);
+    uint32_t pso55_spv = 0u;
+    CHECK(scarlett_d3d12xs_test_get_pso_info(pso55, nullptr, &pso55_spv, nullptr));
+    CHECK(pso55_spv >= 20u);
+
+    /* 2d. Slot 67: Indirect shader pointer at q0 (native compute desc) -> lifts XS2 to SPIR-V */
+    uint64_t slot67_inner[4]{
+        reinterpret_cast<uint64_t>(xs2_blob.data()), xs2_blob.size(), 0u, 0u};
+    uint64_t slot67_desc[4]{reinterpret_cast<uint64_t>(slot67_inner), 0u, 0u, 0u};
+    void *pso67 = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreatePSO>(dev_vtbl[67])(
+                 dev, slot67_desc, &iid_pso, &pso67),
+             SCARLETT_OK);
+    uint32_t pso67_spv = 0u;
+    CHECK(scarlett_d3d12xs_test_get_pso_info(pso67, nullptr, &pso67_spv, nullptr));
+    CHECK(pso67_spv >= 20u);
+
+    /* 2e. Slot 57 with IID_ID3D12PipelineState -> lifts XS2 inside stream/struct */
+    uint64_t slot57_desc[4]{reinterpret_cast<uint64_t>(xs2_blob.data()), xs2_blob.size(), 0u, 0u};
+    void *pso57 = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreatePSO>(dev_vtbl[57])(
+                 dev, slot57_desc, &iid_pso, &pso57),
+             SCARLETT_OK);
+    uint32_t pso57_spv = 0u;
+    CHECK(scarlett_d3d12xs_test_get_pso_info(pso57, nullptr, &pso57_spv, nullptr));
+    CHECK(pso57_spv >= 20u);
+
+    /* 3. CreatePlacedResourceX sanitization for Xbox Depth/UAV/RT/MSAA flags */
+    using PfnCreatePlacedX = scarlett_hresult_t (*)(
+        ID3D12DeviceX *, uint64_t, const mock_vkd3d_m3::MockResDesc *,
+        uint32_t, const void *, const scarlett_guid_t *, void **);
+    using PfnCreateView = void (*)(ID3D12DeviceX *, void *, const void *, uint64_t);
+    using PfnCreateDH = scarlett_hresult_t (*)(
+        ID3D12DeviceX *, const mock_vkd3d_dh::MockDescHeapDesc *, const scarlett_guid_t *, void **);
+
+    mock_vkd3d_dh::MockDescHeapDesc cbv_dh_desc{0u, 64u, 1u, 0u};
+    mock_vkd3d_dh::MockDescHeapDesc dsv_dh_desc{3u, 64u, 0u, 0u};
+    mock_vkd3d_dh::MockDescHeapDesc samp_dh_desc{1u, 64u, 0u, 0u};
+    void *cbv_dh = nullptr, *dsv_dh = nullptr, *samp_dh = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreateDH>(dev_vtbl[14])(dev, &cbv_dh_desc, &iid_dh, &cbv_dh), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreateDH>(dev_vtbl[14])(dev, &dsv_dh_desc, &iid_dh, &dsv_dh), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreateDH>(dev_vtbl[14])(dev, &samp_dh_desc, &iid_dh, &samp_dh), SCARLETT_OK);
+
+    using PfnGetStart = uint64_t (*)(void *);
+    uint64_t cbv_cpu = reinterpret_cast<PfnGetStart>((*reinterpret_cast<void * const * const *>(cbv_dh))[9])(cbv_dh);
+    uint64_t dsv_cpu = reinterpret_cast<PfnGetStart>((*reinterpret_cast<void * const * const *>(dsv_dh))[9])(dsv_dh);
+    uint64_t samp_cpu = reinterpret_cast<PfnGetStart>((*reinterpret_cast<void * const * const *>(samp_dh))[9])(samp_dh);
+
+    /* Depth texture with conflicting ALLOW_RT | ALLOW_DS | ALLOW_UAV | SIMULTANEOUS_ACCESS (0x27) */
+    mock_vkd3d_m3::MockResDesc depth_desc{
+        3u, 0u, 1280u, 720u, 1u, 1u, 39u /* R32_TYPELESS */, 1u, 0u, 0u, 0x27u};
+    void *depth_res = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreatePlacedX>(dev_vtbl[133])(
+                 dev, 0x20000000u, &depth_desc, 0u, nullptr, &iid_res, &depth_res),
+             SCARLETT_OK);
+    CHECK(depth_res != nullptr);
+    CHECK(mock_dev.create_res_rejected == 0u);
+    CHECK(mock_dev.last_accepted_flags == 0x02u);
+
+    reinterpret_cast<PfnCreateView>(dev_vtbl[21])(dev, depth_res, nullptr, dsv_cpu);
+    reinterpret_cast<PfnCreateView>(dev_vtbl[18])(dev, depth_res, nullptr, cbv_cpu);
+    CHECK(mock_dev.create_dsv_calls == 1u && mock_dev.create_srv_calls == 1u);
+
+    /* MSAA + UAV + MipLevels=4 -> sanitized to SampleCount=4, MipLevels=1, Flags without UAV */
+    mock_vkd3d_m3::MockResDesc msaa_desc{
+        3u, 0u, 640u, 480u, 1u, 4u, 28u /* R8G8B8A8_UNORM */, 4u, 0u, 0u, 0x05u};
+    void *msaa_res = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreatePlacedX>(dev_vtbl[133])(
+                 dev, 0x21000000u, &msaa_desc, 0u, nullptr, &iid_res, &msaa_res),
+             SCARLETT_OK);
+    CHECK(msaa_res != nullptr);
+    CHECK(mock_dev.last_accepted_samples == 4u && mock_dev.last_accepted_flags == 0x01u);
+
+    /* Depth flag on non-depth format -> pass 0 fails, pass 1 retry strips DS flag and succeeds */
+    mock_vkd3d_m3::MockResDesc bad_ds_desc{
+        3u, 0u, 256u, 256u, 1u, 1u, 28u /* R8G8B8A8_UNORM */, 1u, 0u, 0u, 0x0Au};
+    void *bad_ds_res = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreatePlacedX>(dev_vtbl[133])(
+                 dev, 0x22000000u, &bad_ds_desc, 0u, nullptr, &iid_res, &bad_ds_res),
+             SCARLETT_OK);
+    CHECK(bad_ds_res != nullptr && mock_dev.create_res_rejected == 1u);
+
+    /* 4. ID3D12DeviceX::Slot61 (CreateSampler): must NOT overwrite pSamplerDesc and must forward */
+    using PfnSlot61 = scarlett_hresult_t (*)(ID3D12DeviceX *, const void *, uint64_t);
+    uint32_t samp_desc[13] = {
+        0x15u, 99u /* invalid AddressU -> clamp 3 */, 1u, 1u,
+        0u, 64u /* MaxAnisotropy > 16 -> clamp 16 */, 4u,
+        0u, 0u, 0u, 0u, 0u, 0x447A0000u};
+    CHECK_HR(reinterpret_cast<PfnSlot61>(dev_vtbl[61])(
+                 dev, samp_desc, samp_cpu + 2u * 32u),
+             SCARLETT_OK);
+    CHECK(samp_desc[1] == 99u && samp_desc[5] == 64u); /* Input stack desc preserved */
+    CHECK(mock_dev.create_sampler_calls == 1u);
+    CHECK(mock_dev.last_sampler_dest == mock_dev.dh_pool[2].cpu_va + 2u * 64u);
+    CHECK(mock_dev.last_sampler_words[1] == 3u && mock_dev.last_sampler_words[5] == 16u);
+
+    auto rel = [](void *p) {
+        auto *v = *reinterpret_cast<void * const * const *>(p);
+        return reinterpret_cast<PfnRelease>(v[2])(p);
+    };
+    CHECK(rel(bad_ds_res) == 0u);
+    CHECK(rel(msaa_res) == 0u);
+    CHECK(rel(depth_res) == 0u);
+    CHECK(rel(samp_dh) == 0u);
+    CHECK(rel(dsv_dh) == 0u);
+    CHECK(rel(cbv_dh) == 0u);
+    CHECK(rel(pso57) == 0u);
+    CHECK(rel(pso67) == 0u);
+    CHECK(rel(pso55) == 0u);
+    CHECK(rel(pso62) == 0u);
+    CHECK(rel(pso86) == 0u);
+    CHECK(rel(rs_raw) == 0u);
+
+    dev->real_device = saved_real;
+    CHECK(dev->lpVtbl->Release(dev) == 0u);
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -1502,6 +2044,8 @@ int main() {
          test_10_cmdlist_sidetable_and_shader_lift},
         {"11. Descriptor Heap Hidden Out-Ptr ABI & Clamped Bounds Validation",
          test_11_descriptor_heap_abi_and_bounds},
+        {"12. Dynamic PSO/StateObject Scaling, Shader Lifting, Resource Flags & Slot61",
+         test_12_pso_capacity_shader_lift_res_flags_and_slot61},
     };
 
     int passed = 0;
