@@ -4,6 +4,7 @@
  */
 
 #include "d3d12_xs_internal.hpp"
+#include "rdna2_lifter/rdna2_lifter.hpp"
 #include "xmem/xmem_api.h"
 
 #include <algorithm>
@@ -734,6 +735,83 @@ scarlett_hresult_t D3D12XsManager::strip_dxil(scarlett_d3d12xs_strip_dxil_params
     const auto *src = reinterpret_cast<const uint8_t *>(static_cast<uintptr_t>(p.src_addr));
     auto *dst = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(p.dst_addr));
     return strip_xbox_dxil_container(src, p.src_size, dst, p.dst_capacity, p);
+}
+
+scarlett_hresult_t D3D12XsManager::lift_shader(scarlett_d3d12xs_lift_shader_params_t &p) {
+    p.out_dst_size = 0u;
+    p.out_used_dxil_fast_path = 0u;
+    p.out_container_kind = 0u;
+    p.out_wave_strategy = 0u;
+
+    const auto *src = reinterpret_cast<const uint8_t *>(static_cast<uintptr_t>(p.src_addr));
+    auto *dst = reinterpret_cast<uint32_t *>(static_cast<uintptr_t>(p.dst_addr));
+    if (src == nullptr || p.src_size < 4u) {
+        p.out_status = SCARLETT_ERR_SHADER_INVALID_CONTAINER;
+        return p.out_status;
+    }
+
+    const uint32_t magic =
+        static_cast<uint32_t>(src[0]) |
+        (static_cast<uint32_t>(src[1]) << 8u) |
+        (static_cast<uint32_t>(src[2]) << 16u) |
+        (static_cast<uint32_t>(src[3]) << 24u);
+    if (magic == 0x43425844u) { /* 'DXBC' */
+        p.out_container_kind = 1u;
+    } else if (magic == 0x00325358u || (src[0] == 'X' && src[1] == 'S' && src[2] == '2')) {
+        p.out_container_kind = 2u; /* 'XS2' */
+    } else if (magic == 0x4D535346u) { /* 'FSSM' */
+        p.out_container_kind = 3u;
+    } else if (magic == 0x39305350u) { /* 'PS09' */
+        p.out_container_kind = 4u;
+    } else if (magic == 0x35444753u) { /* 'SGD5' */
+        p.out_container_kind = 5u;
+    }
+
+    scarlett_shader_mode_t mode = scarlett::rdna2::parse_shader_mode_env();
+    if (p.shader_mode == 1u) {
+        mode = SCARLETT_SHADER_MODE_EXACT;
+    } else if (p.shader_mode == 2u) {
+        mode = SCARLETT_SHADER_MODE_ADAPTIVE;
+    } else if (p.shader_mode == 3u) {
+        mode = SCARLETT_SHADER_MODE_FAST_F32;
+    }
+
+    scarlett_rdna2_lift_c_result_t c_res{};
+    const size_t cap_words = static_cast<size_t>(p.dst_capacity / 4u);
+    scarlett_hresult_t hr = scarlett_rdna2_lift_shader_c(
+        src,
+        static_cast<size_t>(p.src_size),
+        mode,
+        p.prefer_ray_query,
+        dst,
+        cap_words,
+        &c_res);
+
+    p.out_dst_size = c_res.byte_count;
+    p.out_used_dxil_fast_path = c_res.used_dxil_fast_path;
+    p.out_wave_strategy = c_res.wave_strategy;
+    p.out_status = hr;
+
+    static std::atomic<uint32_t> lift_log_count{0u};
+    const uint32_t seq = lift_log_count.fetch_add(1u, std::memory_order_relaxed) + 1u;
+    if (seq <= 16u || (seq % 100u) == 0u) {
+        std::fprintf(stderr,
+                     "[scarlett-shader] lift #%u magic='%c%c%c%c' kind=%u src=%" PRIu64
+                     " dst=%" PRIu64 " fast_path=%u wave=%u hr=0x%08x\n",
+                     seq,
+                     (src[0] >= 32 && src[0] < 127) ? static_cast<char>(src[0]) : '.',
+                     (src[1] >= 32 && src[1] < 127) ? static_cast<char>(src[1]) : '.',
+                     (src[2] >= 32 && src[2] < 127) ? static_cast<char>(src[2]) : '.',
+                     (src[3] >= 32 && src[3] < 127) ? static_cast<char>(src[3]) : '.',
+                     p.out_container_kind,
+                     p.src_size,
+                     p.out_dst_size,
+                     p.out_used_dxil_fast_path,
+                     p.out_wave_strategy,
+                     static_cast<uint32_t>(hr));
+        std::fflush(stderr);
+    }
+    return hr;
 }
 
 scarlett_hresult_t D3D12XsManager::set_frame_interval(

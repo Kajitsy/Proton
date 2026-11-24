@@ -27,7 +27,7 @@ else
     name_prefix: '',
     include_directories: [scarlett_inc, include_directories('.')],
     cpp_args: ['-Wall', '-Wextra', '-Werror', '-fvisibility=hidden'],
-    link_with: [xmem_unix_so],
+    link_with: [xmem_unix_so, rdna2_lifter_lib],
     dependencies: [d3d12_xs_threads_dep, d3d12_xs_dl_dep],
     install: true,
     install_dir: scarlett_install_dir,
@@ -37,7 +37,7 @@ else
     d3d12_xs_unix_sources,
     include_directories: [scarlett_inc, include_directories('.')],
     cpp_args: ['-Wall', '-Wextra', '-Werror', '-DSCARLETT_D3D12XS_STATIC_HOST_LINK=1'],
-    link_with: [xmem_unix_so],
+    link_with: [xmem_unix_so, rdna2_lifter_lib],
     dependencies: [d3d12_xs_threads_dep, d3d12_xs_dl_dep],
     install: false,
   )

@@ -32,6 +32,7 @@ if(SCARLETT_BUILD_UNIXLIB)
     )
     target_link_libraries(d3d12_xs_unix PRIVATE
         xmem_unix
+        scarlett_rdna2_lifter
         Threads::Threads
         ${CMAKE_DL_LIBS}
     )
@@ -62,6 +63,7 @@ if(SCARLETT_BUILD_UNIXLIB)
     )
     target_link_libraries(scarlett_d3d12_xs_unix_core PUBLIC
         xmem_unix
+        scarlett_rdna2_lifter
         Threads::Threads
         ${CMAKE_DL_LIBS}
     )

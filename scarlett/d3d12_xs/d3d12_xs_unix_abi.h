@@ -55,7 +55,8 @@ typedef enum scarlett_d3d12xs_unix_op_e {
     SCARLETT_D3D12XS_UNIX_POWER_STATE             = 21,
     SCARLETT_D3D12XS_UNIX_DUMP_DRED_FAULT         = 22,
     SCARLETT_D3D12XS_UNIX_REPORT_STUB             = 23,
-    SCARLETT_D3D12XS_UNIX_OP_COUNT                = 24
+    SCARLETT_D3D12XS_UNIX_LIFT_SHADER             = 24,
+    SCARLETT_D3D12XS_UNIX_OP_COUNT                = 25
 } scarlett_d3d12xs_unix_op_t;
 
 /* ============================================================================
@@ -572,6 +573,23 @@ typedef struct scarlett_d3d12xs_report_stub_params_s {
 
 SCARLETT_STATIC_ASSERT(sizeof(scarlett_d3d12xs_report_stub_params_t) == 480,
                        "scarlett_d3d12xs_report_stub_params_t must be 480 bytes");
+
+typedef struct scarlett_d3d12xs_lift_shader_params_s {
+    uint64_t src_addr;
+    uint64_t src_size;
+    uint64_t dst_addr;
+    uint64_t dst_capacity;
+    uint64_t out_dst_size;
+    uint32_t shader_mode;        /* 0=env/adaptive, 1=exact, 2=adaptive, 3=fast_f32 */
+    uint32_t prefer_ray_query;
+    uint32_t out_used_dxil_fast_path;
+    uint32_t out_container_kind; /* 0=unknown, 1=DXBC, 2=XS2, 3=FSSM, 4=PS09, 5=SGD5 */
+    uint32_t out_wave_strategy;
+    scarlett_hresult_t out_status;
+} scarlett_d3d12xs_lift_shader_params_t;
+
+SCARLETT_STATIC_ASSERT(sizeof(scarlett_d3d12xs_lift_shader_params_t) == 64,
+                       "scarlett_d3d12xs_lift_shader_params_t must be 64 bytes");
 
 #ifdef __cplusplus
 } /* extern "C" */

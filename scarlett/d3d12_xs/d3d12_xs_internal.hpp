@@ -437,6 +437,7 @@ public:
     scarlett_hresult_t power_state(scarlett_d3d12xs_power_state_params_t &p);
     scarlett_hresult_t dump_dred_fault(scarlett_d3d12xs_dred_dump_params_t &p);
     scarlett_hresult_t report_stub(scarlett_d3d12xs_report_stub_params_t &p);
+    scarlett_hresult_t lift_shader(scarlett_d3d12xs_lift_shader_params_t &p);
 
     void set_stub_sink(scarlett_stub_sink_fn_t sink, void *user_data);
 

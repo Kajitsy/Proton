@@ -156,6 +156,12 @@ int32_t op_report_stub(void *args) {
         *static_cast<scarlett_d3d12xs_report_stub_params_t *>(args));
 }
 
+int32_t op_lift_shader(void *args) {
+    if (args == nullptr) return SCARLETT_E_POINTER;
+    return D3D12XsManager::instance().lift_shader(
+        *static_cast<scarlett_d3d12xs_lift_shader_params_t *>(args));
+}
+
 } // namespace
 
 } // namespace scarlett::d3d12xs::unixlib
@@ -188,7 +194,8 @@ using wine_unixlib_entry_t = int32_t (*)(void *);
     scarlett::d3d12xs::unixlib::op_resize_swapchain,       /* 20: RESIZE_SWAPCHAIN */ \
     scarlett::d3d12xs::unixlib::op_power_state,            /* 21: POWER_STATE */ \
     scarlett::d3d12xs::unixlib::op_dump_dred_fault,        /* 22: DUMP_DRED_FAULT */ \
-    scarlett::d3d12xs::unixlib::op_report_stub             /* 23: REPORT_STUB */
+    scarlett::d3d12xs::unixlib::op_report_stub,            /* 23: REPORT_STUB */ \
+    scarlett::d3d12xs::unixlib::op_lift_shader             /* 24: LIFT_SHADER */
 
 static const wine_unixlib_entry_t k_d3d12xs_local_unix_funcs[] = {
     SCARLETT_D3D12XS_UNIX_FUNC_LIST

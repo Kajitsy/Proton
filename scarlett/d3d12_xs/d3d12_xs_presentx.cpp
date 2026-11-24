@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -284,7 +285,7 @@ void convert_plane_to_bgra8(
     const uint32_t dst_pitch = w * 4u;
 
     if (fmt == 10u || fmt == 11u) {
-        /* DXGI_FORMAT_R16G16B16A16_FLOAT (8 bpp) -> BGRA8 */
+        /* DXGI_FORMAT_R16G16B16A16_FLOAT (8 bpp) -> opaque BGRA8 */
         const uint32_t src_pitch = plane.row_pitch >= w * 8u ? plane.row_pitch : ((w * 8u + 255u) & ~255u);
         for (uint32_t y = 0u; y < h; ++y) {
             const uint16_t *s = reinterpret_cast<const uint16_t *>(src + static_cast<size_t>(y) * src_pitch);
@@ -293,7 +294,7 @@ void convert_plane_to_bgra8(
                 d[x * 4u + 0u] = half_to_unorm8(s[x * 4u + 2u]);
                 d[x * 4u + 1u] = half_to_unorm8(s[x * 4u + 1u]);
                 d[x * 4u + 2u] = half_to_unorm8(s[x * 4u + 0u]);
-                d[x * 4u + 3u] = half_to_unorm8(s[x * 4u + 3u]);
+                d[x * 4u + 3u] = 0xFFu;
             }
         }
         return;
@@ -301,7 +302,7 @@ void convert_plane_to_bgra8(
 
     const uint32_t src_pitch = plane.row_pitch >= w * 4u ? plane.row_pitch : ((w * 4u + 255u) & ~255u);
     if (fmt == 24u || fmt == 25u || fmt == 26u) {
-        /* DXGI_FORMAT_R10G10B10A2_UNORM -> BGRA8 */
+        /* DXGI_FORMAT_R10G10B10A2_UNORM -> opaque BGRA8 */
         for (uint32_t y = 0u; y < h; ++y) {
             const uint32_t *s = reinterpret_cast<const uint32_t *>(src + static_cast<size_t>(y) * src_pitch);
             uint8_t *d = dst_bgra + static_cast<size_t>(y) * dst_pitch;
@@ -310,14 +311,14 @@ void convert_plane_to_bgra8(
                 d[x * 4u + 0u] = static_cast<uint8_t>((v >> 22u) & 0xFFu);
                 d[x * 4u + 1u] = static_cast<uint8_t>((v >> 12u) & 0xFFu);
                 d[x * 4u + 2u] = static_cast<uint8_t>((v >> 2u) & 0xFFu);
-                d[x * 4u + 3u] = static_cast<uint8_t>(((v >> 30u) & 0x3u) * 85u);
+                d[x * 4u + 3u] = 0xFFu;
             }
         }
         return;
     }
 
     if (fmt == 28u || fmt == 29u || fmt == 30u || fmt == 31u || fmt == 32u) {
-        /* DXGI_FORMAT_R8G8B8A8_* -> BGRA8 */
+        /* DXGI_FORMAT_R8G8B8A8_* -> opaque BGRA8 */
         for (uint32_t y = 0u; y < h; ++y) {
             const uint8_t *s = src + static_cast<size_t>(y) * src_pitch;
             uint8_t *d = dst_bgra + static_cast<size_t>(y) * dst_pitch;
@@ -325,18 +326,19 @@ void convert_plane_to_bgra8(
                 d[x * 4u + 0u] = s[x * 4u + 2u];
                 d[x * 4u + 1u] = s[x * 4u + 1u];
                 d[x * 4u + 2u] = s[x * 4u + 0u];
-                d[x * 4u + 3u] = s[x * 4u + 3u];
+                d[x * 4u + 3u] = 0xFFu;
             }
         }
         return;
     }
 
-    /* BGRA8 / BGRX8 / default 4-bpp */
+    /* BGRA8 / BGRX8 / default 4-bpp: force opaque alpha 0xFF */
     for (uint32_t y = 0u; y < h; ++y) {
-        std::memcpy(
-            dst_bgra + static_cast<size_t>(y) * dst_pitch,
-            src + static_cast<size_t>(y) * src_pitch,
-            dst_pitch);
+        const uint32_t *s32 = reinterpret_cast<const uint32_t *>(src + static_cast<size_t>(y) * src_pitch);
+        uint32_t *d32 = reinterpret_cast<uint32_t *>(dst_bgra + static_cast<size_t>(y) * dst_pitch);
+        for (uint32_t x = 0u; x < w; ++x) {
+            d32[x] = s32[x] | UINT32_C(0xFF000000);
+        }
     }
 }
 
@@ -395,6 +397,11 @@ bool wsi_create_swapchain(SwapchainState &sc, VulkanRuntimeContext *vk) noexcept
         caps.supportedCompositeAlpha != 0u) {
         composite_alpha = caps.supportedCompositeAlpha & (~caps.supportedCompositeAlpha + 1u);
     }
+    std::fprintf(stderr,
+                 "[scarlett-wsi] swapchain %ux%u supportedAlpha=0x%x chosenAlpha=0x%x fmt=%u\n",
+                 extent.width, extent.height,
+                 caps.supportedCompositeAlpha, composite_alpha, sc.wsi.swapchain_format);
+    std::fflush(stderr);
 
     ScarVkSwapchainKHR old_sc = sc.wsi.swapchain;
     ScarVkSwapchainCreateInfoKHR sc_ci{};
@@ -707,12 +714,31 @@ void wsi_present_frame(
     }
 
     bool did_blit = false;
+    uint32_t nonzero_samples = 0u;
+    uint32_t total_samples = 0u;
     if (inout.plane_count > 0u && inout.planes[0].gpu_va > UINT64_C(0x10000) &&
         inout.planes[0].width > 0u && inout.planes[0].height > 0u &&
         vk->vkCmdCopyBufferToImage != nullptr && vk->vkCmdBlitImage != nullptr &&
         wsi_ensure_upload_resources(sc, vk, inout.planes[0].width, inout.planes[0].height)) {
         const auto &plane0 = inout.planes[0];
         convert_plane_to_bgra8(plane0, static_cast<uint8_t *>(sc.wsi.upload_buf_mapped));
+
+        /* Sample converted BGRA8 RGB channels (ignore forced 0xFF alpha) for content diagnostics */
+        if (sc.present_serial <= 5u || (sc.present_serial % 60u) == 0u) {
+            const auto *bgra = static_cast<const uint32_t *>(sc.wsi.upload_buf_mapped);
+            const uint32_t pw = plane0.width;
+            const uint32_t ph = plane0.height;
+            const uint32_t sx_step = std::max<uint32_t>(1u, pw / 64u);
+            const uint32_t sy_step = std::max<uint32_t>(1u, ph / 64u);
+            for (uint32_t sy = 0u; sy < ph; sy += sy_step) {
+                for (uint32_t sx = 0u; sx < pw; sx += sx_step) {
+                    ++total_samples;
+                    if ((bgra[static_cast<size_t>(sy) * pw + sx] & UINT32_C(0x00FFFFFF)) != 0u) {
+                        ++nonzero_samples;
+                    }
+                }
+            }
+        }
 
         ScarVkImageMemoryBarrier up_to_dst{};
         up_to_dst.sType = SCAR_VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -847,6 +873,27 @@ void wsi_present_frame(
     if (vk->vkQueueSubmit(vk->direct_queue, 1u, &submit_info, sc.wsi.in_flight_fence) !=
         SCAR_VK_SUCCESS) {
         return;
+    }
+
+    if (sc.present_serial <= 5u || (sc.present_serial % 60u) == 0u) {
+        const uint64_t p0va = inout.plane_count > 0u ? inout.planes[0].gpu_va : 0u;
+        const uint32_t pw = inout.plane_count > 0u ? inout.planes[0].width : 0u;
+        const uint32_t ph = inout.plane_count > 0u ? inout.planes[0].height : 0u;
+        const uint32_t pfmt = inout.plane_count > 0u ? inout.planes[0].dxgi_format : 0u;
+        const uint32_t ppitch = inout.plane_count > 0u ? inout.planes[0].row_pitch : 0u;
+        std::fprintf(stderr,
+                     "[scarlett-presentx-wsi] frame=%" PRIu64 " did_blit=%d p0va=0x%" PRIx64
+                     " %ux%u fmt=%u pitch=%u nonzero_rgb=%u/%u\n",
+                     sc.present_serial,
+                     did_blit ? 1 : 0,
+                     p0va,
+                     pw,
+                     ph,
+                     pfmt,
+                     ppitch,
+                     nonzero_samples,
+                     total_samples);
+        std::fflush(stderr);
     }
 
     ScarVkPresentInfoKHR present_info{};

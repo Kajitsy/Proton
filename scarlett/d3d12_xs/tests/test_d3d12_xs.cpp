@@ -56,6 +56,7 @@
 #include <vector>
 
 #include "d3d12_xs_api.h"
+#include "d3d12_xs_unix_abi.h"
 #include "d3d12_xs_vk_abi.h"
 #include "xmem/xmem_api.h"
 
@@ -1124,6 +1125,104 @@ bool test_9_diagnostic_auto_stub_trampoline() {
     return true;
 }
 
+/* ============================================================================
+ * Test 10: Command List Side-Table Isolation & Shader Lifting Bridge
+ * ============================================================================ */
+bool test_10_cmdlist_sidetable_and_shader_lift() {
+    void *dev_raw = nullptr;
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
+    auto *dev_vtbl = reinterpret_cast<void * const *>(dev->lpVtbl);
+
+    const scarlett_guid_t iid_unk = {
+        0x00000000u, 0x0000u, 0x0000u,
+        {0xC0u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x46u}};
+
+    struct QueueDesc { uint32_t Type, Priority, Flags, NodeMask; } q_desc{0u, 0u, 0u, 0u};
+    using PfnCreateQueue = scarlett_hresult_t (*)(ID3D12DeviceX *, const QueueDesc *, const scarlett_guid_t *, void **);
+    using PfnCreateAlloc = scarlett_hresult_t (*)(ID3D12DeviceX *, uint32_t, const scarlett_guid_t *, void **);
+    using PfnCreateList = scarlett_hresult_t (*)(ID3D12DeviceX *, uint32_t, uint32_t, void *, void *, const scarlett_guid_t *, void **);
+
+    void *queue_raw = nullptr;
+    void *alloc_raw = nullptr;
+    void *cl_raw = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreateQueue>(dev_vtbl[8])(dev, &q_desc, &iid_unk, &queue_raw), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreateAlloc>(dev_vtbl[9])(dev, 0u, &iid_unk, &alloc_raw), SCARLETT_OK);
+    CHECK_HR(reinterpret_cast<PfnCreateList>(dev_vtbl[12])(dev, 0u, 0u, alloc_raw, nullptr, &iid_unk, &cl_raw), SCARLETT_OK);
+    CHECK(queue_raw != nullptr && alloc_raw != nullptr && cl_raw != nullptr);
+
+    /* Simulate Xbox inline writes into ID3D12GraphicsCommandListX beyond lpVtbl (incl. +0x118) */
+    uint8_t *cl_bytes = static_cast<uint8_t *>(cl_raw);
+    for (size_t off = sizeof(void *); off < 0x400u; ++off) {
+        cl_bytes[off] = static_cast<uint8_t>(0xC0u + (off & 0x0Fu));
+    }
+
+    uint32_t label_target = 0u;
+    auto *cl_vtbl = *reinterpret_cast<void * const * const *>(cl_raw);
+    auto *alloc_vtbl = *reinterpret_cast<void * const * const *>(alloc_raw);
+    auto *q_vtbl = *reinterpret_cast<void * const * const *>(queue_raw);
+    using PfnWriteLabel = void (*)(void *, uint64_t, uint32_t, uint32_t, uint32_t);
+    using PfnClose = scarlett_hresult_t (*)(void *);
+    using PfnExec = void (*)(void *, uint32_t, void * const *);
+    using PfnRelease = uint32_t (*)(void *);
+
+    reinterpret_cast<PfnWriteLabel>(cl_vtbl[71])(
+        cl_raw, reinterpret_cast<uint64_t>(&label_target), 0x12345678u, 0u, 0u);
+    CHECK_HR(reinterpret_cast<PfnClose>(cl_vtbl[9])(cl_raw), SCARLETT_OK);
+    reinterpret_cast<PfnExec>(q_vtbl[10])(queue_raw, 1u, &cl_raw);
+    CHECK(label_target == 0x12345678u);
+
+    /* Path A via SCARLETT_D3D12XS_UNIX_LIFT_SHADER: DXBC with XBOX + DXIL */
+    const std::vector<uint8_t> kXboxChunk = {'X','B','O','X',1,2,3,4};
+    const std::vector<uint8_t> kDxilChunk = {'B','C',0xC0u,0xDEu,1,0,0,0};
+    auto dxbc_src = build_synthetic_dxbc({
+        {{'X','B','O','X'}, kXboxChunk},
+        {{'D','X','I','L'}, kDxilChunk},
+    });
+    std::vector<uint8_t> lift_out(4096u, 0u);
+    scarlett_d3d12xs_lift_shader_params_t lp{};
+    lp.src_addr = reinterpret_cast<uint64_t>(dxbc_src.data());
+    lp.src_size = dxbc_src.size();
+    lp.dst_addr = reinterpret_cast<uint64_t>(lift_out.data());
+    lp.dst_capacity = lift_out.size();
+    CHECK_HR(scarlett_d3d12xs_unix_call(SCARLETT_D3D12XS_UNIX_LIFT_SHADER, &lp), SCARLETT_OK);
+    CHECK(lp.out_status == SCARLETT_OK);
+    CHECK(lp.out_used_dxil_fast_path == 1u);
+    CHECK(lp.out_container_kind == 1u);
+    CHECK(lp.out_dst_size > 0u && lp.out_dst_size < dxbc_src.size());
+
+    /* Path B via SCARLETT_D3D12XS_UNIX_LIFT_SHADER: minimal XS2 compute shader -> SPIR-V */
+    std::vector<uint8_t> xs2_src(52u, 0u);
+    write_le32(xs2_src, 0u, 0x00325358u);      /* 'XS2\0' */
+    write_le32(xs2_src, 4u, (2u << 16u) | 1u); /* version=1, stage=2 (CS) */
+    write_le32(xs2_src, 8u, (4u << 16u) | 64u);/* wave_size=64, vgpr=4 */
+    write_le32(xs2_src, 12u, 4u);              /* sgpr=4, bindings=0 */
+    write_le32(xs2_src, 20u, 1u);              /* wg_x=1 */
+    write_le32(xs2_src, 24u, 1u);              /* wg_y=1 */
+    write_le32(xs2_src, 28u, 1u);              /* wg_z=1 */
+    write_le32(xs2_src, 40u, 48u);             /* isa_offset=48 */
+    write_le32(xs2_src, 44u, 4u);              /* isa_bytes=4 */
+    write_le32(xs2_src, 48u, 0xBF810000u);     /* s_endpgm */
+    std::vector<uint8_t> spirv_out(65536u, 0u);
+    scarlett_d3d12xs_lift_shader_params_t spv_lp{};
+    spv_lp.src_addr = reinterpret_cast<uint64_t>(xs2_src.data());
+    spv_lp.src_size = xs2_src.size();
+    spv_lp.dst_addr = reinterpret_cast<uint64_t>(spirv_out.data());
+    spv_lp.dst_capacity = spirv_out.size();
+    CHECK_HR(scarlett_d3d12xs_unix_call(SCARLETT_D3D12XS_UNIX_LIFT_SHADER, &spv_lp), SCARLETT_OK);
+    CHECK(spv_lp.out_status == SCARLETT_OK);
+    CHECK(spv_lp.out_used_dxil_fast_path == 0u);
+    CHECK(spv_lp.out_container_kind == 2u);
+    CHECK(spv_lp.out_dst_size >= 20u);
+    CHECK(read_le32(spirv_out.data()) == 0x07230203u);
+
+    CHECK(reinterpret_cast<PfnRelease>(cl_vtbl[2])(cl_raw) == 0u);
+    CHECK(reinterpret_cast<PfnRelease>(alloc_vtbl[2])(alloc_raw) == 0u);
+    CHECK(reinterpret_cast<PfnRelease>(q_vtbl[2])(queue_raw) == 0u);
+    CHECK(dev->lpVtbl->Release(dev) == 0u);
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -1151,6 +1250,8 @@ int main() {
          test_8_dred_and_device_fault_proton_log},
         {"9. Zero Silent Stubs Diagnostic Auto-Stub Trampoline (Normal & Strict)",
          test_9_diagnostic_auto_stub_trampoline},
+        {"10. Command List Side-Table Isolation & Shader Lifting Bridge",
+         test_10_cmdlist_sidetable_and_shader_lift},
     };
 
     int passed = 0;
