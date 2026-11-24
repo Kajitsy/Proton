@@ -60,6 +60,9 @@
 #include "d3d12_xs_vk_abi.h"
 #include "xmem/xmem_api.h"
 
+extern "C" uint64_t scarlett_d3d12xs_test_translate_gpu_desc_handle(
+    uint64_t xbox_gpu_handle, uint32_t *out_heap_type);
+
 namespace {
 
 int g_failures = 0;
@@ -1223,6 +1226,251 @@ bool test_10_cmdlist_sidetable_and_shader_lift() {
     return true;
 }
 
+/* ============================================================================
+ * Test 11: Descriptor Heap Hidden Out-Ptr ABI & Clamped Bounds Validation
+ * ============================================================================ */
+namespace mock_vkd3d_dh {
+
+struct MockDescHeapDesc {
+    uint32_t Type;
+    uint32_t NumDescriptors;
+    uint32_t Flags;
+    uint32_t NodeMask;
+};
+
+struct MockRealDescHeap {
+    void * const *lpVtbl;
+    uint64_t cpu_va;
+    uint64_t gpu_va;
+    uint32_t ref_count;
+    bool gstart_received_nonnull_out;
+};
+
+struct MockRealDevice {
+    void * const *lpVtbl;
+    uint32_t create_dh_calls;
+    uint32_t srv_calls;
+    uint64_t last_srv_dest;
+    uint32_t copy_desc_calls;
+    uint64_t last_copy_dst;
+    uint64_t last_copy_src;
+    uint32_t copy_simple_calls;
+    uint64_t last_simple_dst;
+    uint64_t last_simple_src;
+    uint32_t last_simple_count;
+    MockRealDescHeap heaps[4];
+    uint32_t heap_count;
+};
+
+uint32_t mock_dh_release(void *iface) {
+    auto *h = static_cast<MockRealDescHeap *>(iface);
+    if (h->ref_count > 0u) {
+        --h->ref_count;
+    }
+    return h->ref_count;
+}
+
+uint64_t *mock_dh_get_cpu_start(void *iface, uint64_t *out) {
+    auto *h = static_cast<MockRealDescHeap *>(iface);
+    if (out != nullptr) {
+        h->gstart_received_nonnull_out = true;
+        *out = h->cpu_va;
+    }
+    return out;
+}
+
+uint64_t *mock_dh_get_gpu_start(void *iface, uint64_t *out) {
+    auto *h = static_cast<MockRealDescHeap *>(iface);
+    if (out != nullptr) {
+        *out = h->gpu_va;
+    }
+    return out;
+}
+
+void * const kMockDhVtbl[16] = {
+    nullptr, nullptr, reinterpret_cast<void *>(mock_dh_release),
+    nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr,
+    reinterpret_cast<void *>(mock_dh_get_cpu_start),
+    reinterpret_cast<void *>(mock_dh_get_gpu_start),
+};
+
+scarlett_hresult_t mock_dev_create_dh(
+    void *iface, const MockDescHeapDesc *desc, const scarlett_guid_t *, void **pp) {
+    auto *d = static_cast<MockRealDevice *>(iface);
+    ++d->create_dh_calls;
+    if (desc == nullptr || pp == nullptr) {
+        return SCARLETT_E_INVALIDARG;
+    }
+    if ((desc->Flags & 0x1u) != 0u && desc->Type == 0u && desc->NumDescriptors > 1000000u) {
+        *pp = nullptr;
+        return SCARLETT_E_INVALIDARG;
+    }
+    if (d->heap_count >= 4u) {
+        return SCARLETT_E_OUTOFMEMORY;
+    }
+    MockRealDescHeap *h = &d->heaps[d->heap_count];
+    h->lpVtbl = kMockDhVtbl;
+    h->cpu_va = UINT64_C(0x700000000000) + static_cast<uint64_t>(d->heap_count) * UINT64_C(0x10000000);
+    h->gpu_va = ((desc->Flags & 0x1u) != 0u) ? (UINT64_C(0x800000000000) + static_cast<uint64_t>(d->heap_count) * UINT64_C(0x10000000)) : 0u;
+    h->ref_count = 1u;
+    h->gstart_received_nonnull_out = false;
+    ++d->heap_count;
+    *pp = h;
+    return SCARLETT_OK;
+}
+
+uint32_t mock_dev_get_inc(void *, uint32_t) {
+    return 64u;
+}
+
+void mock_dev_create_srv(void *iface, void *, const void *, uint64_t dest) {
+    auto *d = static_cast<MockRealDevice *>(iface);
+    ++d->srv_calls;
+    d->last_srv_dest = dest;
+}
+
+void mock_dev_copy_desc(
+    void *iface, uint32_t n_dst, const uint64_t *dsts, const uint32_t *,
+    uint32_t n_src, const uint64_t *srcs, const uint32_t *, uint32_t) {
+    auto *d = static_cast<MockRealDevice *>(iface);
+    ++d->copy_desc_calls;
+    if (n_dst > 0u && dsts != nullptr) {
+        d->last_copy_dst = dsts[0];
+    }
+    if (n_src > 0u && srcs != nullptr) {
+        d->last_copy_src = srcs[0];
+    }
+}
+
+void mock_dev_copy_simple(
+    void *iface, uint32_t count, uint64_t dst, uint64_t src, uint32_t) {
+    auto *d = static_cast<MockRealDevice *>(iface);
+    ++d->copy_simple_calls;
+    d->last_simple_count = count;
+    d->last_simple_dst = dst;
+    d->last_simple_src = src;
+}
+
+void * const kMockDevVtbl[40] = {
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    reinterpret_cast<void *>(mock_dev_create_dh),     /* slot 14 */
+    reinterpret_cast<void *>(mock_dev_get_inc),       /* slot 15 */
+    nullptr,
+    nullptr,
+    reinterpret_cast<void *>(mock_dev_create_srv),    /* slot 18 */
+    nullptr, nullptr, nullptr, nullptr,
+    reinterpret_cast<void *>(mock_dev_copy_desc),     /* slot 23 */
+    reinterpret_cast<void *>(mock_dev_copy_simple),   /* slot 24 */
+};
+
+} // namespace mock_vkd3d_dh
+
+bool test_11_descriptor_heap_abi_and_bounds() {
+    void *dev_raw = nullptr;
+    CHECK_HR(D3D12XboxCreateDevice(nullptr, nullptr, nullptr, &dev_raw), SCARLETT_OK);
+    auto *dev = static_cast<ID3D12DeviceX *>(dev_raw);
+    void *saved_real = dev->real_device;
+
+    mock_vkd3d_dh::MockRealDevice mock_dev{};
+    mock_dev.lpVtbl = mock_vkd3d_dh::kMockDevVtbl;
+    dev->real_device = &mock_dev;
+
+    auto *dev_vtbl = reinterpret_cast<void * const *>(dev->lpVtbl);
+    const scarlett_guid_t iid_dh = {
+        0x8EFB471Du, 0x616Cu, 0x4F49u,
+        {0x90u, 0xF7u, 0x12u, 0x7Bu, 0xB7u, 0x63u, 0xFAu, 0x51u}};
+
+    using PfnCreateDH = scarlett_hresult_t (*)(
+        ID3D12DeviceX *, const mock_vkd3d_dh::MockDescHeapDesc *, const scarlett_guid_t *, void **);
+    using PfnCreateSRV = void (*)(ID3D12DeviceX *, void *, const void *, uint64_t);
+    using PfnCopyDesc = void (*)(
+        ID3D12DeviceX *, uint32_t, const uint64_t *, const uint32_t *,
+        uint32_t, const uint64_t *, const uint32_t *, uint32_t);
+    using PfnCopySimple = void (*)(ID3D12DeviceX *, uint32_t, uint64_t, uint64_t, uint32_t);
+
+    /* Heap 0: shader-visible 0x130000 -> mock rejects > 1M, d3d12_xs clamps to 1000000 */
+    mock_vkd3d_dh::MockDescHeapDesc dh_desc0{0u, 0x130000u, 1u, 0u};
+    void *dh0_raw = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreateDH>(dev_vtbl[14])(dev, &dh_desc0, &iid_dh, &dh0_raw), SCARLETT_OK);
+    CHECK(dh0_raw != nullptr);
+    CHECK(mock_dev.create_dh_calls == 2u);
+    CHECK(mock_dev.heap_count == 1u);
+    CHECK(mock_dev.heaps[0].gstart_received_nonnull_out);
+
+    /* Heap 1: non-shader-visible staging heap (256 descriptors) */
+    mock_vkd3d_dh::MockDescHeapDesc dh_desc1{0u, 256u, 0u, 0u};
+    void *dh1_raw = nullptr;
+    CHECK_HR(reinterpret_cast<PfnCreateDH>(dev_vtbl[14])(dev, &dh_desc1, &iid_dh, &dh1_raw), SCARLETT_OK);
+    CHECK(dh1_raw != nullptr);
+    CHECK(mock_dev.heap_count == 2u);
+
+    /* Verify Xbox vtable GetCPUDescriptorHandleForHeapStart / GetGPUDescriptorHandleForHeapStart
+     * return scalar handles in RAX (1-arg call) and GetDesc writes struct */
+    auto *dh0_vtbl = *reinterpret_cast<void * const * const *>(dh0_raw);
+    auto *dh1_vtbl = *reinterpret_cast<void * const * const *>(dh1_raw);
+    using PfnGetStart = uint64_t (*)(void *);
+    using PfnGetDesc = void *(*)(void *, mock_vkd3d_dh::MockDescHeapDesc *);
+    using PfnRelease = uint32_t (*)(void *);
+
+    const uint64_t cpu0 = reinterpret_cast<PfnGetStart>(dh0_vtbl[9])(dh0_raw);
+    const uint64_t gpu0 = reinterpret_cast<PfnGetStart>(dh0_vtbl[10])(dh0_raw);
+    const uint64_t cpu1 = reinterpret_cast<PfnGetStart>(dh1_vtbl[9])(dh1_raw);
+    CHECK(cpu0 != 0u && gpu0 == cpu0 && cpu1 != 0u && cpu1 != cpu0);
+
+    mock_vkd3d_dh::MockDescHeapDesc got_desc{};
+    CHECK(reinterpret_cast<PfnGetDesc>(dh0_vtbl[8])(dh0_raw, &got_desc) == &got_desc);
+    CHECK(got_desc.NumDescriptors == 0x130000u);
+
+    /* In-bounds SRV at index 5 in heap 0 -> real_cpu_start + 5 * 64 */
+    reinterpret_cast<PfnCreateSRV>(dev_vtbl[18])(dev, nullptr, nullptr, cpu0 + 5u * 32u);
+    CHECK(mock_dev.srv_calls == 1u);
+    CHECK(mock_dev.last_srv_dest == mock_dev.heaps[0].cpu_va + 5u * 64u);
+
+    /* Out-of-bounds SRV at index 1000000 (within Xbox 0x130000, beyond clamped 1M) -> must NOT forward */
+    reinterpret_cast<PfnCreateSRV>(dev_vtbl[18])(dev, nullptr, nullptr, cpu0 + 1000000u * 32u);
+    CHECK(mock_dev.srv_calls == 1u);
+
+    /* CopyDescriptors in-bounds (heap 1[3] -> heap 0[10]) -> translates both using real_inc_size=64 */
+    const uint64_t dst_range = cpu0 + 10u * 32u;
+    const uint64_t src_range = cpu1 + 3u * 32u;
+    const uint32_t range_sz = 4u;
+    reinterpret_cast<PfnCopyDesc>(dev_vtbl[23])(
+        dev, 1u, &dst_range, &range_sz, 1u, &src_range, &range_sz, 0u);
+    CHECK(mock_dev.copy_desc_calls == 1u);
+    CHECK(mock_dev.last_copy_dst == mock_dev.heaps[0].cpu_va + 10u * 64u);
+    CHECK(mock_dev.last_copy_src == mock_dev.heaps[1].cpu_va + 3u * 64u);
+
+    /* CopyDescriptorsSimple crossing clamped 1M boundary (start=999998, count=4) -> must NOT forward */
+    reinterpret_cast<PfnCopySimple>(dev_vtbl[24])(
+        dev, 4u, cpu0 + 999998u * 32u, cpu1 + 0u * 32u, 0u);
+    CHECK(mock_dev.copy_simple_calls == 0u);
+
+    /* CopyDescriptorsSimple strictly within clamped 1M (start=999996, count=4) -> forwards */
+    reinterpret_cast<PfnCopySimple>(dev_vtbl[24])(
+        dev, 4u, cpu0 + 999996u * 32u, cpu1 + 0u * 32u, 0u);
+    CHECK(mock_dev.copy_simple_calls == 1u);
+    CHECK(mock_dev.last_simple_count == 4u);
+    CHECK(mock_dev.last_simple_dst == mock_dev.heaps[0].cpu_va + 999996u * 64u);
+    CHECK(mock_dev.last_simple_src == mock_dev.heaps[1].cpu_va);
+
+    /* GPU descriptor handle translation: shader-visible in-bounds, OOB vs 1M clamp, and non-shader-visible */
+    uint32_t gpu_heap_type = 99u;
+    CHECK(scarlett_d3d12xs_test_translate_gpu_desc_handle(gpu0 + 7u * 32u, &gpu_heap_type) ==
+          mock_dev.heaps[0].gpu_va + 7u * 64u);
+    CHECK(gpu_heap_type == 0u);
+    CHECK(scarlett_d3d12xs_test_translate_gpu_desc_handle(gpu0 + 1000000u * 32u, nullptr) == 0u);
+    const uint64_t gpu1 = reinterpret_cast<PfnGetStart>(dh1_vtbl[10])(dh1_raw);
+    CHECK(scarlett_d3d12xs_test_translate_gpu_desc_handle(gpu1, nullptr) == 0u);
+
+    CHECK(reinterpret_cast<PfnRelease>(dh1_vtbl[2])(dh1_raw) == 0u);
+    CHECK(reinterpret_cast<PfnRelease>(dh0_vtbl[2])(dh0_raw) == 0u);
+    dev->real_device = saved_real;
+    CHECK(dev->lpVtbl->Release(dev) == 0u);
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -1252,6 +1500,8 @@ int main() {
          test_9_diagnostic_auto_stub_trampoline},
         {"10. Command List Side-Table Isolation & Shader Lifting Bridge",
          test_10_cmdlist_sidetable_and_shader_lift},
+        {"11. Descriptor Heap Hidden Out-Ptr ABI & Clamped Bounds Validation",
+         test_11_descriptor_heap_abi_and_bounds},
     };
 
     int passed = 0;
