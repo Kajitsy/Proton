@@ -307,6 +307,27 @@ public:
         return s < 105u && sgpr_is_ballot_pair_[s];
     }
 
+    enum class SgprKind : uint8_t {
+        Unknown = 0,
+        VbTablePtr,
+        DescTablePtr,
+        VbDesc,
+        CbvDesc,
+        TexSrvDesc
+    };
+    void set_sgpr_desc(uint16_t s, SgprKind kind, uint32_t slot = 0u) {
+        if (s < 106u) {
+            sgpr_kind_[s] = kind;
+            sgpr_slot_[s] = slot;
+        }
+    }
+    SgprKind get_sgpr_kind(uint16_t s) const noexcept {
+        return (s < 106u) ? sgpr_kind_[s] : SgprKind::Unknown;
+    }
+    uint32_t get_sgpr_slot(uint16_t s) const noexcept {
+        return (s < 106u) ? sgpr_slot_[s] : 0u;
+    }
+
 private:
     static float inline_float_val(uint16_t code) noexcept {
         switch (code) {
@@ -326,6 +347,8 @@ private:
     IrModule& mod_;
     std::array<uint32_t, 106> sgpr_{};
     std::array<bool, 106>     sgpr_is_ballot_pair_{};
+    std::array<SgprKind, 106> sgpr_kind_{};
+    std::array<uint32_t, 106> sgpr_slot_{};
     std::array<uint32_t, 256> vgpr_{};
     std::array<IrType, 256>   vgpr_type_{};
     uint32_t scc_{0};
@@ -354,6 +377,25 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
 
     if (decoded.empty()) {
         return mod;
+    }
+
+    /* Pre-collect vertex buffer load offsets in VS so each maps deterministically to Location 0, 1, ... */
+    std::vector<uint32_t> vs_attr_offsets;
+    if (meta.stage == ShaderStage::Vertex) {
+        for (const auto& di : decoded) {
+            if (di.cls == IsaClass::MUBUF || di.cls == IsaClass::MTBUF) {
+                const bool is_load =
+                    (di.cls == IsaClass::MUBUF && di.opcode >= mubuf_op::BUFFER_LOAD_DWORD && di.opcode <= mubuf_op::BUFFER_LOAD_DWORDX3) ||
+                    (di.cls == IsaClass::MUBUF && di.opcode >= mubuf_op::BUFFER_LOAD_FORMAT_X && di.opcode <= mubuf_op::BUFFER_LOAD_FORMAT_XYZW) ||
+                    (di.cls == IsaClass::MTBUF && di.opcode <= mtbuf_op::TBUFFER_LOAD_FORMAT_XYZW);
+                if (is_load) {
+                    if (std::find(vs_attr_offsets.begin(), vs_attr_offsets.end(), di.offset) == vs_attr_offsets.end()) {
+                        vs_attr_offsets.push_back(di.offset);
+                    }
+                }
+            }
+        }
+        std::sort(vs_attr_offsets.begin(), vs_attr_offsets.end());
     }
 
     /* Step 1: Map word PC -> instruction index & discover CFG block leaders */
@@ -453,6 +495,12 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
 
     /* Step 2: Lower decoded GFX10.3 stream to SSA IR with structured CF markers */
     IrBuilder b(mod);
+    if (meta.stage == ShaderStage::Vertex) {
+        b.set_sgpr_desc(0u, IrBuilder::SgprKind::VbTablePtr, 0u);
+        b.set_sgpr_desc(8u, IrBuilder::SgprKind::DescTablePtr, 0u);
+    } else if (meta.stage == ShaderStage::Pixel) {
+        b.set_sgpr_desc(8u, IrBuilder::SgprKind::DescTablePtr, 0u);
+    }
     std::vector<uint32_t> open_if_merges;
     int open_loops = 0;
 
@@ -639,6 +687,9 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
                         if (d.opcode == sop1_op::S_MOV_B64 && d.src[0] == reg_code::VCC_LO) {
                             b.mark_sgpr_ballot_pair(d.dst);
                         }
+                        if (d.src[0] < 106u) {
+                            b.set_sgpr_desc(d.dst, b.get_sgpr_kind(d.src[0]), b.get_sgpr_slot(d.src[0]));
+                        }
                         break;
                     case sop1_op::S_NOT_B32:
                     case sop1_op::S_NOT_B64:
@@ -764,14 +815,54 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
             }
 
             case IsaClass::SMEM: {
-                mod.uses_storage_buffer = true;
-                const uint32_t count = (d.opcode == smem_op::S_LOAD_DWORDX4 || d.opcode == smem_op::S_BUFFER_LOAD_DWORDX4) ? 4u :
-                                       (d.opcode == smem_op::S_LOAD_DWORDX2 || d.opcode == smem_op::S_BUFFER_LOAD_DWORDX2) ? 2u : 1u;
-                for (uint32_t k = 0; k < count; ++k) {
-                    const uint32_t slot = (d.offset / 4u) + k;
-                    uint32_t v = b.emit(IrOp::LoadInputU32, IrType::U32, ValueUniformity::Uniform,
-                                        {}, slot, 0.0f, false, 1u);
-                    b.write_sgpr(static_cast<uint16_t>(d.dst + k), v);
+                uint32_t count = 1u;
+                switch (d.opcode) {
+                    case smem_op::S_LOAD_DWORDX2:
+                    case smem_op::S_BUFFER_LOAD_DWORDX2: count = 2u; break;
+                    case smem_op::S_LOAD_DWORDX4:
+                    case smem_op::S_BUFFER_LOAD_DWORDX4: count = 4u; break;
+                    case smem_op::S_LOAD_DWORDX8:
+                    case smem_op::S_BUFFER_LOAD_DWORDX8: count = 8u; break;
+                    case smem_op::S_LOAD_DWORDX16:
+                    case smem_op::S_BUFFER_LOAD_DWORDX16: count = 16u; break;
+                    default: count = 1u; break;
+                }
+                const bool is_sbuf = (d.opcode >= smem_op::S_BUFFER_LOAD_DWORD &&
+                                      d.opcode <= smem_op::S_BUFFER_LOAD_DWORDX16);
+                const auto src_kind = b.get_sgpr_kind(d.src[0]);
+                const uint32_t src_slot = b.get_sgpr_slot(d.src[0]);
+                if (!is_sbuf && src_kind == IrBuilder::SgprKind::DescTablePtr) {
+                    const uint32_t slot = (d.offset / 32u) & 7u;
+                    const auto res_kind = (count >= 8u)
+                        ? IrBuilder::SgprKind::TexSrvDesc
+                        : IrBuilder::SgprKind::CbvDesc;
+                    b.set_sgpr_desc(d.dst, res_kind, slot);
+                    for (uint32_t k = 0; k < count; ++k) {
+                        b.write_sgpr(static_cast<uint16_t>(d.dst + k), b.const_u32(slot));
+                    }
+                } else if (!is_sbuf && src_kind == IrBuilder::SgprKind::VbTablePtr) {
+                    b.set_sgpr_desc(d.dst, IrBuilder::SgprKind::VbDesc, d.offset / 16u);
+                    for (uint32_t k = 0; k < count; ++k) {
+                        b.write_sgpr(static_cast<uint16_t>(d.dst + k), b.const_u32(0u));
+                    }
+                } else if (is_sbuf && (meta.stage == ShaderStage::Vertex || meta.stage == ShaderStage::Pixel)) {
+                    const uint32_t cbv_slot = (src_kind == IrBuilder::SgprKind::CbvDesc) ? (src_slot & 7u) : 0u;
+                    mod.cbv_slot_mask |= (1u << cbv_slot);
+                    mod.uses_storage_buffer = true;
+                    for (uint32_t k = 0; k < count; ++k) {
+                        const uint32_t dw_idx = (d.offset / 4u) + k;
+                        uint32_t v = b.emit(IrOp::LoadCbvU32, IrType::U32, ValueUniformity::Uniform,
+                                            {}, dw_idx, 0.0f, false, cbv_slot);
+                        b.write_sgpr(static_cast<uint16_t>(d.dst + k), v);
+                    }
+                } else {
+                    mod.uses_storage_buffer = true;
+                    for (uint32_t k = 0; k < count; ++k) {
+                        const uint32_t slot = (d.offset / 4u) + k;
+                        uint32_t v = b.emit(IrOp::LoadInputU32, IrType::U32, ValueUniformity::Uniform,
+                                            {}, slot, 0.0f, false, 1u);
+                        b.write_sgpr(static_cast<uint16_t>(d.dst + k), v);
+                    }
                 }
                 break;
             }
@@ -1287,11 +1378,61 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
                         b.write_vgpr(d.dst, b.emit(IrOp::Dot2F32F16, IrType::F32, ValueUniformity::Divergent, {a, c, acc}, 0u, 0.0f, d.clamp), IrType::F32);
                         break;
                     }
-                    case vop3p_op::V_FMA_MIX_F32: {
-                        uint32_t fa = b.read_src_f32(d.src[0], false, 0u);
-                        uint32_t fc = b.read_src_f32(d.src[1], false, 0u);
-                        uint32_t fe = b.read_src_f32(d.src[2], false, 0u);
-                        b.write_vgpr(d.dst, b.emit(IrOp::FFma, IrType::F32, ValueUniformity::Divergent, {fa, fc, fe}, 0u, 0.0f, d.clamp), IrType::F32);
+                    case vop3p_op::V_FMA_MIX_F32:
+                    case vop3p_op::V_FMA_MIXLO_F16:
+                    case vop3p_op::V_FMA_MIXHI_F16: {
+                        auto read_mix = [&](uint32_t k) -> uint32_t {
+                            const bool is_f16 = ((d.op_sel_hi >> k) & 1u) != 0u;
+                            const bool is_abs = ((d.abs_mask >> k) & 1u) != 0u;
+                            const bool is_neg = ((d.neg_mask >> k) & 1u) != 0u;
+                            uint32_t v = 0u;
+                            if (!is_f16) {
+                                v = b.read_src_f32(d.src[k], d.has_literal, d.literal, is_abs, is_neg);
+                            } else {
+                                if (d.src[k] == reg_code::INLINE_INT_0) {
+                                    v = b.const_f32(0.0f);
+                                } else {
+                                    uint32_t raw = b.read_src_u32(d.src[k], d.has_literal, d.literal);
+                                    uint32_t half_u = raw;
+                                    if (((d.op_sel >> k) & 1u) != 0u) {
+                                        half_u = b.emit(IrOp::LShr, IrType::U32, ValueUniformity::Divergent,
+                                                        {raw, b.const_u32(16u)});
+                                    }
+                                    v = b.emit(IrOp::CvtF16ToF32, IrType::F32, ValueUniformity::Divergent, {half_u});
+                                }
+                                if (is_abs) {
+                                    v = b.emit(IrOp::FAbs, IrType::F32, ValueUniformity::Divergent, {v});
+                                }
+                                if (is_neg) {
+                                    v = b.emit(IrOp::FNeg, IrType::F32, ValueUniformity::Divergent, {v});
+                                }
+                            }
+                            return v;
+                        };
+                        uint32_t fa = read_mix(0u);
+                        uint32_t fc = read_mix(1u);
+                        uint32_t fe = read_mix(2u);
+                        uint32_t fma = b.emit(IrOp::FFma, IrType::F32, ValueUniformity::Divergent,
+                                              {fa, fc, fe}, 0u, 0.0f, d.clamp);
+                        if (d.opcode == vop3p_op::V_FMA_MIX_F32) {
+                            b.write_vgpr(d.dst, fma, IrType::F32);
+                        } else {
+                            uint32_t h = b.emit(IrOp::CvtF32ToF16, IrType::U32, ValueUniformity::Divergent, {fma});
+                            uint32_t prev = b.read_vgpr_u32(d.dst);
+                            if (d.opcode == vop3p_op::V_FMA_MIXLO_F16) {
+                                uint32_t hi = b.emit(IrOp::BitAnd, IrType::U32, ValueUniformity::Divergent,
+                                                     {prev, b.const_u32(0xFFFF0000u)});
+                                uint32_t lo = b.emit(IrOp::BitAnd, IrType::U32, ValueUniformity::Divergent,
+                                                     {h, b.const_u32(0xFFFFu)});
+                                b.write_vgpr(d.dst, b.emit(IrOp::BitOr, IrType::U32, ValueUniformity::Divergent, {hi, lo}), IrType::U32);
+                            } else {
+                                uint32_t lo = b.emit(IrOp::BitAnd, IrType::U32, ValueUniformity::Divergent,
+                                                     {prev, b.const_u32(0xFFFFu)});
+                                uint32_t hi = b.emit(IrOp::Shl, IrType::U32, ValueUniformity::Divergent,
+                                                     {h, b.const_u32(16u)});
+                                b.write_vgpr(d.dst, b.emit(IrOp::BitOr, IrType::U32, ValueUniformity::Divergent, {lo, hi}), IrType::U32);
+                            }
+                        }
                         break;
                     }
                     default: {
@@ -1304,6 +1445,7 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
             }
 
             case IsaClass::VINTRP: {
+                mod.in_attr_mask |= (1u << (d.attr & 15u));
                 const uint32_t v = b.read_src_f32(d.src[0], false, 0u);
                 uint32_t r = b.emit(IrOp::InterpAttr, IrType::F32, ValueUniformity::Divergent,
                                     {v}, d.attr, 0.0f, false, d.attr_chan);
@@ -1354,7 +1496,6 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
 
             case IsaClass::MUBUF:
             case IsaClass::MTBUF: {
-                mod.uses_storage_buffer = true;
                 const bool is_store = (d.cls == IsaClass::MUBUF &&
                                        ((d.opcode >= mubuf_op::BUFFER_STORE_FORMAT_X && d.opcode <= mubuf_op::BUFFER_STORE_FORMAT_XYZW) ||
                                         (d.opcode >= mubuf_op::BUFFER_STORE_DWORD && d.opcode <= mubuf_op::BUFFER_STORE_DWORDX4))) ||
@@ -1362,23 +1503,52 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
                 const bool is_atomic = (d.cls == IsaClass::MUBUF && d.opcode >= mubuf_op::BUFFER_ATOMIC_SWAP);
                 const uint32_t vaddr = b.read_src_u32(d.src[0], false, 0u);
                 if (is_store) {
+                    mod.uses_storage_buffer = true;
                     const uint32_t val = b.read_vgpr_u32(d.dst);
                     b.emit(IrOp::StoreOutputU32, IrType::Void, ValueUniformity::Divergent,
                            {vaddr, val}, d.offset / 4u);
                     b.mark_output_written();
                 } else if (is_atomic) {
+                    mod.uses_storage_buffer = true;
                     const uint32_t val = b.read_vgpr_u32(d.dst);
                     uint32_t r = b.emit(IrOp::AtomicBufAdd, IrType::U32, ValueUniformity::Divergent,
                                         {vaddr, val}, d.offset / 4u);
                     b.write_vgpr(d.dst, r, IrType::U32);
                     b.mark_output_written();
                 } else {
-                    const uint32_t cnt = (d.opcode == mubuf_op::BUFFER_LOAD_DWORDX4 || d.opcode == mubuf_op::BUFFER_LOAD_FORMAT_XYZW) ? 4u :
-                                         (d.opcode == mubuf_op::BUFFER_LOAD_DWORDX2 || d.opcode == mubuf_op::BUFFER_LOAD_FORMAT_XY) ? 2u : 1u;
-                    for (uint32_t k = 0; k < cnt; ++k) {
-                        uint32_t r = b.emit(IrOp::LoadInputU32, IrType::U32, ValueUniformity::Divergent,
-                                            {vaddr}, (d.offset / 4u) + k, 0.0f, false, 0u);
-                        b.write_vgpr(static_cast<uint16_t>(d.dst + k), r, IrType::U32);
+                    uint32_t cnt = 1u;
+                    if (d.cls == IsaClass::MTBUF) {
+                        cnt = (d.opcode == mtbuf_op::TBUFFER_LOAD_FORMAT_XYZW) ? 4u :
+                              (d.opcode == mtbuf_op::TBUFFER_LOAD_FORMAT_XYZ)  ? 3u :
+                              (d.opcode == mtbuf_op::TBUFFER_LOAD_FORMAT_XY)   ? 2u : 1u;
+                    } else {
+                        cnt = (d.opcode == mubuf_op::BUFFER_LOAD_DWORDX4 || d.opcode == mubuf_op::BUFFER_LOAD_FORMAT_XYZW) ? 4u :
+                              (d.opcode == mubuf_op::BUFFER_LOAD_DWORDX3 || d.opcode == mubuf_op::BUFFER_LOAD_FORMAT_XYZ)  ? 3u :
+                              (d.opcode == mubuf_op::BUFFER_LOAD_DWORDX2 || d.opcode == mubuf_op::BUFFER_LOAD_FORMAT_XY)   ? 2u : 1u;
+                    }
+                    if (meta.stage == ShaderStage::Vertex && !vs_attr_offsets.empty()) {
+                        uint32_t loc = 0u;
+                        for (size_t ai = 0u; ai < vs_attr_offsets.size(); ++ai) {
+                            if (vs_attr_offsets[ai] == d.offset) {
+                                loc = static_cast<uint32_t>(ai);
+                                break;
+                            }
+                        }
+                        if (loc < 16u) {
+                            mod.vtx_attr_mask |= (1u << loc);
+                        }
+                        for (uint32_t k = 0; k < cnt; ++k) {
+                            uint32_t r = b.emit(IrOp::LoadVertexAttr, IrType::F32, ValueUniformity::Divergent,
+                                                {}, loc, 0.0f, false, k);
+                            b.write_vgpr(static_cast<uint16_t>(d.dst + k), r, IrType::F32);
+                        }
+                    } else {
+                        mod.uses_storage_buffer = true;
+                        for (uint32_t k = 0; k < cnt; ++k) {
+                            uint32_t r = b.emit(IrOp::LoadInputU32, IrType::U32, ValueUniformity::Divergent,
+                                                {vaddr}, (d.offset / 4u) + k, 0.0f, false, 0u);
+                            b.write_vgpr(static_cast<uint16_t>(d.dst + k), r, IrType::U32);
+                        }
                     }
                 }
                 break;
@@ -1422,9 +1592,26 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
                     if (meta.stage == ShaderStage::Pixel && d.opcode == mimg_op::IMAGE_SAMPLE) {
                         mod.uses_wqm = true;
                     }
-                    const uint32_t uv = b.read_src_f32(d.src[0], false, 0u);
-                    uint32_t r = b.emit(IrOp::ImageSample, IrType::F32, ValueUniformity::Divergent, {uv});
-                    b.write_vgpr(d.dst, r, IrType::F32);
+                    const uint16_t base_v = (d.src[0] >= reg_code::VGPR_BASE)
+                        ? static_cast<uint16_t>(d.src[0] - reg_code::VGPR_BASE)
+                        : 0u;
+                    const uint32_t u = b.read_vgpr_f32(base_v);
+                    const uint32_t v = b.read_vgpr_f32(static_cast<uint16_t>(base_v + 1u));
+                    const uint32_t tex_slot =
+                        (b.get_sgpr_kind(d.srsrc) == IrBuilder::SgprKind::TexSrvDesc)
+                            ? (b.get_sgpr_slot(d.srsrc) & 7u)
+                            : 0u;
+                    mod.tex_slot_mask |= (1u << tex_slot);
+                    uint32_t mask = (d.dmask != 0u) ? (d.dmask & 0xFu) : 1u;
+                    uint32_t out_off = 0u;
+                    for (uint32_t ch = 0u; ch < 4u; ++ch) {
+                        if ((mask & (1u << ch)) != 0u) {
+                            uint32_t r = b.emit(IrOp::ImageSample, IrType::F32, ValueUniformity::Divergent,
+                                                {u, v}, tex_slot, 0.0f, false, ch);
+                            b.write_vgpr(static_cast<uint16_t>(d.dst + out_off), r, IrType::F32);
+                            ++out_off;
+                        }
+                    }
                 }
                 break;
             }
@@ -1454,12 +1641,24 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
             }
 
             case IsaClass::EXP: {
-                const uint32_t c0 = b.read_src_f32(d.src[0], false, 0u);
-                const uint32_t c1 = b.read_src_f32(d.src[1], false, 0u);
-                const uint32_t c2 = b.read_src_f32(d.src[2], false, 0u);
-                const uint32_t c3 = b.read_src_f32(d.src[3], false, 0u);
-                b.emit(IrOp::Export, IrType::Void, ValueUniformity::Divergent,
-                       {c0, c1, c2, c3}, d.exp_target, 0.0f, false, d.dmask);
+                if (meta.stage == ShaderStage::Vertex && d.exp_target >= 32u && d.exp_target < 48u) {
+                    mod.out_param_mask |= (1u << (d.exp_target - 32u));
+                } else if (meta.stage == ShaderStage::Pixel && d.exp_target < 8u) {
+                    mod.mrt_mask |= (1u << d.exp_target);
+                }
+                if (d.exp_compr) {
+                    const uint32_t u01 = b.read_src_u32(d.src[0], false, 0u);
+                    const uint32_t u23 = b.read_src_u32(d.src[1], false, 0u);
+                    b.emit(IrOp::Export, IrType::Void, ValueUniformity::Divergent,
+                           {u01, u23, u01, u23}, d.exp_target, 0.0f, false, (d.dmask & 0xFu) | 0x10u);
+                } else {
+                    const uint32_t c0 = b.read_src_f32(d.src[0], false, 0u);
+                    const uint32_t c1 = b.read_src_f32(d.src[1], false, 0u);
+                    const uint32_t c2 = b.read_src_f32(d.src[2], false, 0u);
+                    const uint32_t c3 = b.read_src_f32(d.src[3], false, 0u);
+                    b.emit(IrOp::Export, IrType::Void, ValueUniformity::Divergent,
+                           {c0, c1, c2, c3}, d.exp_target, 0.0f, false, d.dmask & 0xFu);
+                }
                 b.mark_output_written();
                 break;
             }

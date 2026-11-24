@@ -370,7 +370,7 @@ bool decode_gfx103_stream(const uint32_t* words,
                 /* MTBUF */
                 inst.cls = IsaClass::MTBUF;
                 inst.tbuf_format = static_cast<uint8_t>((w0 >> 19u) & 0x7Fu);
-                inst.opcode = static_cast<uint16_t>((w0 >> 15u) & 0xFu);
+                inst.opcode = static_cast<uint16_t>((w0 >> 16u) & 0x7u);
                 inst.glc = ((w0 >> 14u) & 1u) != 0u;
                 inst.offset = w0 & 0xFFFu;
                 inst.srsrc = static_cast<uint8_t>(((w1 >> 16u) & 0x1Fu) * 4u);

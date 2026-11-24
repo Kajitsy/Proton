@@ -90,6 +90,24 @@ LiftResult Rdna2Lifter::lift_isa(const Rdna2ShaderMetadata& meta,
     res.metadata = meta;
     res.container_kind = meta.container_kind;
 
+    /* 0. Skip Xbox Scarlett 36-byte pre-header (d580.... .. s_inst_prefetch 0x3) if present */
+    if (isa_words != nullptr && word_count > 10u &&
+        ((isa_words[0] >> 16u) == 0xD580u) &&
+        isa_words[6] == 0xD5800000u &&
+        isa_words[9] == 0xBFA00003u) {
+        isa_words += 9u;
+        word_count -= 9u;
+        /* Trim trailing s_code_end (0xBF9F0000) + Scarlett footer after s_endpgm (0xBF810000) */
+        for (size_t k = 0u; k + 2u < word_count; ++k) {
+            if (isa_words[k] == 0xBF810000u &&
+                ((isa_words[k + 1u] == 0xBF9F0000u && isa_words[k + 2u] == 0xBF9F0000u) ||
+                 (isa_words[k + 1u] == 0x00000000u && isa_words[k + 2u] == 0x00000000u))) {
+                word_count = k + 1u;
+                break;
+            }
+        }
+    }
+
     /* 1. Decode GFX10.3 binary instruction stream */
     std::vector<DecodedInst> decoded;
     uint32_t err_pc = 0u;

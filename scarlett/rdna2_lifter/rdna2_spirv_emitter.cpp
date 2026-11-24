@@ -66,6 +66,7 @@ constexpr uint16_t OpDecorate                        = 71;
 constexpr uint16_t OpMemberDecorate                  = 72;
 constexpr uint16_t OpCompositeConstruct              = 80;
 constexpr uint16_t OpCompositeExtract                = 81;
+constexpr uint16_t OpImageSampleImplicitLod          = 87;
 constexpr uint16_t OpImageSampleExplicitLod          = 88;
 constexpr uint16_t OpImageFetch                      = 95;
 constexpr uint16_t OpImageRead                       = 98;
@@ -446,18 +447,46 @@ public:
             mod_.meta.stage != ShaderStage::Compute &&
             mod_.rt_strategy != RtStrategy::BdaBvh4Fallback;
 
-        /* Storage Buffers (binding 0 = input SSBO, binding 1 = output SSBO) */
+        /* Storage Buffers (binding 0 = input SSBO, binding 1 = output SSBO) or Graphics CBV slots */
+        const bool is_gfx_with_explicit_cbv =
+            (mod_.meta.stage != ShaderStage::Compute &&
+             mod_.rt_strategy != RtStrategy::BdaBvh4Fallback &&
+             mod_.cbv_slot_mask != 0u);
         const bool need_ssbo =
             !suppress_rogue_descriptors &&
             (mod_.uses_storage_buffer ||
              mod_.rt_strategy == RtStrategy::BdaBvh4Fallback ||
              mod_.meta.stage == ShaderStage::Compute);
-        if (need_ssbo) {
+        if (need_ssbo && is_gfx_with_explicit_cbv) {
+            setup_ssbo_types();
+            for (uint32_t s = 0u; s < 8u; ++s) {
+                if ((mod_.cbv_slot_mask & (1u << s)) != 0u) {
+                    var_cbv_ssbo_[s] = alloc_id();
+                    push_inst(globals_, spv::OpVariable, {p_ssbo_struct_, var_cbv_ssbo_[s], spv::ScStorageBuffer});
+                    push_inst(decos_, spv::OpDecorate, {var_cbv_ssbo_[s], spv::DecDescriptorSet, 0u});
+                    push_inst(decos_, spv::OpDecorate, {var_cbv_ssbo_[s], spv::DecBinding, s});
+                    push_inst(decos_, spv::OpDecorate, {var_cbv_ssbo_[s], spv::DecNonWritable});
+                    add_interface(var_cbv_ssbo_[s]);
+                }
+            }
+        } else if (need_ssbo) {
             setup_ssbo_globals();
         }
 
         /* Sampled / Storage images */
-        if (!suppress_rogue_descriptors && mod_.uses_image_sample) {
+        if (!suppress_rogue_descriptors && mod_.tex_slot_mask != 0u) {
+            setup_sampled_image_types();
+            uint32_t p_si = make_ptr(spv::ScUniformConstant, t_sampled_img_);
+            for (uint32_t s = 0u; s < 8u; ++s) {
+                if ((mod_.tex_slot_mask & (1u << s)) != 0u) {
+                    var_tex_2d_[s] = alloc_id();
+                    push_inst(globals_, spv::OpVariable, {p_si, var_tex_2d_[s], spv::ScUniformConstant});
+                    push_inst(decos_, spv::OpDecorate, {var_tex_2d_[s], spv::DecDescriptorSet, 0u});
+                    push_inst(decos_, spv::OpDecorate, {var_tex_2d_[s], spv::DecBinding, 8u + s});
+                    add_interface(var_tex_2d_[s]);
+                }
+            }
+        } else if (!suppress_rogue_descriptors && mod_.uses_image_sample) {
             setup_sampled_image_global();
         }
         if (!suppress_rogue_descriptors && mod_.uses_image_storage) {
@@ -666,7 +695,7 @@ private:
         return spv::EmGLCompute;
     }
 
-    void setup_ssbo_globals() {
+    void setup_ssbo_types() {
         t_rt_u32_ = alloc_id();
         push_inst(types_, spv::OpTypeRuntimeArray, {t_rt_u32_, t_u32_});
         push_inst(decos_, spv::OpDecorate, {t_rt_u32_, spv::DecArrayStride, 4u});
@@ -678,6 +707,10 @@ private:
 
         p_ssbo_struct_ = make_ptr(spv::ScStorageBuffer, t_ssbo_struct_);
         p_ssbo_u32_ = make_ptr(spv::ScStorageBuffer, t_u32_);
+    }
+
+    void setup_ssbo_globals() {
+        setup_ssbo_types();
 
         var_in_ssbo_ = alloc_id();
         push_inst(globals_, spv::OpVariable, {p_ssbo_struct_, var_in_ssbo_, spv::ScStorageBuffer});
@@ -693,12 +726,16 @@ private:
         add_interface(var_out_ssbo_);
     }
 
-    void setup_sampled_image_global() {
+    void setup_sampled_image_types() {
         t_img_2d_ = alloc_id();
         /* Dim=2D(1), Depth=0, Arrayed=0, MS=0, Sampled=1, Format=Unknown(0) */
         push_inst(types_, spv::OpTypeImage, {t_img_2d_, t_f32_, 1u, 0u, 0u, 0u, 1u, 0u});
         t_sampled_img_ = alloc_id();
         push_inst(types_, spv::OpTypeSampledImage, {t_sampled_img_, t_img_2d_});
+    }
+
+    void setup_sampled_image_global() {
+        setup_sampled_image_types();
         uint32_t p_si = make_ptr(spv::ScUniformConstant, t_sampled_img_);
         var_sampled_img_ = alloc_id();
         push_inst(globals_, spv::OpVariable, {p_si, var_sampled_img_, spv::ScUniformConstant});
@@ -811,11 +848,30 @@ private:
                 push_inst(decos_, spv::OpDecorate, {var_vtx_id_, spv::DecBuiltIn, spv::BiVertexIndex});
                 add_interface(var_vtx_id_);
 
+                uint32_t p_in_v4 = make_ptr(spv::ScInput, t_v4f32_);
+                for (uint32_t loc = 0u; loc < 16u; ++loc) {
+                    if ((mod_.vtx_attr_mask & (1u << loc)) != 0u) {
+                        var_in_vtx_[loc] = alloc_id();
+                        push_inst(globals_, spv::OpVariable, {p_in_v4, var_in_vtx_[loc], spv::ScInput});
+                        push_inst(decos_, spv::OpDecorate, {var_in_vtx_[loc], spv::DecLocation, loc});
+                        add_interface(var_in_vtx_[loc]);
+                    }
+                }
+
                 uint32_t p_out_v4 = make_ptr(spv::ScOutput, t_v4f32_);
                 var_out_pos_ = alloc_id();
                 push_inst(globals_, spv::OpVariable, {p_out_v4, var_out_pos_, spv::ScOutput});
                 push_inst(decos_, spv::OpDecorate, {var_out_pos_, spv::DecBuiltIn, spv::BiPosition});
                 add_interface(var_out_pos_);
+
+                for (uint32_t loc = 0u; loc < 16u; ++loc) {
+                    if ((mod_.out_param_mask & (1u << loc)) != 0u) {
+                        var_out_param_[loc] = alloc_id();
+                        push_inst(globals_, spv::OpVariable, {p_out_v4, var_out_param_[loc], spv::ScOutput});
+                        push_inst(decos_, spv::OpDecorate, {var_out_param_[loc], spv::DecLocation, loc});
+                        add_interface(var_out_param_[loc]);
+                    }
+                }
                 break;
             }
 
@@ -827,16 +883,28 @@ private:
                 push_inst(decos_, spv::OpDecorate, {var_frag_coord_, spv::DecBuiltIn, spv::BiFragCoord});
                 add_interface(var_frag_coord_);
 
-                var_in_attr0_ = alloc_id();
-                push_inst(globals_, spv::OpVariable, {p_in_v4, var_in_attr0_, spv::ScInput});
-                push_inst(decos_, spv::OpDecorate, {var_in_attr0_, spv::DecLocation, 0u});
-                add_interface(var_in_attr0_);
+                const uint32_t attr_mask = mod_.in_attr_mask | 1u;
+                for (uint32_t loc = 0u; loc < 16u; ++loc) {
+                    if ((attr_mask & (1u << loc)) != 0u) {
+                        var_in_attr_[loc] = alloc_id();
+                        push_inst(globals_, spv::OpVariable, {p_in_v4, var_in_attr_[loc], spv::ScInput});
+                        push_inst(decos_, spv::OpDecorate, {var_in_attr_[loc], spv::DecLocation, loc});
+                        add_interface(var_in_attr_[loc]);
+                    }
+                }
+                var_in_attr0_ = var_in_attr_[0];
 
                 uint32_t p_out_v4 = make_ptr(spv::ScOutput, t_v4f32_);
-                var_out_color0_ = alloc_id();
-                push_inst(globals_, spv::OpVariable, {p_out_v4, var_out_color0_, spv::ScOutput});
-                push_inst(decos_, spv::OpDecorate, {var_out_color0_, spv::DecLocation, 0u});
-                add_interface(var_out_color0_);
+                const uint32_t mrt_mask = mod_.mrt_mask | 1u;
+                for (uint32_t mrt = 0u; mrt < 8u; ++mrt) {
+                    if ((mrt_mask & (1u << mrt)) != 0u) {
+                        var_out_color_[mrt] = alloc_id();
+                        push_inst(globals_, spv::OpVariable, {p_out_v4, var_out_color_[mrt], spv::ScOutput});
+                        push_inst(decos_, spv::OpDecorate, {var_out_color_[mrt], spv::DecLocation, mrt});
+                        add_interface(var_out_color_[mrt]);
+                    }
+                }
+                var_out_color0_ = var_out_color_[0];
                 break;
             }
 
@@ -1666,6 +1734,34 @@ private:
                     res = const_bool(inst.imm_u32 != 0u);
                     break;
 
+                case IrOp::LoadVertexAttr: {
+                    const uint32_t loc = inst.imm_u32 & 15u;
+                    const uint32_t comp = inst.imm2_u32 & 3u;
+                    if (var_in_vtx_[loc] != 0u) {
+                        uint32_t vec = alloc_id();
+                        push_inst(body_, spv::OpLoad, {t_v4f32_, vec, var_in_vtx_[loc]});
+                        res = alloc_id();
+                        push_inst(body_, spv::OpCompositeExtract, {t_f32_, res, vec, comp});
+                    } else {
+                        res = const_f32((comp == 3u) ? 1.0f : 0.0f);
+                    }
+                    break;
+                }
+
+                case IrOp::LoadCbvU32: {
+                    const uint32_t slot = inst.imm2_u32 & 7u;
+                    const uint32_t ssbo = (var_cbv_ssbo_[slot] != 0u) ? var_cbv_ssbo_[slot] : var_in_ssbo_;
+                    if (ssbo != 0u) {
+                        uint32_t p = alloc_id();
+                        push_inst(body_, spv::OpAccessChain, {p_ssbo_u32_, p, ssbo, const_u32(0u), const_u32(inst.imm_u32)});
+                        res = alloc_id();
+                        push_inst(body_, spv::OpLoad, {t_u32_, res, p});
+                    } else {
+                        res = const_u32(0u);
+                    }
+                    break;
+                }
+
                 case IrOp::LoadInputU32:
                 case IrOp::LoadInputF32: {
                     if (var_in_ssbo_ != 0u) {
@@ -1791,18 +1887,26 @@ private:
                 }
 
                 case IrOp::ImageSample: {
-                    if (var_sampled_img_ != 0u) {
+                    const uint32_t tex_slot = inst.imm_u32 & 7u;
+                    const uint32_t tex_var = (var_tex_2d_[tex_slot] != 0u) ? var_tex_2d_[tex_slot] : var_sampled_img_;
+                    if (tex_var != 0u) {
                         uint32_t u = arg(inst, 0, IrType::F32);
+                        uint32_t v = (inst.arg_count >= 2u) ? arg(inst, 1, IrType::F32) : u;
                         uint32_t si = alloc_id();
-                        push_inst(body_, spv::OpLoad, {t_sampled_img_, si, var_sampled_img_});
+                        push_inst(body_, spv::OpLoad, {t_sampled_img_, si, tex_var});
                         uint32_t uv = alloc_id();
-                        push_inst(body_, spv::OpCompositeConstruct, {t_v2f32_, uv, u, u});
+                        push_inst(body_, spv::OpCompositeConstruct, {t_v2f32_, uv, u, v});
                         uint32_t rgba = alloc_id();
-                        /* ImageOperands::Lod = 0x2 */
-                        push_inst(body_, spv::OpImageSampleExplicitLod,
-                                  {t_v4f32_, rgba, si, uv, 0x2u, const_f32(0.0f)});
+                        if (mod_.meta.stage == ShaderStage::Pixel) {
+                            push_inst(body_, spv::OpImageSampleImplicitLod,
+                                      {t_v4f32_, rgba, si, uv});
+                        } else {
+                            /* ImageOperands::Lod = 0x2 */
+                            push_inst(body_, spv::OpImageSampleExplicitLod,
+                                      {t_v4f32_, rgba, si, uv, 0x2u, const_f32(0.0f)});
+                        }
                         res = alloc_id();
-                        push_inst(body_, spv::OpCompositeExtract, {t_f32_, res, rgba, 0u});
+                        push_inst(body_, spv::OpCompositeExtract, {t_f32_, res, rgba, inst.imm2_u32 & 3u});
                     } else {
                         res = const_f32(1.0f);
                     }
@@ -1848,9 +1952,11 @@ private:
                 }
 
                 case IrOp::InterpAttr: {
-                    if (var_in_attr0_ != 0u) {
+                    const uint32_t attr_var = var_in_attr_[inst.imm_u32 & 15u];
+                    const uint32_t src_var = (attr_var != 0u) ? attr_var : var_in_attr0_;
+                    if (src_var != 0u) {
                         uint32_t attr = alloc_id();
-                        push_inst(body_, spv::OpLoad, {t_v4f32_, attr, var_in_attr0_});
+                        push_inst(body_, spv::OpLoad, {t_v4f32_, attr, src_var});
                         res = alloc_id();
                         push_inst(body_, spv::OpCompositeExtract, {t_f32_, res, attr, inst.imm2_u32 & 3u});
                     } else {
@@ -1860,13 +1966,47 @@ private:
                 }
 
                 case IrOp::Export: {
-                    uint32_t c0 = arg(inst, 0, IrType::F32);
-                    uint32_t c1 = arg(inst, 1, IrType::F32);
-                    uint32_t c2 = arg(inst, 2, IrType::F32);
-                    uint32_t c3 = arg(inst, 3, IrType::F32);
-                    uint32_t vec = alloc_id();
-                    push_inst(body_, spv::OpCompositeConstruct, {t_v4f32_, vec, c0, c1, c2, c3});
+                    uint32_t vec = 0u;
+                    if ((inst.imm2_u32 & 0x10u) != 0u) {
+                        uint32_t u01 = arg(inst, 0, IrType::U32);
+                        uint32_t u23 = arg(inst, 1, IrType::U32);
+                        uint32_t rg = alloc_id();
+                        uint32_t ba = alloc_id();
+                        push_inst(body_, spv::OpExtInst, {t_v2f32_, rg, glsl_ext_id_, spv::GlslUnpackHalf2x16, u01});
+                        push_inst(body_, spv::OpExtInst, {t_v2f32_, ba, glsl_ext_id_, spv::GlslUnpackHalf2x16, u23});
+                        uint32_t c0 = alloc_id(), c1 = alloc_id(), c2 = alloc_id(), c3 = alloc_id();
+                        push_inst(body_, spv::OpCompositeExtract, {t_f32_, c0, rg, 0u});
+                        push_inst(body_, spv::OpCompositeExtract, {t_f32_, c1, rg, 1u});
+                        push_inst(body_, spv::OpCompositeExtract, {t_f32_, c2, ba, 0u});
+                        push_inst(body_, spv::OpCompositeExtract, {t_f32_, c3, ba, 1u});
+                        vec = alloc_id();
+                        push_inst(body_, spv::OpCompositeConstruct, {t_v4f32_, vec, c0, c1, c2, c3});
+                    } else {
+                        uint32_t c0 = arg(inst, 0, IrType::F32);
+                        uint32_t c1 = arg(inst, 1, IrType::F32);
+                        uint32_t c2 = arg(inst, 2, IrType::F32);
+                        uint32_t c3 = arg(inst, 3, IrType::F32);
+                        vec = alloc_id();
+                        push_inst(body_, spv::OpCompositeConstruct, {t_v4f32_, vec, c0, c1, c2, c3});
+                    }
                     last_export_vec_ = vec;
+                    const uint32_t tgt = inst.imm_u32;
+                    if (mod_.meta.stage == ShaderStage::Vertex) {
+                        if (tgt == exp_target::POS0 && var_out_pos_ != 0u) {
+                            push_inst(body_, spv::OpStore, {var_out_pos_, vec});
+                            wrote_pos_ = true;
+                        } else if (tgt >= exp_target::PARAM0 && tgt < exp_target::PARAM0 + 16u) {
+                            uint32_t pv = var_out_param_[tgt - exp_target::PARAM0];
+                            if (pv != 0u) {
+                                push_inst(body_, spv::OpStore, {pv, vec});
+                            }
+                        }
+                    } else if (mod_.meta.stage == ShaderStage::Pixel) {
+                        if (tgt < 8u && var_out_color_[tgt] != 0u) {
+                            push_inst(body_, spv::OpStore, {var_out_color_[tgt], vec});
+                            if (tgt == 0u) wrote_color0_ = true;
+                        }
+                    }
                     break;
                 }
 
@@ -2545,13 +2685,20 @@ private:
 
         switch (exec_model) {
             case spv::EmVertex:
+                if (!wrote_pos_) {
+                    push_inst(body_, spv::OpStore, {var_out_pos_, out_vec});
+                }
+                push_inst(body_, spv::OpReturn, {});
+                break;
             case spv::EmTessellationEvaluation:
                 push_inst(body_, spv::OpStore, {var_out_pos_, out_vec});
                 push_inst(body_, spv::OpReturn, {});
                 break;
 
             case spv::EmFragment:
-                push_inst(body_, spv::OpStore, {var_out_color0_, out_vec});
+                if (!wrote_color0_) {
+                    push_inst(body_, spv::OpStore, {var_out_color0_, out_vec});
+                }
                 push_inst(body_, spv::OpReturn, {});
                 break;
 
@@ -2731,9 +2878,15 @@ private:
 
     /* Globals */
     uint32_t var_in_ssbo_{0}, var_out_ssbo_{0};
+    std::array<uint32_t, 8>  var_cbv_ssbo_{};
+    std::array<uint32_t, 8>  var_tex_2d_{};
     uint32_t var_sampled_img_{0}, var_stor_img_{0};
     uint32_t var_lds_{0}, var_wave64_lds_{0}, var_wave64_ballot_{0};
     uint32_t var_gid_{0}, var_lid_{0}, var_vtx_id_{0}, var_frag_coord_{0}, var_in_attr0_{0};
+    std::array<uint32_t, 16> var_in_vtx_{};
+    std::array<uint32_t, 16> var_out_param_{};
+    std::array<uint32_t, 16> var_in_attr_{};
+    std::array<uint32_t, 8>  var_out_color_{};
     uint32_t var_out_pos_{0}, var_out_color0_{0};
     uint32_t var_tess_outer_{0}, var_tess_inner_{0}, var_tess_coord_{0};
     uint32_t var_mesh_verts_{0}, var_mesh_prims_{0}, var_task_payload_{0};
@@ -2745,6 +2898,7 @@ private:
     uint32_t local_loop_ctr_{0};
     uint32_t lane_id_val_{0}, wave64_lane_idx_{0};
     uint32_t last_export_vec_{0}, last_stored_u32_{0};
+    bool     wrote_pos_{false}, wrote_color0_{false};
     bool     loop_broke_{false};
 };
 

@@ -48,6 +48,8 @@ enum class IrOp : uint16_t {
     ConstBool,
     LoadInputU32,       /* Read from SSBO input buffer[idx] (lane or uniform) */
     LoadInputF32,
+    LoadVertexAttr,     /* VS vertex input attribute (imm=location, imm2=component 0..3) */
+    LoadCbvU32,         /* Graphics CBV/SSBO load (imm=dword_offset, imm2=slot 0..7) */
     StoreOutputU32,     /* Write to SSBO output buffer[idx] */
     StoreOutputF32,
     LoadLdsU32,
@@ -217,6 +219,12 @@ struct IrModule {
     uint32_t loop_count{0};
     uint32_t branch_count{0};
     uint32_t max_lds_words{64};
+    uint32_t cbv_slot_mask{0};
+    uint32_t tex_slot_mask{0};
+    uint32_t vtx_attr_mask{0};
+    uint32_t out_param_mask{0};
+    uint32_t in_attr_mask{0};
+    uint32_t mrt_mask{0};
 
     /* Stage 2 & Stage 3 analysis outputs */
     FpClassAnalysisStats fp_stats{};
