@@ -1,28 +1,24 @@
 # Scarlett Teamwork Status
 
-Обновлено: 2026-11-24T16:54:00Z
+Обновлено: 2026-11-24T21:08:00Z
 
-## Что сделано (итерация 4: горячий патч `clzero` и динамическая трассировка)
-- `ccache` включен (`ENABLE_CCACHE := 1` в `build/Makefile`), инкрементальная сборка `scarlett` проходит за ~22–31s (`exit 0`).
-- Горячий патч `clzero_loop` в `scarlett/xgameruntime/xgameruntime_pe.c` сработал: число `0xc000001d` упало с `4615` до `24` строк (`[scarlett-veh] Patched clzero_loop` на `0x144e8aa70/90/b0/d0/f0`).
-- Прежний OOM-сбой `0x142219650` / `0x1406EB759` в 45-секундном прогоне R3 (с повторным использованием `/tmp/gta`) не воспроизвелся (`0` совпадений, в логе `16076` строк).
-- `PresentX` дошел до `frame=840` (`88` строк `[scarlett-presentx]`, `hr=0x00000000`), с ненулевым `p0va` (`0x1C610000` и `0x1E5C0000`, по `31.7 MiB`).
+## Что сделано (итерация 8: живая проверка M3 — реализация PSO, пересылка SetPipelineState/DrawInstanced и захват окна)
+- Прогон R3 (`45s`, `PROTON_XBOX_SCARLETT=1`, `PROTON_XBOX_SHADER_MODE=adaptive`, `/tmp/gta`, без `+module`) завершился по таймауту `45s` (`exit=124`, `19717` строк / `18825` после дедупликации в `/tmp/gta_scarlett_loop.log`) без `Unhandled exception` (`0` падений, `0` новых `.crash.log`; при завершении по `SIGTERM` в конце лога зафиксирована одна строка `virtual_setup_exception nested exception` на потоке `0184`).
+- **Реализация PSO (`[scarlett-pso]`, `78` залогированных вызовов до `seq=53248`)**:
+  - `slot=86`: `12/12` `real != 0`; `slot=55`: `43/43` `real != 0`; `slot=57`: `10/11` `real != 0` (`1` — `seq=35`, `spirv=0, real=0`); `slot=67`: `11/12` `real != 0` (`1` — `seq=53248`, `lhr=0x80830007`). Всего `76/78` `real != 0`, `0` падений `vkCreateGraphicsPipelines`, `[scarlett-shader] lift_container failed`: `8` (`0xa05c0203` / `0xa05c0202`, дошли до `#3800`).
+- **Пересылка `ID3D12GraphicsCommandListX` (`[scarlett-cl]`, `128` дедуп. строк)**:
+  - `SetPipelineState` (`9`, до `seq=1536`) и `DrawInstanced` (`9`, до `seq=1536`) успешно пересланы в `clm->real_obj`, `no_real_pso`: `0`. Также пересланы `SetDescriptorHeaps` (`9`), `SetGraphicsRootSignature` (`9`), `OMSetRenderTargets` (`9`), `OMSetDepthBounds` (`9`), `IASetPrimitiveTopology` (`8`), `ClearRenderTargetView` (`7`), `OMSetBlendFactor` (`7`), `RSSetViewports` (`7`), `RSSetScissorRects` (`7`); `XboxSlot72/74/75` обработаны как `xbox_noop`.
+  - **Выявленный пробел привязки**: все `13` залогированных вызовов `SetGraphicsRootDescriptorTable` (`slot=36`, `seq=1..1280`, `BaseDescriptor=0x0FA8EF00`..`0x1146DEA0`) отброшены с `(bad_gpu_desc)` в `d3d12_xs_pe.c:3625` (`d3d12xs_translate_gpu_desc_handle == 0`).
+- **`PresentX` и захват окна**:
+  - Окно `steam_proton` (`1490x802` при `at=[-907,-30]`, X11 ID `0x7200001`, `xwayland=true`) захвачено до завершения 45s в `/tmp/gta_iter8_grim.png` и `/tmp/gta_iter8_x11.png`: содержимое остаётся пустым (`x11` `583x772` полностью чёрный `min=0 max=0 mean=0 stddev=0`; `grim` показывает тёмную подложку/верхнюю панель поверх рабочего стола, слева белая область за границей экрана `x<0`).
+  - `[scarlett-presentx]`: `frame=1..600` (`40` записей, `hr=0x00000000`); `[scarlett-readback]`: `18` раз (`ok`, `3840x2160 fmt=28 nz=0`); `[scarlett-presentx-wsi]`: `15` раз (`did_blit=1`, `nonzero_rgb=0/4224`).
 
-## Захват окна `Americas`
-- Окно `Americas` (`class='steam_proton'`, `ws=5`, геометрия `1610,48 1900x1022`, X11 `0x5800001`) захвачено во время работы игры:
-  - `/tmp/gta_iter4_x11.png`: пустой 1-битный PNG (`1900x1022`, `375` байт).
-  - `/tmp/gta_iter4_grim.png`: RGB PNG `1900x1022` (`502871` байт, `659` уникальных цветов, min `[1, 0, 0]`, max `[179, 151, 148]`). Поверхность окна прозрачна/неотрисована (виден размытый фон рабочего стола через Hyprland blur), так как поток `01a0` упал на `Frame: 0`.
+## Динамическая трассировка `/tmp/gta_scarlett_loop.log` (дедуп.)
+- `xmem.dll`: `17`; `dstorage_xs`: `193`; `AcpHal`: `4`; `XApu`: `1`; `xg_xs` / `xgameruntime` / `XCRDAPI` / `Bink2Scarlett` / `GameInput`: `0`.
+- `d3d12_xs.dll`: `CreatePlacedResourceX` (`19`, включая `p0va=0x216A0000`/`0x23650000` с `created-va0`), `CreateRootSignature` (`41`), `CreateCommandList` (`15`), `WaitFrameEventX` (`18`), `FlushGpuLabels` (`17`), `[scarlett-sampler]` (`8`), `[scarlett-veh]` (`13`).
+- Ошибки `vkd3d`/`d3d12`/`vulkan` (`err:`): `0`; `VK_ERROR_DEVICE_LOST`: `0`. Прочие `err:`: `8` (`winebth` `c0000142` x1, `openxr` `0x2` x6, финальный `nested exception` при `SIGTERM` x1).
 
-## Динамическая трассировка `/tmp/gta_scarlett_loop.log`
-- `[scarlett-xmem-alloc]`: `10` вызовов (резервы `24 GiB`, `0x89700000` = `2199 MiB`, `0x185c00000` = `6236 MiB`), `status=0x0`; `[scarlett-xmem-free]` / `phys`: `0`.
-- `CreatePlacedResourceX`: `19` записей; `ID3D12ResourceX::Release` (`[scarlett-d3d12-res-free]`): `0`.
-- `ID3D12FenceX::Signal`: `33` записи (до `0x6a4`); `GetCompletedValue`: `4` записи (до `0x6ad`); `SetEventOnCompletion`: `0`.
-- `WriteGpuMemoryLabelX`: `19` записей (~1750+ вызовов до порога `512` на одном командном списке); `FlushGpuLabels`: `12` записей (`seq=1..12`).
-- `GetFrameStatisticsX`: `15` записей (до `frame=0x348` = `840`).
-- `dstorage_xs`: `188` записей (`OpenFile` `59`, `CreateQueue` `17`, `CreateStatusArray` `17`, `EnqueueRequest` `84`, `Submit` `9`, `EnqueueSignal`/`EnqueueSetEvent` `0`).
-
-## Новый блокер (падение внутри `d3d12_xs.dll+0xD8A3`)
-- На строке `L14920` поток `01a0` получил `EXCEPTION_ACCESS_VIOLATION` (`0xc0000005`, `info[1]=FFFFFFFFFFFFFFFF`) в `d3d12_xs.dll+0xD8A3` (`d3d12xs_cmd_list_flush_labels`), вызванной из `d3d12_xs.dll+0x4FD0` (`cmd_list_slot71_write_gpu_memory_label_x`, при `label_write_count >= 512`).
-- Стек: `d3d12_xs.dll+0xD8A3` -> `d3d12_xs.dll+0x4FD0` -> `game_scarlett_master.exe+0x04ED46AA` -> `+0x02484284` -> `+0x0248412E` -> `+0x00CE03DF` -> `+0x00120CF6` -> `+0x04FD1B76` -> `+0x023CF247` -> `+0x02215ECA`.
-- Причина: `FlushGpuLabels` записал `label_writes[0..11]` (`0x138ac00008..0x138ac0009c`), а в `label_writes[12]` (смещение `+0x118` внутри `ID3D12GraphicsCommandListX`, `cl=0x6ffff9245380`) оказались мусорные/чужие байты `gpu_va=0xc2c1c0bf00000001` (`rax`) и `value=0xc6c5c4c3` (`r8`) — вероятно, `label_writes` пересекается с inline-полями Xbox `ID3D12GraphicsCommandListX` за пределами `+0x50` (или не вынесен во внешнюю таблицу).
-- Breakpad сохранил `t:\1cfab532-629b-469f-beb3-c02f72c3592f.dmp` и `t:\game_scarlett_master-20261124-195032-332.crash.log` (`Game State: Game Init`, `Frame: 0`, `TileHeap: used (8Mb) - total (6236Mb)`).
+## Активные блокеры M3 (почему `nz=0` при `real != 0` PSO)
+1. **`SetGraphicsRootDescriptorTable` `(bad_gpu_desc)` (`13/13` вызовов в `d3d12_xs_pe.c:3625`)**: `d3d12xs_translate_gpu_desc_handle()` возвращает `0` для GPU-адресов дескрипторов (`0x0FA8EF00`..`0x1146DEA0`), из-за чего таблицы дескрипторов ресурсов/CBV не пересылаются перед `DrawInstanced`.
+2. **Отсутствие вызовов `Dispatch` / `ResourceBarrier` / `IASetVertexBuffers` / `IASetIndexBuffer` / `Close` в `[scarlett-cl]` и `(created-va0)` на буферах `PresentX`** (`p0va=0x216A0000`/`0x23650000`): привязка GPU VA и барьеров/закрытия командных списков требует проверки перед следующим прогоном.
+3. **Единичные пропуски шейдеров**: `8` ошибок `[scarlett-shader] lift_container failed` (`0xa05c0203` / `0xa05c0202`) и `2` `real=0` PSO (`slot=57 seq=35`, `slot=67 seq=53248`).
