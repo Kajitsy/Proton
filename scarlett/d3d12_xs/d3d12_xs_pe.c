@@ -351,6 +351,8 @@ static void d3d12xs_pe_free_mem(void *ptr) {
     }
 }
 
+static bool d3d12xs_pe_unix_check_mem(uint64_t addr, size_t bytes, bool check_write);
+
 static bool d3d12xs_pe_is_readable(const void *ptr, size_t bytes) {
     uint64_t addr = (uint64_t)(uintptr_t)ptr;
     if (addr < UINT64_C(0x10000) || addr > UINT64_C(0x00007FFFFFFFFFFF) ||
@@ -363,15 +365,29 @@ static bool d3d12xs_pe_is_readable(const void *ptr, size_t bytes) {
     if (vq == NULL) {
         return true;
     }
-    scarlett_mbi_t mbi;
-    d3d12xs_pe_zero(&mbi, sizeof(mbi));
-    if (vq(ptr, &mbi, sizeof(mbi)) < sizeof(mbi)) {
-        return false;
+    uint64_t cur = addr;
+    uint64_t target_end = addr + (uint64_t)bytes;
+    for (uint32_t step = 0u; step < 16u && cur < target_end; ++step) {
+        scarlett_mbi_t mbi;
+        d3d12xs_pe_zero(&mbi, sizeof(mbi));
+        if (vq((const void *)(uintptr_t)cur, &mbi, sizeof(mbi)) < sizeof(mbi)) {
+            return d3d12xs_pe_unix_check_mem(addr, bytes, false);
+        }
+        if (mbi.State == 0x10000u) {
+            /* MEM_FREE in Wine tree may still be mmap-backed by xmem_unix.so */
+            return d3d12xs_pe_unix_check_mem(addr, bytes, false);
+        }
+        if (mbi.State != 0x1000u || (mbi.Protect & 0x101u) != 0u ||
+            (mbi.Protect & 0xEEu) == 0u || mbi.RegionSize == 0u) {
+            return false;
+        }
+        uint64_t reg_end = mbi.BaseAddress + mbi.RegionSize;
+        if (reg_end <= cur) {
+            return false;
+        }
+        cur = reg_end;
     }
-    if (mbi.State != 0x1000u || (mbi.Protect & 0x101u) != 0u || (mbi.Protect & 0xEEu) == 0u) {
-        return false;
-    }
-    return (addr + bytes) <= (mbi.BaseAddress + mbi.RegionSize);
+    return cur >= target_end;
 }
 
 static bool d3d12xs_pe_is_writable_va(uint64_t va, size_t bytes) {
@@ -399,7 +415,10 @@ static bool d3d12xs_pe_is_writable_va(uint64_t va, size_t bytes) {
         scarlett_mbi_t mbi;
         d3d12xs_pe_zero(&mbi, sizeof(mbi));
         if (vq((const void *)(uintptr_t)cur, &mbi, sizeof(mbi)) < sizeof(mbi)) {
-            return false;
+            return d3d12xs_pe_unix_check_mem(va, bytes, true);
+        }
+        if (mbi.State == 0x10000u) {
+            return d3d12xs_pe_unix_check_mem(va, bytes, true);
         }
         if (mbi.State != 0x1000u || (mbi.Protect & 0x101u) != 0u ||
             (mbi.Protect & 0xCCu) == 0u || mbi.RegionSize == 0u) {
@@ -796,6 +815,18 @@ static inline int32_t d3d12xs_pe_unix_call(uint32_t opcode, void *params) {
     return g_d3d12xs_unix_bridge(opcode, params);
 }
 
+#endif
+
+#if defined(_WIN32) || defined(__MINGW32__)
+static bool d3d12xs_pe_unix_check_mem(uint64_t addr, size_t bytes, bool check_write) {
+    scarlett_d3d12xs_check_mem_params_t p;
+    d3d12xs_pe_zero(&p, sizeof(p));
+    p.addr = addr;
+    p.size = (uint64_t)bytes;
+    p.check_write = check_write ? 1u : 0u;
+    int32_t rc = d3d12xs_pe_unix_call(SCARLETT_D3D12XS_UNIX_CHECK_MEM, &p);
+    return scarlett_succeeded(rc) && scarlett_succeeded(p.out_status) && p.out_ok != 0u;
+}
 #endif
 
 /* ============================================================================
@@ -2477,18 +2508,23 @@ static void d3d12xs_pm4_assign_slice(
     if (base == g_pm4_fallback_sink) {
         cl->pBegin = g_pm4_fallback_sink;
         cl->pCurrent = g_pm4_fallback_sink;
-        cl->pEnd = g_pm4_fallback_sink + sizeof(g_pm4_fallback_sink) - 4096u;
+        cl->pEnd = g_pm4_fallback_sink;
+        if (clm != NULL) {
+            clm->bound_pm4_begin = cl->pBegin;
+            clm->bound_pm4_end = g_pm4_fallback_sink + sizeof(g_pm4_fallback_sink) - 4096u;
+        }
     } else {
         uint8_t *slice = base + (idx % SCARLETT_D3D12XS_MAX_COM_CMD_LISTS) * SCARLETT_D3D12XS_PM4_SLICE_BYTES;
         cl->pBegin = slice;
         cl->pCurrent = slice;
-        cl->pEnd = slice + SCARLETT_D3D12XS_PM4_SLICE_BYTES - 4096u;
+        /* Set pEnd == pCurrent so inline PM4 fastpaths route through COM vtable slots */
+        cl->pEnd = slice;
+        if (clm != NULL) {
+            clm->bound_pm4_begin = cl->pBegin;
+            clm->bound_pm4_end = slice + SCARLETT_D3D12XS_PM4_SLICE_BYTES - 4096u;
+        }
     }
     cl->reserved_chunk = 0u;
-    if (clm != NULL) {
-        clm->bound_pm4_begin = cl->pBegin;
-        clm->bound_pm4_end = cl->pEnd;
-    }
 }
 
 static inline bool d3d12xs_is_cmd_list_iid(const scarlett_guid_t *riid) {
@@ -2700,11 +2736,20 @@ static void d3d12xs_cmd_list_record_label(
     clm->label_writes[idx].reserved = 0u;
 }
 
+static void *d3d12xs_pso_get_real(const void *ptr);
+static void d3d12xs_cl_log(
+    const char *op,
+    uint32_t xbox_slot,
+    uint64_t a0,
+    uint64_t a1,
+    uint64_t a2,
+    const char *note,
+    bool is_error);
+
 static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_reset(
     ID3D12GraphicsCommandListX *self,
     void *pAllocator,
     void *pInitialState) {
-    (void)pInitialState;
     d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
     if (clm == NULL) {
         return SCARLETT_E_POINTER;
@@ -2716,17 +2761,19 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_reset(
     if (clm->bound_pm4_begin != NULL) {
         self->pBegin = clm->bound_pm4_begin;
         self->pCurrent = clm->bound_pm4_begin;
-        self->pEnd = clm->bound_pm4_end;
+        /* Keep pEnd == pCurrent so inline PM4 fastpaths route through COM vtable slots */
+        self->pEnd = clm->bound_pm4_begin;
     }
     if (clm->real_obj != NULL) {
         d3d12xs_cmd_alloc_meta_t *am = d3d12xs_get_cmd_alloc_meta(pAllocator);
         void *real_alloc = (am != NULL) ? am->real_obj : NULL;
+        void *real_pso = (pInitialState != NULL) ? d3d12xs_pso_get_real(pInitialState) : NULL;
         if (real_alloc != NULL) {
             typedef scarlett_hresult_t (SCARLETT_D3D12XS_CALL *pfn_real_reset_t)(
                 void *, void *, void *);
             void **vtbl = *(void ***)clm->real_obj;
             pfn_real_reset_t fn = (pfn_real_reset_t)vtbl[10];
-            scarlett_hresult_t hr = fn(clm->real_obj, real_alloc, NULL);
+            scarlett_hresult_t hr = fn(clm->real_obj, real_alloc, real_pso);
             if (scarlett_failed(hr)) {
                 return hr;
             }
@@ -2735,18 +2782,38 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_reset(
     return SCARLETT_OK;
 }
 
-static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_slot20_refill(
-    ID3D12GraphicsCommandListX *self) {
+static void SCARLETT_D3D12XS_CALL cmd_list_slot20_ia_set_primitive_topology(
+    ID3D12GraphicsCommandListX *self,
+    uint32_t PrimitiveTopology) {
     d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
-    if (clm == NULL) {
-        return SCARLETT_E_POINTER;
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
     }
-    if (clm->bound_pm4_begin != NULL) {
-        self->pBegin = clm->bound_pm4_begin;
-        self->pCurrent = clm->bound_pm4_begin;
-        self->pEnd = clm->bound_pm4_end;
+    d3d12xs_cl_log("IASetPrimitiveTopology", 20u, PrimitiveTopology, 0u, 0u,
+                   "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, uint32_t);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[20])(clm->real_obj, PrimitiveTopology);
+}
+
+static void SCARLETT_D3D12XS_CALL cmd_list_slot25_set_pipeline_state(
+    ID3D12GraphicsCommandListX *self,
+    void *pPipelineState) {
+    d3d12xs_cmd_list_meta_t *clm = d3d12xs_get_cmd_list_meta(self, NULL);
+    if (clm == NULL || clm->real_obj == NULL) {
+        return;
     }
-    return SCARLETT_OK;
+    void *real_pso = (pPipelineState != NULL) ? d3d12xs_pso_get_real(pPipelineState) : NULL;
+    if (pPipelineState != NULL && real_pso == NULL) {
+        d3d12xs_cl_log("SetPipelineState", 25u, (uint64_t)(uintptr_t)pPipelineState,
+                       0u, 0u, "(no_real_pso)", true);
+        return;
+    }
+    d3d12xs_cl_log("SetPipelineState", 25u, (uint64_t)(uintptr_t)pPipelineState,
+                   (uint64_t)(uintptr_t)real_pso, 0u, "(forwarded)", false);
+    typedef void (SCARLETT_D3D12XS_CALL *pfn_real_t)(void *, void *);
+    void **vtbl = *(void ***)clm->real_obj;
+    ((pfn_real_t)vtbl[25])(clm->real_obj, real_pso);
 }
 
 static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_slot_trace_common(
@@ -3111,11 +3178,14 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_xbox_ok_139(
     uint64_t rdx,
     uint64_t r8,
     uint64_t r9) {
-    static uint32_t logged = 0u;
+    (void)r9;
     if (self == NULL) {
         return SCARLETT_E_POINTER;
     }
-    if (__atomic_exchange_n(&logged, 1u, __ATOMIC_ACQ_REL) == 0u) {
+    scarlett_hresult_t hr = cmd_list_reset(
+        self, (void *)(uintptr_t)rdx, (void *)(uintptr_t)r8);
+    static uint32_t logged = 0u;
+    if (__atomic_exchange_n(&logged, 1u, __ATOMIC_ACQ_REL) == 0u || scarlett_failed(hr)) {
         d3d12xs_pe_log_stub_ods(
             "d3d12_xs.dll",
             "ID3D12GraphicsCommandListX::Slot139",
@@ -3125,10 +3195,10 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_xbox_ok_139(
             rdx,
             r8,
             r9,
-            SCARLETT_OK,
-            "(ok)");
+            hr,
+            scarlett_succeeded(hr) ? "(reset_ok)" : "(reset_fail)");
     }
-    return SCARLETT_OK;
+    return hr;
 }
 
 static scarlett_hresult_t SCARLETT_D3D12XS_CALL cmd_list_xbox_ok_142(
@@ -4051,7 +4121,7 @@ D3D12XS_DEFINE_SLOT_STUB(cmd_list, "ID3D12GraphicsCommandListX", 6, "6")
 D3D12XS_DEFINE_SLOT_STUB(cmd_list, "ID3D12GraphicsCommandListX", 7, "7")
 
 D3D12XS_DEFINE_CL_TRACE(18)
-D3D12XS_DEFINE_CL_TRACE(25) D3D12XS_DEFINE_CL_TRACE(26) D3D12XS_DEFINE_CL_TRACE(27)
+D3D12XS_DEFINE_CL_TRACE(26) D3D12XS_DEFINE_CL_TRACE(27)
 D3D12XS_DEFINE_CL_TRACE(28) D3D12XS_DEFINE_CL_TRACE(29) D3D12XS_DEFINE_CL_TRACE(30) D3D12XS_DEFINE_CL_TRACE(31)
 D3D12XS_DEFINE_CL_TRACE(56) D3D12XS_DEFINE_CL_TRACE(57) D3D12XS_DEFINE_CL_TRACE(58)
 D3D12XS_DEFINE_CL_TRACE(60) D3D12XS_DEFINE_CL_TRACE(61) D3D12XS_DEFINE_CL_TRACE(62) D3D12XS_DEFINE_CL_TRACE(63)
@@ -4096,12 +4166,12 @@ static const ID3D12GraphicsCommandListXVtbl g_cmd_list_vtbl = {
         (void *)cmd_list_slot17_copy_resource,       /* slot 17 -> PC 17 */
         (void *)cmd_list_trace_18,              /* slot 18 */
         (void *)cmd_list_slot19_resolve_subresource, /* slot 19 -> PC 19 */
-        (void *)cmd_list_slot20_refill,         /* slot 20 (+0xa0) */
+        (void *)cmd_list_slot20_ia_set_primitive_topology, /* slot 20 -> PC 20 */
         (void *)cmd_list_slot21_rs_set_viewports,     /* slot 21 -> PC 21 */
         (void *)cmd_list_slot22_rs_set_scissor_rects, /* slot 22 -> PC 22 */
         (void *)cmd_list_slot23_om_set_blend_factor,  /* slot 23 -> PC 23 */
         (void *)cmd_list_slot24_om_set_stencil_ref,   /* slot 24 -> PC 24 */
-        (void *)cmd_list_trace_25,              /* slot 25 */
+        (void *)cmd_list_slot25_set_pipeline_state,   /* slot 25 -> PC 25 */
         (void *)cmd_list_trace_26,              /* slot 26 */
         (void *)cmd_list_trace_27,              /* slot 27 */
         (void *)cmd_list_trace_28,              /* slot 28 */
@@ -5447,6 +5517,9 @@ static void SCARLETT_D3D12XS_CALL com_slot17_create_cbv(
     } cbv_desc_t;
     cbv_desc_t pc_desc;
     d3d12xs_pe_memcpy(&pc_desc, pDesc, sizeof(pc_desc));
+    if (pc_desc.SizeInBytes > 0u) {
+        pc_desc.SizeInBytes = (pc_desc.SizeInBytes + 255u) & ~255u;
+    }
     uint64_t real_va = d3d12xs_translate_gpu_va(pc_desc.BufferLocation, NULL);
     if (real_va != 0u) {
         pc_desc.BufferLocation = real_va;
@@ -6385,8 +6458,15 @@ typedef struct d3d12xs_pso_meta_s {
     uint32_t in_use;
     uint32_t is_compute;
     uint32_t lifted_spirv_bytes;
+    uint32_t saved_owns_dxbc;
+    uint32_t reserved_pad;
     void *real_obj;
     void *lifted_spirv_buf;
+    void *saved_real_rs;
+    void *saved_vs_dxbc;
+    uint64_t saved_vs_len;
+    void *saved_ps_dxbc;
+    uint64_t saved_ps_len;
 } d3d12xs_pso_meta_t;
 
 #define SCARLETT_D3D12XS_PSO_CHUNK_SIZE 4096u
@@ -6536,6 +6616,20 @@ static uint32_t SCARLETT_D3D12XS_CALL pso_release(ID3D12PipelineStateX *self) {
             d3d12xs_pe_free_mem(pm->lifted_spirv_buf);
             pm->lifted_spirv_buf = NULL;
         }
+        if (pm->saved_owns_dxbc != 0u) {
+            if (pm->saved_vs_dxbc != NULL) {
+                d3d12xs_pe_free_mem(pm->saved_vs_dxbc);
+            }
+            if (pm->saved_ps_dxbc != NULL) {
+                d3d12xs_pe_free_mem(pm->saved_ps_dxbc);
+            }
+        }
+        pm->saved_real_rs = NULL;
+        pm->saved_vs_dxbc = NULL;
+        pm->saved_vs_len = 0u;
+        pm->saved_ps_dxbc = NULL;
+        pm->saved_ps_len = 0u;
+        pm->saved_owns_dxbc = 0u;
         pm->lifted_spirv_bytes = 0u;
         pm->unix_device_handle = 0u;
         __atomic_store_n(&pm->in_use, 0u, __ATOMIC_RELEASE);
@@ -7075,6 +7169,328 @@ static bool d3d12xs_pe_lift_shader_ex(
     return true;
 }
 
+#define SCARLETT_D3D12XS_SLOT55_MAGIC UINT64_C(0x534C353545585452)
+typedef struct d3d12xs_slot55_extra_s {
+    uint64_t magic;
+    uint64_t flags;
+    uint64_t override_ptr;
+} d3d12xs_slot55_extra_t;
+
+typedef struct d3d12xs_pc_rt_blend_s {
+    int32_t BlendEnable;
+    int32_t LogicOpEnable;
+    uint32_t SrcBlend;
+    uint32_t DestBlend;
+    uint32_t BlendOp;
+    uint32_t SrcBlendAlpha;
+    uint32_t DestBlendAlpha;
+    uint32_t BlendOpAlpha;
+    uint32_t LogicOp;
+    uint8_t RenderTargetWriteMask;
+    uint8_t pad[3];
+} d3d12xs_pc_rt_blend_t;
+
+typedef struct d3d12xs_pc_blend_s {
+    int32_t AlphaToCoverageEnable;
+    int32_t IndependentBlendEnable;
+    d3d12xs_pc_rt_blend_t RenderTarget[8];
+} d3d12xs_pc_blend_t;
+
+typedef struct d3d12xs_pc_shader_bc_s {
+    const void *pShaderBytecode;
+    uint64_t BytecodeLength;
+} d3d12xs_pc_shader_bc_t;
+
+typedef struct d3d12xs_pc_stream_out_s {
+    const void *pSODeclaration;
+    uint32_t NumEntries;
+    uint32_t pad0;
+    const void *pBufferStrides;
+    uint32_t NumStrides;
+    uint32_t RasterizedStream;
+} d3d12xs_pc_stream_out_t;
+
+typedef struct d3d12xs_pc_rasterizer_s {
+    uint32_t FillMode;
+    uint32_t CullMode;
+    int32_t FrontCounterClockwise;
+    int32_t DepthBias;
+    float DepthBiasClamp;
+    float SlopeScaledDepthBias;
+    int32_t DepthClipEnable;
+    int32_t MultisampleEnable;
+    int32_t AntialiasedLineEnable;
+    uint32_t ForcedSampleCount;
+    uint32_t ConservativeRaster;
+} d3d12xs_pc_rasterizer_t;
+
+typedef struct d3d12xs_pc_ds_op_s {
+    uint32_t StencilFailOp;
+    uint32_t StencilDepthFailOp;
+    uint32_t StencilPassOp;
+    uint32_t StencilFunc;
+} d3d12xs_pc_ds_op_t;
+
+typedef struct d3d12xs_pc_depth_stencil_s {
+    int32_t DepthEnable;
+    uint32_t DepthWriteMask;
+    uint32_t DepthFunc;
+    int32_t StencilEnable;
+    uint8_t StencilReadMask;
+    uint8_t StencilWriteMask;
+    uint8_t pad0[2];
+    d3d12xs_pc_ds_op_t FrontFace;
+    d3d12xs_pc_ds_op_t BackFace;
+} d3d12xs_pc_depth_stencil_t;
+
+typedef struct d3d12xs_pc_input_layout_s {
+    const void *pInputElementDescs;
+    uint32_t NumElements;
+    uint32_t pad0;
+} d3d12xs_pc_input_layout_t;
+
+typedef struct d3d12xs_pc_sample_desc_s {
+    uint32_t Count;
+    uint32_t Quality;
+} d3d12xs_pc_sample_desc_t;
+
+typedef struct d3d12xs_pc_gfx_pso_desc_s {
+    void *pRootSignature;
+    d3d12xs_pc_shader_bc_t VS;
+    d3d12xs_pc_shader_bc_t PS;
+    d3d12xs_pc_shader_bc_t DS;
+    d3d12xs_pc_shader_bc_t HS;
+    d3d12xs_pc_shader_bc_t GS;
+    d3d12xs_pc_stream_out_t StreamOutput;
+    d3d12xs_pc_blend_t BlendState;
+    uint32_t SampleMask;
+    d3d12xs_pc_rasterizer_t RasterizerState;
+    d3d12xs_pc_depth_stencil_t DepthStencilState;
+    uint32_t pad_before_il;
+    d3d12xs_pc_input_layout_t InputLayout;
+    uint32_t IBStripCutValue;
+    uint32_t PrimitiveTopologyType;
+    uint32_t NumRenderTargets;
+    uint32_t RTVFormats[8];
+    uint32_t DSVFormat;
+    d3d12xs_pc_sample_desc_t SampleDesc;
+    uint32_t NodeMask;
+    uint32_t pad_before_cached;
+    d3d12xs_pc_shader_bc_t CachedPSO;
+    uint32_t Flags;
+    uint32_t pad_end;
+} d3d12xs_pc_gfx_pso_desc_t;
+
+typedef struct d3d12xs_pc_compute_pso_desc_s {
+    void *pRootSignature;
+    d3d12xs_pc_shader_bc_t CS;
+    uint32_t NodeMask;
+    uint32_t pad0;
+    d3d12xs_pc_shader_bc_t CachedPSO;
+    uint32_t Flags;
+    uint32_t pad1;
+} d3d12xs_pc_compute_pso_desc_t;
+
+SCARLETT_STATIC_ASSERT(sizeof(d3d12xs_pc_blend_t) == 328, "D3D12_BLEND_DESC must be 328 bytes");
+SCARLETT_STATIC_ASSERT(sizeof(d3d12xs_pc_gfx_pso_desc_t) == 656, "D3D12_GRAPHICS_PIPELINE_STATE_DESC must be 656 bytes");
+SCARLETT_STATIC_ASSERT(sizeof(d3d12xs_pc_compute_pso_desc_t) == 56, "D3D12_COMPUTE_PIPELINE_STATE_DESC must be 56 bytes");
+
+static void d3d12xs_init_default_gfx_pso_desc(d3d12xs_pc_gfx_pso_desc_t *d) {
+    d3d12xs_pe_zero(d, sizeof(*d));
+    for (size_t i = 0u; i < 8u; ++i) {
+        d->BlendState.RenderTarget[i].SrcBlend = 2u;       /* ONE */
+        d->BlendState.RenderTarget[i].DestBlend = 1u;      /* ZERO */
+        d->BlendState.RenderTarget[i].BlendOp = 1u;        /* ADD */
+        d->BlendState.RenderTarget[i].SrcBlendAlpha = 2u;  /* ONE */
+        d->BlendState.RenderTarget[i].DestBlendAlpha = 1u; /* ZERO */
+        d->BlendState.RenderTarget[i].BlendOpAlpha = 1u;   /* ADD */
+        d->BlendState.RenderTarget[i].LogicOp = 4u;        /* NOOP */
+        d->BlendState.RenderTarget[i].RenderTargetWriteMask = 0xFu;
+    }
+    d->SampleMask = 0xFFFFFFFFu;
+    d->RasterizerState.FillMode = 3u;  /* SOLID */
+    d->RasterizerState.CullMode = 3u;  /* BACK */
+    d->RasterizerState.DepthClipEnable = 1;
+    d->DepthStencilState.DepthWriteMask = 0u;
+    d->DepthStencilState.DepthFunc = 4u; /* LESS */
+    d->DepthStencilState.StencilReadMask = 0xFFu;
+    d->DepthStencilState.StencilWriteMask = 0xFFu;
+    d->DepthStencilState.FrontFace.StencilFailOp = 1u;
+    d->DepthStencilState.FrontFace.StencilDepthFailOp = 1u;
+    d->DepthStencilState.FrontFace.StencilPassOp = 1u;
+    d->DepthStencilState.FrontFace.StencilFunc = 8u;
+    d->DepthStencilState.BackFace = d->DepthStencilState.FrontFace;
+    d->PrimitiveTopologyType = 3u; /* TRIANGLE */
+    d->NumRenderTargets = 1u;
+    d->RTVFormats[0] = 28u; /* DXGI_FORMAT_R8G8B8A8_UNORM */
+    d->SampleDesc.Count = 1u;
+    d->SampleDesc.Quality = 0u;
+}
+
+static void *d3d12xs_wrap_spirv_as_dxbc_spv0(
+    const void *spv,
+    uint64_t spv_bytes,
+    uint64_t *out_dxbc_bytes) {
+    if (out_dxbc_bytes != NULL) *out_dxbc_bytes = 0u;
+    if (spv == NULL || spv_bytes < 20u || (spv_bytes & 3u) != 0u ||
+        spv_bytes > (UINT64_C(8) << 20)) {
+        return NULL;
+    }
+    if (*(const uint32_t *)spv != 0x07230203u) {
+        return NULL;
+    }
+    uint64_t total = 44u + spv_bytes;
+    uint8_t *buf = (uint8_t *)d3d12xs_pe_alloc_zero((size_t)total);
+    if (buf == NULL) {
+        return NULL;
+    }
+    uint32_t *hdr = (uint32_t *)buf;
+    hdr[0] = 0x43425844u; /* 'DXBC' */
+    hdr[5] = 1u;          /* version */
+    hdr[6] = (uint32_t)total;
+    hdr[7] = 1u;          /* chunk count */
+    hdr[8] = 36u;         /* offset of SPV0 chunk */
+    hdr[9] = 0x30565053u; /* 'SPV0' */
+    hdr[10] = (uint32_t)spv_bytes;
+    d3d12xs_pe_memcpy(buf + 44u, spv, (size_t)spv_bytes);
+    if (out_dxbc_bytes != NULL) *out_dxbc_bytes = total;
+    return buf;
+}
+
+#define SCARLETT_D3D12XS_ISA_CACHE_SIZE 4096u
+typedef struct d3d12xs_isa_cache_entry_s {
+    uint32_t state; /* 0 = empty, 1 = filling, 2 = ready */
+    uint32_t stage;
+    const void *isa_ptr;
+    uint64_t isa_bytes;
+    void *dxbc_buf;
+    uint64_t dxbc_bytes;
+} d3d12xs_isa_cache_entry_t;
+
+static d3d12xs_isa_cache_entry_t g_isa_dxbc_cache[SCARLETT_D3D12XS_ISA_CACHE_SIZE];
+
+static bool d3d12xs_lift_raw_isa_cached(
+    const void *isa_ptr,
+    uint64_t isa_bytes,
+    uint32_t stage,
+    void **out_dxbc,
+    uint64_t *out_dxbc_len,
+    bool *out_owned,
+    scarlett_hresult_t *out_lhr) {
+    if (out_dxbc != NULL) *out_dxbc = NULL;
+    if (out_dxbc_len != NULL) *out_dxbc_len = 0u;
+    if (out_owned != NULL) *out_owned = false;
+    if (isa_ptr == NULL || isa_bytes < 4u || (isa_bytes & 3u) != 0u ||
+        isa_bytes > (UINT64_C(1) << 20)) {
+        return false;
+    }
+    uint64_t h = ((uint64_t)(uintptr_t)isa_ptr >> 2u) ^
+                 (isa_bytes * UINT64_C(0x9E3779B97F4A7C15)) ^
+                 ((uint64_t)stage * UINT64_C(0xBF58476D1CE4E5B9));
+    uint32_t slot = (uint32_t)(h & (SCARLETT_D3D12XS_ISA_CACHE_SIZE - 1u));
+    d3d12xs_isa_cache_entry_t *cached_slot = NULL;
+    for (uint32_t probe = 0u; probe < 16u; ++probe) {
+        uint32_t idx = (slot + probe) & (SCARLETT_D3D12XS_ISA_CACHE_SIZE - 1u);
+        d3d12xs_isa_cache_entry_t *e = &g_isa_dxbc_cache[idx];
+        uint32_t st = __atomic_load_n(&e->state, __ATOMIC_ACQUIRE);
+        if (st == 2u) {
+            if (e->isa_ptr == isa_ptr && e->isa_bytes == isa_bytes && e->stage == stage) {
+                if (e->dxbc_buf != NULL && e->dxbc_bytes > 0u) {
+                    if (out_dxbc != NULL) *out_dxbc = e->dxbc_buf;
+                    if (out_dxbc_len != NULL) *out_dxbc_len = e->dxbc_bytes;
+                    if (out_owned != NULL) *out_owned = false;
+                    if (out_lhr != NULL) *out_lhr = SCARLETT_OK;
+                    return true;
+                }
+                return false;
+            }
+            continue;
+        }
+        if (st == 0u) {
+            uint32_t expected = 0u;
+            if (__atomic_compare_exchange_n(
+                    &e->state, &expected, 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                cached_slot = e;
+                break;
+            }
+            /* Someone else took this slot; wait briefly if it matches our key or continue probing */
+            while (__atomic_load_n(&e->state, __ATOMIC_ACQUIRE) == 1u) {
+                __asm__ __volatile__("pause");
+            }
+            if (__atomic_load_n(&e->state, __ATOMIC_ACQUIRE) == 2u &&
+                e->isa_ptr == isa_ptr && e->isa_bytes == isa_bytes && e->stage == stage) {
+                if (e->dxbc_buf != NULL && e->dxbc_bytes > 0u) {
+                    if (out_dxbc != NULL) *out_dxbc = e->dxbc_buf;
+                    if (out_dxbc_len != NULL) *out_dxbc_len = e->dxbc_bytes;
+                    if (out_owned != NULL) *out_owned = false;
+                    if (out_lhr != NULL) *out_lhr = SCARLETT_OK;
+                    return true;
+                }
+                return false;
+            }
+        }
+    }
+
+    void *dxbc_buf = NULL;
+    uint64_t dxbc_len = 0u;
+    if (d3d12xs_pe_is_readable(isa_ptr, (size_t)isa_bytes)) {
+        uint8_t *ps09 = (uint8_t *)d3d12xs_pe_alloc_zero((size_t)(52u + isa_bytes));
+        if (ps09 != NULL) {
+            uint32_t *ph = (uint32_t *)ps09;
+            ph[0] = 0x09005350u; /* "PS\x00\x09" */
+            ph[1] = 0x0A03u;     /* GFX10.3 */
+            ph[2] = stage;
+            ph[5] = 64u;         /* wave_size */
+            ph[7] = 64u;         /* wg_x */
+            ph[8] = 1u;          /* wg_y */
+            ph[9] = 1u;          /* wg_z */
+            ph[10] = 1u;         /* export_mask */
+            ph[12] = (uint32_t)isa_bytes;
+            d3d12xs_pe_memcpy(ps09 + 52u, isa_ptr, (size_t)isa_bytes);
+            void *spv_buf = NULL;
+            uint64_t spv_len = 0u;
+            uint32_t used_dxil = 0u;
+            uint32_t kind = 0u;
+            if (d3d12xs_pe_lift_shader_ex(
+                    ps09, 52u + isa_bytes, &spv_buf, &spv_len,
+                    &used_dxil, &kind, out_lhr)) {
+                if (used_dxil == 0u && spv_buf != NULL) {
+                    dxbc_buf = d3d12xs_wrap_spirv_as_dxbc_spv0(spv_buf, spv_len, &dxbc_len);
+                    d3d12xs_pe_free_mem(spv_buf);
+                } else if (used_dxil != 0u && spv_buf != NULL) {
+                    dxbc_buf = spv_buf;
+                    dxbc_len = spv_len;
+                }
+            }
+            d3d12xs_pe_free_mem(ps09);
+        }
+    }
+
+    if (cached_slot != NULL) {
+        cached_slot->isa_ptr = isa_ptr;
+        cached_slot->isa_bytes = isa_bytes;
+        cached_slot->stage = stage;
+        cached_slot->dxbc_buf = dxbc_buf;
+        cached_slot->dxbc_bytes = dxbc_len;
+        __atomic_store_n(&cached_slot->state, 2u, __ATOMIC_RELEASE);
+        if (dxbc_buf != NULL && dxbc_len > 0u) {
+            if (out_dxbc != NULL) *out_dxbc = dxbc_buf;
+            if (out_dxbc_len != NULL) *out_dxbc_len = dxbc_len;
+            if (out_owned != NULL) *out_owned = false;
+            return true;
+        }
+        return false;
+    }
+
+    if (dxbc_buf != NULL && dxbc_len > 0u) {
+        if (out_dxbc != NULL) *out_dxbc = dxbc_buf;
+        if (out_dxbc_len != NULL) *out_dxbc_len = dxbc_len;
+        if (out_owned != NULL) *out_owned = true;
+        return true;
+    }
+    return false;
+}
+
 static scarlett_hresult_t com_create_pso_impl(
     ID3D12DeviceX *self,
     const void *pDesc,
@@ -7156,8 +7572,15 @@ static scarlett_hresult_t com_create_pso_impl(
     pm->in_use = 1u;
     pm->is_compute = (vtable_slot == 11u || vtable_slot == 62u || vtable_slot == 67u) ? 1u : 0u;
     pm->lifted_spirv_bytes = 0u;
+    pm->saved_owns_dxbc = 0u;
+    pm->reserved_pad = 0u;
     pm->real_obj = NULL;
     pm->lifted_spirv_buf = NULL;
+    pm->saved_real_rs = NULL;
+    pm->saved_vs_dxbc = NULL;
+    pm->saved_vs_len = 0u;
+    pm->saved_ps_dxbc = NULL;
+    pm->saved_ps_len = 0u;
 
     static uint32_t g_pso_log_count = 0u;
     uint32_t seq = __atomic_add_fetch(&g_pso_log_count, 1u, __ATOMIC_RELAXED);
@@ -7325,6 +7748,173 @@ static scarlett_hresult_t com_create_pso_impl(
                     }
                 }
             }
+        } else if (vtable_slot == 55u && d3d12xs_get_pso_meta(pDesc) != NULL) {
+            /* Xbox derived PSO: pDesc = base ID3D12PipelineStateX*, extra = d3d12xs_slot55_extra_t* */
+            d3d12xs_pso_meta_t *base_pm = d3d12xs_get_pso_meta(pDesc);
+            const d3d12xs_slot55_extra_t *s55 =
+                (extra_info >= UINT64_C(0x10000) &&
+                 d3d12xs_pe_is_readable((const void *)(uintptr_t)extra_info, sizeof(d3d12xs_slot55_extra_t)) &&
+                 ((const d3d12xs_slot55_extra_t *)(uintptr_t)extra_info)->magic == SCARLETT_D3D12XS_SLOT55_MAGIC)
+                    ? (const d3d12xs_slot55_extra_t *)(uintptr_t)extra_info
+                    : NULL;
+            if (base_pm != NULL && base_pm->saved_real_rs != NULL &&
+                (base_pm->saved_vs_dxbc != NULL || base_pm->saved_ps_dxbc != NULL)) {
+                pm->saved_real_rs = base_pm->saved_real_rs;
+                if (base_pm->saved_owns_dxbc == 0u) {
+                    pm->saved_vs_dxbc = base_pm->saved_vs_dxbc;
+                    pm->saved_vs_len = base_pm->saved_vs_len;
+                    pm->saved_ps_dxbc = base_pm->saved_ps_dxbc;
+                    pm->saved_ps_len = base_pm->saved_ps_len;
+                    pm->saved_owns_dxbc = 0u;
+                } else {
+                    if (base_pm->saved_vs_dxbc != NULL && base_pm->saved_vs_len > 0u) {
+                        void *vs_copy = d3d12xs_pe_alloc_zero((size_t)base_pm->saved_vs_len);
+                        if (vs_copy != NULL) {
+                            d3d12xs_pe_memcpy(vs_copy, base_pm->saved_vs_dxbc, (size_t)base_pm->saved_vs_len);
+                            pm->saved_vs_dxbc = vs_copy;
+                            pm->saved_vs_len = base_pm->saved_vs_len;
+                        }
+                    }
+                    if (base_pm->saved_ps_dxbc != NULL && base_pm->saved_ps_len > 0u) {
+                        void *ps_copy = d3d12xs_pe_alloc_zero((size_t)base_pm->saved_ps_len);
+                        if (ps_copy != NULL) {
+                            d3d12xs_pe_memcpy(ps_copy, base_pm->saved_ps_dxbc, (size_t)base_pm->saved_ps_len);
+                            pm->saved_ps_dxbc = ps_copy;
+                            pm->saved_ps_len = base_pm->saved_ps_len;
+                        }
+                    }
+                    pm->saved_owns_dxbc = 1u;
+                }
+                if (self->real_device != NULL && pm->saved_vs_dxbc != NULL) {
+                    d3d12xs_pc_gfx_pso_desc_t pc_desc;
+                    d3d12xs_init_default_gfx_pso_desc(&pc_desc);
+                    pc_desc.pRootSignature = pm->saved_real_rs;
+                    pc_desc.VS.pShaderBytecode = pm->saved_vs_dxbc;
+                    pc_desc.VS.BytecodeLength = pm->saved_vs_len;
+                    pc_desc.PS.pShaderBytecode = pm->saved_ps_dxbc;
+                    pc_desc.PS.BytecodeLength = pm->saved_ps_len;
+                    if (s55 != NULL && s55->override_ptr >= UINT64_C(0x10000) &&
+                        d3d12xs_pe_is_readable((const void *)(uintptr_t)s55->override_ptr, 4u + sizeof(d3d12xs_pc_blend_t))) {
+                        const uint8_t *ov = (const uint8_t *)(uintptr_t)s55->override_ptr;
+                        if (*(const uint32_t *)ov == 2u) {
+                            d3d12xs_pe_memcpy(&pc_desc.BlendState, ov + 4u, sizeof(d3d12xs_pc_blend_t));
+                        }
+                    }
+                    typedef scarlett_hresult_t (SCARLETT_D3D12XS_CALL *pfn_real_cgpso_t)(
+                        void *, const void *, const scarlett_guid_t *, void **);
+                    void **vtbl = *(void ***)self->real_device;
+                    void *real_pso = NULL;
+                    real_hr = ((pfn_real_cgpso_t)vtbl[10])(
+                        self->real_device, &pc_desc, &kIidID3D12PipelineState, &real_pso);
+                    if (scarlett_succeeded(real_hr) && real_pso != NULL) {
+                        pm->real_obj = real_pso;
+                        diag_found_magic = 0x43425844u;
+                    }
+                }
+            }
+        } else if (vtable_slot == 67u && d3d12xs_pe_is_readable(pDesc, 64u) &&
+                   d3d12xs_is_com_root_sig((const void *)(uintptr_t)((const uint64_t *)pDesc)[0])) {
+            /* Xbox Compute PSO: q0 = RootSignature, q5 = ISA ptr, q6 = ISA bytes */
+            const uint64_t *xq = (const uint64_t *)pDesc;
+            const void *rs_ptr = (const void *)(uintptr_t)xq[0];
+            d3d12xs_root_sig_meta_t *rsm =
+                d3d12xs_is_com_root_sig(rs_ptr) ? d3d12xs_get_root_sig_meta(rs_ptr) : NULL;
+            void *real_rs = (rsm != NULL) ? rsm->real_obj : NULL;
+            const void *cs_isa = (const void *)(uintptr_t)xq[5];
+            uint64_t cs_isa_len = xq[6];
+            void *cs_dxbc = NULL;
+            uint64_t cs_dxbc_len = 0u;
+            bool cs_owned = false;
+            if (real_rs != NULL &&
+                d3d12xs_lift_raw_isa_cached(
+                    cs_isa, cs_isa_len, 2u, &cs_dxbc, &cs_dxbc_len, &cs_owned, &diag_lift_hr)) {
+                ++diag_lifted_stages;
+                ++diag_dxil_stages;
+                diag_found_magic = 0x43425844u;
+                if (self->real_device != NULL) {
+                    d3d12xs_pc_compute_pso_desc_t pc_desc;
+                    d3d12xs_pe_zero(&pc_desc, sizeof(pc_desc));
+                    pc_desc.pRootSignature = real_rs;
+                    pc_desc.CS.pShaderBytecode = cs_dxbc;
+                    pc_desc.CS.BytecodeLength = cs_dxbc_len;
+                    typedef scarlett_hresult_t (SCARLETT_D3D12XS_CALL *pfn_real_ccpso_t)(
+                        void *, const void *, const scarlett_guid_t *, void **);
+                    void **vtbl = *(void ***)self->real_device;
+                    void *real_pso = NULL;
+                    real_hr = ((pfn_real_ccpso_t)vtbl[11])(
+                        self->real_device, &pc_desc, &kIidID3D12PipelineState, &real_pso);
+                    if (scarlett_succeeded(real_hr) && real_pso != NULL) {
+                        pm->real_obj = real_pso;
+                    }
+                }
+                if (cs_owned && cs_dxbc != NULL) {
+                    d3d12xs_pe_free_mem(cs_dxbc);
+                }
+            }
+        } else if (vtable_slot == 57u && d3d12xs_pe_is_readable(pDesc, 96u) &&
+                   d3d12xs_is_com_root_sig((const void *)(uintptr_t)((const uint64_t *)pDesc)[0])) {
+            /* Xbox Graphics PSO: q0 = RootSignature, q5/q6 = VS ISA, q9/q10 = PS ISA */
+            const uint64_t *xq = (const uint64_t *)pDesc;
+            const void *rs_ptr = (const void *)(uintptr_t)xq[0];
+            d3d12xs_root_sig_meta_t *rsm =
+                d3d12xs_is_com_root_sig(rs_ptr) ? d3d12xs_get_root_sig_meta(rs_ptr) : NULL;
+            void *real_rs = (rsm != NULL) ? rsm->real_obj : NULL;
+            void *vs_dxbc = NULL;
+            uint64_t vs_len = 0u;
+            bool vs_owned = false;
+            void *ps_dxbc = NULL;
+            uint64_t ps_len = 0u;
+            bool ps_owned = false;
+            if (xq[5] != 0u && xq[6] >= 4u &&
+                d3d12xs_lift_raw_isa_cached(
+                    (const void *)(uintptr_t)xq[5], xq[6], 0u,
+                    &vs_dxbc, &vs_len, &vs_owned, &diag_lift_hr)) {
+                ++diag_lifted_stages;
+                ++diag_dxil_stages;
+                diag_found_magic = 0x43425844u;
+            }
+            if (xq[9] != 0u && xq[10] >= 4u &&
+                d3d12xs_lift_raw_isa_cached(
+                    (const void *)(uintptr_t)xq[9], xq[10], 1u,
+                    &ps_dxbc, &ps_len, &ps_owned, &diag_lift_hr)) {
+                ++diag_lifted_stages;
+                ++diag_dxil_stages;
+                if (diag_found_magic == 0u) diag_found_magic = 0x43425844u;
+            }
+            pm->saved_real_rs = real_rs;
+            if (!vs_owned) {
+                pm->saved_vs_dxbc = vs_dxbc;
+                pm->saved_vs_len = vs_len;
+            }
+            if (!ps_owned) {
+                pm->saved_ps_dxbc = ps_dxbc;
+                pm->saved_ps_len = ps_len;
+            }
+            pm->saved_owns_dxbc = 0u;
+            if (self->real_device != NULL && real_rs != NULL && vs_dxbc != NULL) {
+                d3d12xs_pc_gfx_pso_desc_t pc_desc;
+                d3d12xs_init_default_gfx_pso_desc(&pc_desc);
+                pc_desc.pRootSignature = real_rs;
+                pc_desc.VS.pShaderBytecode = vs_dxbc;
+                pc_desc.VS.BytecodeLength = vs_len;
+                pc_desc.PS.pShaderBytecode = ps_dxbc;
+                pc_desc.PS.BytecodeLength = ps_len;
+                typedef scarlett_hresult_t (SCARLETT_D3D12XS_CALL *pfn_real_cgpso_t)(
+                    void *, const void *, const scarlett_guid_t *, void **);
+                void **vtbl = *(void ***)self->real_device;
+                void *real_pso = NULL;
+                real_hr = ((pfn_real_cgpso_t)vtbl[10])(
+                    self->real_device, &pc_desc, &kIidID3D12PipelineState, &real_pso);
+                if (scarlett_succeeded(real_hr) && real_pso != NULL) {
+                    pm->real_obj = real_pso;
+                }
+            }
+            if (vs_owned && vs_dxbc != NULL) {
+                d3d12xs_pe_free_mem(vs_dxbc);
+            }
+            if (ps_owned && ps_dxbc != NULL) {
+                d3d12xs_pe_free_mem(ps_dxbc);
+            }
         } else {
             /* Stream desc (D3D12_PIPELINE_STATE_STREAM_DESC) or Xbox PSO struct scan */
             const void *scan_buf = pDesc;
@@ -7374,7 +7964,7 @@ static scarlett_hresult_t com_create_pso_impl(
                     continue;
                 }
                 if (w < UINT64_C(0x10000) || w > UINT64_C(0x00007FFFFFFFFFFF) ||
-                    (w & 3u) != 0u || cand_ptr == pDesc || cand_ptr == scan_buf ||
+                    cand_ptr == pDesc || cand_ptr == scan_buf ||
                     d3d12xs_get_pso_meta(cand_ptr) != NULL) {
                     continue;
                 }
@@ -7531,6 +8121,62 @@ static scarlett_hresult_t com_create_pso_impl(
                         self->real_device, &real_stream_desc, &kIidID3D12PipelineState, &real_pso);
                     if (scarlett_succeeded(real_hr) && real_pso != NULL) {
                         pm->real_obj = real_pso;
+                        if (pm->is_compute == 0u && found_real_rs != NULL && dxil_count >= 1u) {
+                            pm->saved_real_rs = found_real_rs;
+                            pm->saved_vs_dxbc = dxil_bufs[0];
+                            pm->saved_vs_len = dxil_sizes[0];
+                            dxil_bufs[0] = NULL;
+                            if (dxil_count >= 2u) {
+                                pm->saved_ps_dxbc = dxil_bufs[1];
+                                pm->saved_ps_len = dxil_sizes[1];
+                                dxil_bufs[1] = NULL;
+                            }
+                            pm->saved_owns_dxbc = 1u;
+                        }
+                    }
+                    static uint32_t g_stream_diag_seq = 0u;
+                    if (scarlett_failed(real_hr) &&
+                        __atomic_add_fetch(&g_stream_diag_seq, 1u, __ATOMIC_RELAXED) <= 2u) {
+                        char dbuf[512];
+                        char *dp = dbuf;
+                        char *dend = dbuf + sizeof(dbuf);
+                        dp = d3d12xs_pe_append_str(dp, dend, "[scarlett-pso-stream] bytes=");
+                        dp = d3d12xs_pe_append_u32(dp, dend, (uint32_t)scan_bytes);
+                        dp = d3d12xs_pe_append_str(dp, dend, " rs=0x");
+                        dp = d3d12xs_pe_append_hex_padded(dp, dend, (uint64_t)(uintptr_t)found_real_rs, 16);
+                        dp = d3d12xs_pe_append_str(dp, dend, " q=");
+                        for (size_t k = 0u; k < nq && k < 24u; ++k) {
+                            if (k > 0u) dp = d3d12xs_pe_append_str(dp, dend, ",");
+                            dp = d3d12xs_pe_append_hex_padded(dp, dend, ((const uint64_t *)patched_stream)[k], 16);
+                        }
+                        dp = d3d12xs_pe_append_str(dp, dend, "\n");
+                        *dp = '\0';
+                        d3d12xs_pe_ods(dbuf);
+                        if (dxil_count > 0u && dxil_bufs[0] != NULL && dxil_sizes[0] >= 32u) {
+                            const uint8_t *db = (const uint8_t *)dxil_bufs[0];
+                            uint32_t cc = *(const uint32_t *)(db + 28u);
+                            char cbuf[256];
+                            char *cp = cbuf;
+                            char *cend = cbuf + sizeof(cbuf);
+                            cp = d3d12xs_pe_append_str(cp, cend, "[scarlett-dxbc-chunks] sz=");
+                            cp = d3d12xs_pe_append_u32(cp, cend, (uint32_t)dxil_sizes[0]);
+                            cp = d3d12xs_pe_append_str(cp, cend, " n=");
+                            cp = d3d12xs_pe_append_u32(cp, cend, cc);
+                            for (uint32_t ci = 0u; ci < cc && ci < 12u; ++ci) {
+                                uint32_t coff = *(const uint32_t *)(db + 32u + ci * 4u);
+                                if (coff + 8u <= dxil_sizes[0]) {
+                                    uint32_t fcc = *(const uint32_t *)(db + coff);
+                                    uint32_t csz = *(const uint32_t *)(db + coff + 4u);
+                                    cp = d3d12xs_pe_append_str(cp, cend, " ");
+                                    cp = d3d12xs_pe_append_hex_padded(cp, cend, fcc, 8);
+                                    cp = d3d12xs_pe_append_str(cp, cend, ":");
+                                    cp = d3d12xs_pe_append_u32(cp, cend, csz);
+                                }
+                            }
+                            cp = d3d12xs_pe_append_str(cp, cend, "\n");
+                            *cp = '\0';
+                            d3d12xs_pe_ods(cbuf);
+                        }
                     }
                 } else if (pm->is_compute != 0u && dxil_count >= 1u && vtbl[11] != NULL) {
                     uint8_t pc_desc[56];
@@ -7545,6 +8191,18 @@ static scarlett_hresult_t com_create_pso_impl(
                         self->real_device, pc_desc, &kIidID3D12PipelineState, &real_pso);
                     if (scarlett_succeeded(real_hr) && real_pso != NULL) {
                         pm->real_obj = real_pso;
+                        if (pm->is_compute == 0u && found_real_rs != NULL && dxil_count >= 1u) {
+                            pm->saved_real_rs = found_real_rs;
+                            pm->saved_vs_dxbc = dxil_bufs[0];
+                            pm->saved_vs_len = dxil_sizes[0];
+                            dxil_bufs[0] = NULL;
+                            if (dxil_count >= 2u) {
+                                pm->saved_ps_dxbc = dxil_bufs[1];
+                                pm->saved_ps_len = dxil_sizes[1];
+                                dxil_bufs[1] = NULL;
+                            }
+                            pm->saved_owns_dxbc = 1u;
+                        }
                     }
                 }
             }
@@ -7568,7 +8226,7 @@ static scarlett_hresult_t com_create_pso_impl(
         uint32_t sidx = (vtable_slot < 96u) ? vtable_slot : 95u;
         slot_seq = __atomic_add_fetch(&g_slot_log_counts[sidx], 1u, __ATOMIC_RELAXED);
     }
-    if (seq <= 16u || slot_seq <= 4u || (seq & 255u) == 0u) {
+    if (seq <= 16u || slot_seq <= 2u || (vtable_slot == 86u && slot_seq <= 12u) || (seq & 1023u) == 0u) {
         char pbuf[512];
         char *pp = pbuf;
         char *pend = pbuf + sizeof(pbuf);
@@ -8288,8 +8946,11 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL com_slot55_create_command_list1(
     uint64_t arg4,
     const scarlett_guid_t *riid,
     void **ppCommandList) {
-    (void)arg4;
     if (riid != NULL && d3d12xs_guid_eq(riid, &kIidID3D12PipelineState)) {
+        d3d12xs_slot55_extra_t s55;
+        s55.magic = SCARLETT_D3D12XS_SLOT55_MAGIC;
+        s55.flags = arg3;
+        s55.override_ptr = arg4;
         return com_create_pso_impl(
             self,
             (const void *)(uintptr_t)arg2,
@@ -8297,7 +8958,7 @@ static scarlett_hresult_t SCARLETT_D3D12XS_CALL com_slot55_create_command_list1(
             ppCommandList,
             55u,
             (uint64_t)(uintptr_t)__builtin_return_address(0),
-            arg3);
+            (uint64_t)(uintptr_t)&s55);
     }
     return com_slot12_create_command_list(
         self, (uint32_t)arg2, (uint32_t)arg3, NULL, NULL, riid, ppCommandList);

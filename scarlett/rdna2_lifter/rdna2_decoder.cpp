@@ -20,6 +20,14 @@ bool is_vop2_mandatory_literal(uint16_t op) noexcept {
            op == vop2_op::V_FMAMK_F16;
 }
 
+static inline bool is_vop_ext_src0(uint16_t s) noexcept {
+    return s == reg_code::LITERAL_32 ||
+           s == 249u /* SDWA */ ||
+           s == 250u /* DPP16 */ ||
+           s == 233u /* DPP8 */ ||
+           s == 234u /* DPP8FI */;
+}
+
 } // namespace
 
 bool decode_gfx103_stream(const uint32_t* words,
@@ -54,13 +62,17 @@ bool decode_gfx103_stream(const uint32_t* words,
                 inst.src[0] = static_cast<uint16_t>(w0 & 0x1FFu);
                 inst.src_count = 1u;
                 inst.word_count = 1u;
-                if (inst.src[0] == reg_code::LITERAL_32) {
+                if (is_vop_ext_src0(inst.src[0])) {
                     if (i + 1u >= word_count) {
                         out_error_pc = static_cast<uint32_t>(i);
                         return false;
                     }
-                    inst.has_literal = true;
-                    inst.literal = words[i + 1u];
+                    if (inst.src[0] == reg_code::LITERAL_32) {
+                        inst.has_literal = true;
+                        inst.literal = words[i + 1u];
+                    } else {
+                        inst.src[0] = static_cast<uint16_t>(reg_code::VGPR_BASE + (words[i + 1u] & 0xFFu));
+                    }
                     inst.word_count = 2u;
                 }
             } else if (enc7 == 0x3Eu) {
@@ -73,13 +85,17 @@ bool decode_gfx103_stream(const uint32_t* words,
                 inst.src[1] = static_cast<uint16_t>(reg_code::VGPR_BASE + ((w0 >> 9u) & 0xFFu));
                 inst.src_count = 2u;
                 inst.word_count = 1u;
-                if (inst.src[0] == reg_code::LITERAL_32) {
+                if (is_vop_ext_src0(inst.src[0])) {
                     if (i + 1u >= word_count) {
                         out_error_pc = static_cast<uint32_t>(i);
                         return false;
                     }
-                    inst.has_literal = true;
-                    inst.literal = words[i + 1u];
+                    if (inst.src[0] == reg_code::LITERAL_32) {
+                        inst.has_literal = true;
+                        inst.literal = words[i + 1u];
+                    } else {
+                        inst.src[0] = static_cast<uint16_t>(reg_code::VGPR_BASE + (words[i + 1u] & 0xFFu));
+                    }
                     inst.word_count = 2u;
                 }
             } else {
@@ -92,13 +108,17 @@ bool decode_gfx103_stream(const uint32_t* words,
                 inst.src[1] = static_cast<uint16_t>(reg_code::VGPR_BASE + ((w0 >> 9u) & 0xFFu));
                 inst.src_count = 2u;
                 inst.word_count = 1u;
-                if (inst.src[0] == reg_code::LITERAL_32 || is_vop2_mandatory_literal(inst.opcode)) {
+                if (is_vop_ext_src0(inst.src[0]) || is_vop2_mandatory_literal(inst.opcode)) {
                     if (i + 1u >= word_count) {
                         out_error_pc = static_cast<uint32_t>(i);
                         return false;
                     }
-                    inst.has_literal = true;
-                    inst.literal = words[i + 1u];
+                    if (inst.src[0] == reg_code::LITERAL_32 || is_vop2_mandatory_literal(inst.opcode)) {
+                        inst.has_literal = true;
+                        inst.literal = words[i + 1u];
+                    } else {
+                        inst.src[0] = static_cast<uint16_t>(reg_code::VGPR_BASE + (words[i + 1u] & 0xFFu));
+                    }
                     inst.word_count = 2u;
                 }
             }
@@ -243,6 +263,17 @@ bool decode_gfx103_stream(const uint32_t* words,
                 inst.src[1] = static_cast<uint16_t>((w1 >> 9u) & 0x1FFu);
                 inst.src[2] = static_cast<uint16_t>((w1 >> 18u) & 0x1FFu);
                 inst.src_count = 3u;
+                if (inst.src[0] == reg_code::LITERAL_32 ||
+                    inst.src[1] == reg_code::LITERAL_32 ||
+                    inst.src[2] == reg_code::LITERAL_32) {
+                    if (i + 2u >= word_count) {
+                        out_error_pc = static_cast<uint32_t>(i);
+                        return false;
+                    }
+                    inst.has_literal = true;
+                    inst.literal = words[i + 2u];
+                    inst.word_count = 3u;
+                }
                 break;
             }
             case 0x35u: {
@@ -266,6 +297,17 @@ bool decode_gfx103_stream(const uint32_t* words,
                 inst.src[1] = static_cast<uint16_t>((w1 >> 9u) & 0x1FFu);
                 inst.src[2] = static_cast<uint16_t>((w1 >> 18u) & 0x1FFu);
                 inst.src_count = 3u;
+                if (inst.src[0] == reg_code::LITERAL_32 ||
+                    inst.src[1] == reg_code::LITERAL_32 ||
+                    inst.src[2] == reg_code::LITERAL_32) {
+                    if (i + 2u >= word_count) {
+                        out_error_pc = static_cast<uint32_t>(i);
+                        return false;
+                    }
+                    inst.has_literal = true;
+                    inst.literal = words[i + 2u];
+                    inst.word_count = 3u;
+                }
                 break;
             }
             case 0x36u: {
@@ -399,6 +441,14 @@ bool decode_gfx103_stream(const uint32_t* words,
     }
 
     return !out_insts.empty();
+}
+
+static inline bool is_vop_ext_src0(uint16_t s) noexcept {
+    return s == reg_code::LITERAL_32 ||
+           s == 249u /* SDWA */ ||
+           s == 250u /* DPP16 */ ||
+           s == 233u /* DPP8 */ ||
+           s == 234u /* DPP8FI */;
 }
 
 } // namespace scarlett::rdna2

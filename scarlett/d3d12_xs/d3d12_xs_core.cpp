@@ -14,6 +14,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <zlib.h>
 
 namespace scarlett::d3d12xs::unixlib {
 
@@ -737,6 +738,199 @@ scarlett_hresult_t D3D12XsManager::strip_dxil(scarlett_d3d12xs_strip_dxil_params
     return strip_xbox_dxil_container(src, p.src_size, dst, p.dst_capacity, p);
 }
 
+namespace {
+
+uint32_t read_le32_u(const uint8_t *b) noexcept {
+    return static_cast<uint32_t>(b[0]) |
+           (static_cast<uint32_t>(b[1]) << 8u) |
+           (static_cast<uint32_t>(b[2]) << 16u) |
+           (static_cast<uint32_t>(b[3]) << 24u);
+}
+
+uint64_t read_le64_u(const uint8_t *b) noexcept {
+    return static_cast<uint64_t>(read_le32_u(b)) |
+           (static_cast<uint64_t>(read_le32_u(b + 4u)) << 32u);
+}
+
+void write_le32_u(uint8_t *b, uint32_t v) noexcept {
+    b[0] = static_cast<uint8_t>(v & 0xFFu);
+    b[1] = static_cast<uint8_t>((v >> 8u) & 0xFFu);
+    b[2] = static_cast<uint8_t>((v >> 16u) & 0xFFu);
+    b[3] = static_cast<uint8_t>((v >> 24u) & 0xFFu);
+}
+
+scarlett::rdna2::ShaderStage map_dxil_program_type(uint32_t prog_type) noexcept {
+    using S = scarlett::rdna2::ShaderStage;
+    switch (prog_type) {
+    case 0u: return S::Pixel;
+    case 1u: return S::Vertex;
+    case 2u: return S::Geometry;
+    case 3u: return S::Hull;
+    case 4u: return S::Domain;
+    case 5u: return S::Compute;
+    default: return S::Pixel;
+    }
+}
+
+bool try_lift_dxbc_xbch_to_spv0(
+    const uint8_t *src,
+    size_t src_size,
+    scarlett_shader_mode_t mode,
+    uint32_t prefer_ray_query,
+    uint8_t *dst_bytes,
+    uint64_t dst_capacity,
+    scarlett_d3d12xs_lift_shader_params_t &p) noexcept {
+    if (src == nullptr || src_size < 32u || read_le32_u(src) != 0x43425844u) {
+        return false;
+    }
+    const uint32_t chunk_count = read_le32_u(src + 28u);
+    if (chunk_count == 0u || chunk_count > 64u ||
+        32u + static_cast<size_t>(chunk_count) * 4u > src_size) {
+        return false;
+    }
+
+    struct ChunkSpan {
+        uint32_t tag;
+        const uint8_t *payload;
+        uint32_t size;
+    };
+    std::vector<ChunkSpan> kept;
+    kept.reserve(chunk_count + 1u);
+
+    const uint8_t *dxil_payload = nullptr;
+    uint32_t dxil_size = 0u;
+    for (uint32_t i = 0; i < chunk_count; ++i) {
+        const uint32_t off = read_le32_u(src + 32u + i * 4u);
+        if (static_cast<size_t>(off) + 8u > src_size) {
+            return false;
+        }
+        const uint32_t tag = read_le32_u(src + off);
+        const uint32_t csz = read_le32_u(src + off + 4u);
+        if (static_cast<size_t>(off) + 8u + static_cast<size_t>(csz) > src_size) {
+            return false;
+        }
+        if (tag == 0x4C495844u /* 'DXIL' */) {
+            dxil_payload = src + off + 8u;
+            dxil_size = csz;
+        } else {
+            kept.push_back({tag, src + off + 8u, csz});
+        }
+    }
+    if (dxil_payload == nullptr || dxil_size < 48u) {
+        return false;
+    }
+
+    /* Locate embedded 'XBCH' (0x48434258) container inside Xbox 'DXIL' chunk */
+    size_t xbch_off = SIZE_MAX;
+    for (size_t k = 0; k + 24u <= dxil_size; ++k) {
+        if (dxil_payload[k] == 'X' && dxil_payload[k + 1] == 'B' &&
+            dxil_payload[k + 2] == 'C' && dxil_payload[k + 3] == 'H') {
+            xbch_off = k;
+            break;
+        }
+    }
+    if (xbch_off == SIZE_MAX) {
+        return false;
+    }
+    const uint32_t xbch_ver = read_le32_u(dxil_payload + xbch_off + 4u);
+    const uint64_t comp_len = read_le64_u(dxil_payload + xbch_off + 8u);
+    const uint64_t uncomp_len = read_le64_u(dxil_payload + xbch_off + 16u);
+    if (xbch_ver != 3u || comp_len == 0u || uncomp_len < 16u ||
+        uncomp_len > (16u * 1024u * 1024u) ||
+        xbch_off + 24u + comp_len > dxil_size) {
+        return false;
+    }
+
+    std::vector<uint8_t> fssm(static_cast<size_t>(uncomp_len));
+    uLongf z_out = static_cast<uLongf>(uncomp_len);
+    const int zrc = uncompress(
+        fssm.data(),
+        &z_out,
+        dxil_payload + xbch_off + 24u,
+        static_cast<uLong>(comp_len));
+    if (zrc != Z_OK || z_out < 16u) {
+        return false;
+    }
+    fssm.resize(static_cast<size_t>(z_out));
+
+    auto unpacked = scarlett::rdna2::unpack_rdna2_container(fssm.data(), fssm.size());
+    if (unpacked.status != SCARLETT_OK || unpacked.isa_words.empty()) {
+        return false;
+    }
+    const uint32_t prog_type = (read_le32_u(dxil_payload) >> 16u) & 0xFFFFu;
+    unpacked.meta.stage = map_dxil_program_type(prog_type);
+
+    scarlett::rdna2::LiftOptions opts{};
+    opts.mode = mode;
+    opts.prefer_ray_query = (prefer_ray_query != 0u);
+    opts.gpu_profile.probe_bitmask &= ~scarlett::rdna2::probe_bits::EXT_SPV_KHR_FMA;
+    opts.graphics_no_rogue_descriptors = true;
+    opts.enable_maximal_reconvergence = false;
+    opts.enable_quad_control = false;
+    opts.validate_with_spirv_tools = true;
+
+    scarlett::rdna2::Rdna2Lifter lifter;
+    auto res = lifter.lift_isa(
+        unpacked.meta,
+        unpacked.isa_words.data(),
+        unpacked.isa_words.size(),
+        opts);
+    if (res.status != SCARLETT_OK || res.spirv_words.size() < 5u ||
+        res.spirv_words[0] != 0x07230203u) {
+        std::fprintf(stderr,
+                     "[scarlett-shader] lift_isa failed stage=%u words=%zu hr=0x%08x diag='%s'\n",
+                     static_cast<unsigned>(unpacked.meta.stage),
+                     unpacked.isa_words.size(),
+                     static_cast<uint32_t>(res.status),
+                     res.diagnostics.c_str());
+        std::fflush(stderr);
+        return false;
+    }
+
+    const uint32_t spv_bytes_len = static_cast<uint32_t>(res.spirv_words.size() * 4u);
+    const uint32_t out_chunks = static_cast<uint32_t>(kept.size() + 1u);
+    uint64_t total_size = 32u + static_cast<uint64_t>(out_chunks) * 4u;
+    for (const auto &c : kept) {
+        total_size += 8u + static_cast<uint64_t>(c.size);
+    }
+    total_size += 8u + static_cast<uint64_t>(spv_bytes_len);
+    if (dst_bytes == nullptr || total_size > dst_capacity) {
+        p.out_dst_size = total_size;
+        p.out_status = SCARLETT_E_GS_PROVIDED_BUFFER_TOO_SMALL;
+        return true;
+    }
+
+    write_le32_u(dst_bytes + 0u, 0x43425844u); /* 'DXBC' */
+    std::memset(dst_bytes + 4u, 0, 16u);
+    write_le32_u(dst_bytes + 20u, 1u);
+    write_le32_u(dst_bytes + 24u, static_cast<uint32_t>(total_size));
+    write_le32_u(dst_bytes + 28u, out_chunks);
+
+    uint32_t cursor = 32u + out_chunks * 4u;
+    for (size_t i = 0; i < kept.size(); ++i) {
+        write_le32_u(dst_bytes + 32u + i * 4u, cursor);
+        write_le32_u(dst_bytes + cursor, kept[i].tag);
+        write_le32_u(dst_bytes + cursor + 4u, kept[i].size);
+        if (kept[i].size > 0u) {
+            std::memcpy(dst_bytes + cursor + 8u, kept[i].payload, kept[i].size);
+        }
+        cursor += 8u + kept[i].size;
+    }
+    write_le32_u(dst_bytes + 32u + kept.size() * 4u, cursor);
+    write_le32_u(dst_bytes + cursor, 0x30565053u); /* 'SPV0' */
+    write_le32_u(dst_bytes + cursor + 4u, spv_bytes_len);
+    std::memcpy(dst_bytes + cursor + 8u, res.spirv_words.data(), spv_bytes_len);
+
+    compute_dxbc_digest(dst_bytes, static_cast<uint32_t>(total_size), dst_bytes + 4u);
+    p.out_dst_size = total_size;
+    p.out_used_dxil_fast_path = 1u;
+    p.out_wave_strategy = static_cast<uint32_t>(res.wave_stats.chosen_strategy);
+    p.out_status = SCARLETT_OK;
+    return true;
+}
+
+} // namespace
+
 scarlett_hresult_t D3D12XsManager::lift_shader(scarlett_d3d12xs_lift_shader_params_t &p) {
     p.out_dst_size = 0u;
     p.out_used_dxil_fast_path = 0u;
@@ -761,7 +955,7 @@ scarlett_hresult_t D3D12XsManager::lift_shader(scarlett_d3d12xs_lift_shader_para
         p.out_container_kind = 2u; /* 'XS2' */
     } else if (magic == 0x4D535346u) { /* 'FSSM' */
         p.out_container_kind = 3u;
-    } else if (magic == 0x39305350u) { /* 'PS09' */
+    } else if (magic == 0x09005350u) { /* "PS\x00\x09" */
         p.out_container_kind = 4u;
     } else if (magic == 0x35444753u) { /* 'SGD5' */
         p.out_container_kind = 5u;
@@ -776,21 +970,71 @@ scarlett_hresult_t D3D12XsManager::lift_shader(scarlett_d3d12xs_lift_shader_para
         mode = SCARLETT_SHADER_MODE_FAST_F32;
     }
 
-    scarlett_rdna2_lift_c_result_t c_res{};
-    const size_t cap_words = static_cast<size_t>(p.dst_capacity / 4u);
-    scarlett_hresult_t hr = scarlett_rdna2_lift_shader_c(
-        src,
-        static_cast<size_t>(p.src_size),
-        mode,
-        p.prefer_ray_query,
-        dst,
-        cap_words,
-        &c_res);
+    auto *dst_bytes = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(p.dst_addr));
+    scarlett_hresult_t hr = SCARLETT_OK;
+    if (p.out_container_kind == 1u &&
+        try_lift_dxbc_xbch_to_spv0(
+            src,
+            static_cast<size_t>(p.src_size),
+            mode,
+            p.prefer_ray_query,
+            dst_bytes,
+            p.dst_capacity,
+            p)) {
+        hr = p.out_status;
+    } else if (p.out_container_kind >= 2u && p.out_container_kind <= 5u) {
+        scarlett::rdna2::LiftOptions opts{};
+        opts.mode = mode;
+        opts.prefer_ray_query = (p.prefer_ray_query != 0u);
+        opts.gpu_profile.probe_bitmask &= ~scarlett::rdna2::probe_bits::EXT_SPV_KHR_FMA;
+        opts.graphics_no_rogue_descriptors = true;
+        opts.enable_maximal_reconvergence = false;
+        opts.enable_quad_control = false;
+        opts.validate_with_spirv_tools = true;
+        scarlett::rdna2::Rdna2Lifter lifter;
+        auto res = lifter.lift_container(src, static_cast<size_t>(p.src_size), opts);
+        if (res.status == SCARLETT_OK && !res.spirv_words.empty()) {
+            const uint64_t bytes = static_cast<uint64_t>(res.spirv_words.size()) * 4u;
+            if (dst == nullptr || bytes > p.dst_capacity) {
+                p.out_dst_size = bytes;
+                hr = SCARLETT_E_GS_PROVIDED_BUFFER_TOO_SMALL;
+            } else {
+                std::memcpy(dst, res.spirv_words.data(), static_cast<size_t>(bytes));
+                p.out_dst_size = bytes;
+                p.out_used_dxil_fast_path = 0u;
+                p.out_wave_strategy = static_cast<uint32_t>(res.wave_stats.chosen_strategy);
+                hr = SCARLETT_OK;
+            }
+        } else {
+            hr = (res.status != SCARLETT_OK) ? res.status : SCARLETT_E_FAIL;
+            static std::atomic<uint32_t> pathb_err_log{0u};
+            if (pathb_err_log.fetch_add(1u, std::memory_order_relaxed) < 8u) {
+                std::fprintf(stderr,
+                             "[scarlett-shader] lift_container failed kind=%u hr=0x%08x diag='%s'\n",
+                             p.out_container_kind,
+                             static_cast<uint32_t>(hr),
+                             res.diagnostics.c_str());
+                std::fflush(stderr);
+            }
+        }
+        p.out_status = hr;
+    } else {
+        scarlett_rdna2_lift_c_result_t c_res{};
+        const size_t cap_words = static_cast<size_t>(p.dst_capacity / 4u);
+        hr = scarlett_rdna2_lift_shader_c(
+            src,
+            static_cast<size_t>(p.src_size),
+            mode,
+            p.prefer_ray_query,
+            dst,
+            cap_words,
+            &c_res);
 
-    p.out_dst_size = c_res.byte_count;
-    p.out_used_dxil_fast_path = c_res.used_dxil_fast_path;
-    p.out_wave_strategy = c_res.wave_strategy;
-    p.out_status = hr;
+        p.out_dst_size = c_res.byte_count;
+        p.out_used_dxil_fast_path = c_res.used_dxil_fast_path;
+        p.out_wave_strategy = c_res.wave_strategy;
+        p.out_status = hr;
+    }
 
     static std::atomic<uint32_t> lift_log_count{0u};
     const uint32_t seq = lift_log_count.fetch_add(1u, std::memory_order_relaxed) + 1u;
@@ -1074,6 +1318,53 @@ scarlett_hresult_t D3D12XsManager::report_stub(scarlett_d3d12xs_report_stub_para
                        ? SCARLETT_ERR_STRICT_STUB_ABORT
                        : p.ctx.return_hr;
     return p.out_status;
+}
+
+scarlett_hresult_t D3D12XsManager::check_mem(scarlett_d3d12xs_check_mem_params_t &p) {
+    p.out_ok = 0u;
+    if (p.addr < UINT64_C(0x10000) || p.size == 0u || (p.addr + p.size) < p.addr) {
+        p.out_status = SCARLETT_E_INVALIDARG;
+        return p.out_status;
+    }
+    const uint64_t target_start = p.addr;
+    const uint64_t target_end = p.addr + p.size;
+
+    FILE *fp = std::fopen("/proc/self/maps", "r");
+    if (fp == nullptr) {
+        p.out_status = SCARLETT_E_FAIL;
+        return p.out_status;
+    }
+
+    uint64_t covered_until = target_start;
+    char line[512];
+    while (std::fgets(line, sizeof(line), fp) != nullptr) {
+        unsigned long long s = 0, e = 0;
+        char perms[8] = {};
+        if (std::sscanf(line, "%llx-%llx %7s", &s, &e, perms) != 3) {
+            continue;
+        }
+        const uint64_t seg_s = static_cast<uint64_t>(s);
+        const uint64_t seg_e = static_cast<uint64_t>(e);
+        if (seg_e <= covered_until) {
+            continue;
+        }
+        if (seg_s > covered_until) {
+            break;
+        }
+        const bool can_read = (perms[0] == 'r');
+        const bool can_write = (perms[1] == 'w');
+        if (!can_read || (p.check_write != 0u && !can_write)) {
+            break;
+        }
+        covered_until = seg_e;
+        if (covered_until >= target_end) {
+            p.out_ok = 1u;
+            break;
+        }
+    }
+    std::fclose(fp);
+    p.out_status = SCARLETT_OK;
+    return SCARLETT_OK;
 }
 
 } // namespace scarlett::d3d12xs::unixlib

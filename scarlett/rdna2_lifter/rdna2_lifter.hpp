@@ -265,6 +265,7 @@ struct LiftOptions {
     bool enable_maximal_reconvergence{true};
     bool enable_quad_control{true};
     bool validate_with_spirv_tools{false}; /* Validate emitted binary via libSPIRV-Tools if loaded */
+    bool graphics_no_rogue_descriptors{false}; /* Suppress unrequested SSBO/image descriptors in graphics stages */
 };
 
 struct LiftResult {

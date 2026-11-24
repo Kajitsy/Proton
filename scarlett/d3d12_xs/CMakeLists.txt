@@ -1,4 +1,5 @@
 find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
 
 set(SCARLETT_D3D12_XS_UNIX_SOURCES
     d3d12_xs_vulkan_loader.cpp
@@ -34,6 +35,7 @@ if(SCARLETT_BUILD_UNIXLIB)
         xmem_unix
         scarlett_rdna2_lifter
         Threads::Threads
+        ZLIB::ZLIB
         ${CMAKE_DL_LIBS}
     )
     install(TARGETS d3d12_xs_unix
@@ -65,6 +67,7 @@ if(SCARLETT_BUILD_UNIXLIB)
         xmem_unix
         scarlett_rdna2_lifter
         Threads::Threads
+        ZLIB::ZLIB
         ${CMAKE_DL_LIBS}
     )
 

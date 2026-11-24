@@ -43,6 +43,8 @@ uint32_t rotl32(uint32_t x, uint32_t s) noexcept {
     return (x << s) | (x >> (32u - s));
 }
 
+} // namespace
+
 /*
  * Clean-room DXBC MD5 digest over container bytes [20 .. total_size).
  * Matches the modified MD5 length-word layout expected by DirectX / dxil-spirv.
@@ -139,6 +141,8 @@ void compute_dxbc_digest(const uint8_t *data, uint32_t total_size, uint8_t out_d
         write_le32(out_digest + i * 4u, state[i]);
     }
 }
+
+namespace {
 
 struct ParsedChunk {
     uint32_t fourcc = 0;

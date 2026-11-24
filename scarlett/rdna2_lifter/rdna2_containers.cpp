@@ -594,7 +594,47 @@ UnpackedRdna2Container unpack_fssm(const uint8_t* data, size_t size) noexcept {
         out.status = SCARLETT_ERR_SHADER_INVALID_CONTAINER;
         return out;
     }
-    const uint32_t total_bytes = read_le32(data + 4u);
+    const uint32_t word1 = read_le32(data + 4u);
+    const uint32_t word2 = read_le32(data + 8u);
+    if (word1 == 0x00000101u && size >= 0xE0u &&
+        static_cast<uint64_t>(word2) + 16u <= size) {
+        /* Real Xbox Scarlett FSSM v1.1 module (decompressed from XDAT/XBCH) */
+        const uint32_t hdr_off = read_le32(data + 0x40u);
+        const uint32_t isa_meta_off =
+            (hdr_off >= 0x40u && static_cast<uint64_t>(hdr_off) + 0x20u <= size)
+                ? (hdr_off + 0x10u)
+                : 0xC0u;
+        const uint32_t isa_base = read_le32(data + isa_meta_off);
+        const uint32_t isa_len = read_le32(data + isa_meta_off + 8u);
+        if (isa_len >= 0x2Cu &&
+            static_cast<uint64_t>(isa_base) + static_cast<uint64_t>(isa_len) <= size) {
+            const uint32_t isa_start = isa_base + 0x28u;
+            const uint32_t isa_bytes = isa_len - 0x28u;
+            if ((isa_bytes & 3u) == 0u && isa_bytes >= 4u) {
+                out.meta.container_kind = ContainerKind::FSSM;
+                out.meta.stage = ShaderStage::Pixel; /* Caller overrides from DXIL header */
+                out.meta.wave_size = 64u;
+                out.meta.vgpr_count = 32u;
+                out.meta.sgpr_count = 32u;
+                out.meta.export_mask = 0x1u;
+                out.meta.f32_denorm_ftz = true;
+                const size_t nwords = isa_bytes / 4u;
+                out.isa_words.resize(nwords);
+                for (size_t i = 0; i < nwords; ++i) {
+                    out.isa_words[i] = read_le32(data + isa_start + i * 4u);
+                }
+                while (out.isa_words.size() > 1u && out.isa_words.back() == 0xBF9F0000u) {
+                    out.isa_words.pop_back();
+                }
+                out.status = SCARLETT_OK;
+                return out;
+            }
+        }
+        out.status = SCARLETT_ERR_SHADER_INVALID_CONTAINER;
+        return out;
+    }
+
+    const uint32_t total_bytes = word1;
     const uint32_t section_count = read_le32(data + 12u);
     if (total_bytes < 16u || total_bytes > size || section_count == 0u || section_count > 64u) {
         out.status = SCARLETT_ERR_SHADER_INVALID_CONTAINER;
@@ -707,6 +747,9 @@ UnpackedRdna2Container unpack_ps09(const uint8_t* data, size_t size) noexcept {
     if (!extract_isa_words(data, size, 52u, isa_bytes, out.isa_words)) {
         out.status = SCARLETT_ERR_SHADER_INVALID_CONTAINER;
         return out;
+    }
+    while (out.isa_words.size() > 1u && out.isa_words.back() == 0xBF9F0000u) {
+        out.isa_words.pop_back();
     }
     out.status = SCARLETT_OK;
     return out;

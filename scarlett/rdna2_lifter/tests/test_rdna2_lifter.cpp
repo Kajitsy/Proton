@@ -652,6 +652,101 @@ void test_c_abi_bridge() {
     CHECK(validate_spirv_vulkan14(spv_buf, &err), "C ABI emitted SPIR-V failed spirv-val: " << err);
 }
 
+void test_fssm_v11_vop3_lit_dpp16_and_no_rogue_desc() {
+    std::cout << "[TEST] FSSM v1.1, VOP3 LITERAL_32, VOP2 DPP16 & graphics_no_rogue_descriptors..." << std::endl;
+
+    /* Hand-assembled GFX10.3 stream: VOP3 with src2=LITERAL_32, VOP2 with src0=DPP16 (250), S_ENDPGM + 0xBF9F0000 pad */
+    const std::vector<uint32_t> isa = {
+        0xD5800000u, /* VOP3A op=0x80 dst=v0 */
+        0x03FE0100u, /* src0=s0(0x100>>9=0? -> 0x100=v0), src1=v0, src2=LITERAL_32(0xFF) */
+        0x3F800000u, /* literal 1.0f */
+        0x060000FAu, /* VOP2 V_ADD_F32 v0, DPP16(250), v0 */
+        0xFF08B108u, /* DPP16 control word */
+        0xBF810000u, /* S_ENDPGM */
+        0xBF9F0000u, /* S_CODE_END padding */
+    };
+
+    /* Build FSSM v1.1 module matching real Scarlett layout */
+    const uint32_t hdr_off = 0xB0u;
+    const uint32_t isa_base = 0xE0u;
+    const uint32_t isa_hdr_bytes = 0x28u;
+    const uint32_t isa_len = isa_hdr_bytes + static_cast<uint32_t>(isa.size() * 4u);
+    std::vector<uint8_t> fssm(isa_base + isa_len, 0u);
+    fssm[0] = 'F'; fssm[1] = 'S'; fssm[2] = 'S'; fssm[3] = 'M';
+    auto w32 = [&](size_t off, uint32_t v) {
+        fssm[off + 0] = static_cast<uint8_t>(v & 0xFFu);
+        fssm[off + 1] = static_cast<uint8_t>((v >> 8u) & 0xFFu);
+        fssm[off + 2] = static_cast<uint8_t>((v >> 16u) & 0xFFu);
+        fssm[off + 3] = static_cast<uint8_t>((v >> 24u) & 0xFFu);
+    };
+    w32(0x04u, 0x00000101u);
+    w32(0x08u, static_cast<uint32_t>(fssm.size() - 16u));
+    w32(0x40u, hdr_off);
+    w32(hdr_off + 0x10u, isa_base);
+    w32(hdr_off + 0x18u, isa_len);
+    for (size_t i = 0; i < isa.size(); ++i) {
+        w32(isa_base + isa_hdr_bytes + i * 4u, isa[i]);
+    }
+
+    auto unpacked = unpack_rdna2_container(fssm.data(), fssm.size());
+    CHECK(unpacked.status == SCARLETT_OK, "FSSM v1.1 unpack must succeed");
+    CHECK(unpacked.isa_words.size() == isa.size() - 1u, "Trailing 0xBF9F0000 pad must be trimmed");
+
+    unpacked.meta.stage = ShaderStage::Pixel;
+    Rdna2Lifter lifter;
+    LiftOptions opts{};
+    opts.mode = SCARLETT_SHADER_MODE_ADAPTIVE;
+    opts.graphics_no_rogue_descriptors = true;
+    opts.enable_quad_control = false;
+    opts.enable_maximal_reconvergence = false;
+    opts.validate_with_spirv_tools = true;
+    auto res = lifter.lift_isa(unpacked.meta, unpacked.isa_words.data(), unpacked.isa_words.size(), opts);
+    CHECK(res.status == SCARLETT_OK && res.spirv_words.size() > 10u && res.spirv_words[0] == 0x07230203u,
+          "FSSM v1.1 lift with VOP3 literal + DPP16 + graphics_no_rogue_descriptors must validate");
+}
+
+void test_image_load_opimageread_and_interleaved_cf_validation() {
+    std::cout << "[TEST] ImageLoad (OpImageRead) & interleaved CfIf/CfLoop LIFO validation..." << std::endl;
+
+    /* MIMG IMAGE_LOAD + S_CBRANCH_SCC0 (If) + backward S_CBRANCH_SCC1 (Loop) crossing If */
+    Rdna2Assembler a;
+    /* Forward conditional skip over backward loop */
+    a.sopc(sopc_op::S_CMP_EQ_U32, reg_code::SGPR_BASE + 0, 0);
+    a.sopp(sopp_op::S_CBRANCH_SCC0, 6); /* forward if */
+    /* Backward loop inside/overlapping */
+    a.vop1(vop1_op::V_MOV_B32, 0, reg_code::VGPR_BASE + 0);
+    a.sopc(sopc_op::S_CMP_LG_U32, reg_code::SGPR_BASE + 1, 0);
+    a.sopp(sopp_op::S_CBRANCH_SCC1, -2);
+    a.sopp(sopp_op::S_ENDPGM);
+
+    Rdna2ShaderMetadata meta{};
+    meta.stage = ShaderStage::Pixel;
+    meta.wave_size = 64u;
+    Rdna2Lifter lifter;
+    LiftOptions opts{};
+    opts.mode = SCARLETT_SHADER_MODE_ADAPTIVE;
+    opts.graphics_no_rogue_descriptors = true;
+    opts.enable_quad_control = false;
+    opts.enable_maximal_reconvergence = false;
+    opts.validate_with_spirv_tools = true;
+    opts.gpu_profile.probe_bitmask &= ~probe_bits::EXT_SPV_KHR_FMA;
+
+    auto res = lifter.lift_isa(meta, a.words().data(), a.words().size(), opts);
+    CHECK(res.status == SCARLETT_OK && res.spirv_words.size() > 10u,
+          "Interleaved CfIf/CfLoop must pass spirv-val Vulkan 1.4: " << res.diagnostics);
+
+    /* Compute shader with MIMG IMAGE_LOAD (0xF0000000 MIMG encoding) must emit OpImageRead and validate */
+    const std::vector<uint32_t> img_isa = {
+        0xF0000000u, /* MIMG IMAGE_LOAD */
+        0x00000000u,
+        0xBF810000u, /* S_ENDPGM */
+    };
+    meta.stage = ShaderStage::Compute;
+    auto img_res = lifter.lift_isa(meta, img_isa.data(), img_isa.size(), opts);
+    CHECK(img_res.status == SCARLETT_OK && img_res.spirv_words.size() > 10u,
+          "MIMG ImageLoad must emit OpImageRead and pass spirv-val Vulkan 1.4: " << img_res.diagnostics);
+}
+
 } // namespace
 
 int main() {
@@ -661,6 +756,8 @@ int main() {
     test_stage2_known_fp_class_and_stage3_wave64();
     test_differential_adaptive_vs_exact_live_vulkan_and_vm();
     test_c_abi_bridge();
+    test_fssm_v11_vop3_lit_dpp16_and_no_rogue_desc();
+    test_image_load_opimageread_and_interleaved_cf_validation();
 
     if (g_failures == 0) {
         std::cout << "[PASS] All rdna2_lifter unit & live Vulkan 1.4 integration tests PASSED (0 failures)." << std::endl;

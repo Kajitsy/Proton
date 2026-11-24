@@ -162,6 +162,12 @@ int32_t op_lift_shader(void *args) {
         *static_cast<scarlett_d3d12xs_lift_shader_params_t *>(args));
 }
 
+int32_t op_check_mem(void *args) {
+    if (args == nullptr) return SCARLETT_E_POINTER;
+    return D3D12XsManager::instance().check_mem(
+        *static_cast<scarlett_d3d12xs_check_mem_params_t *>(args));
+}
+
 } // namespace
 
 } // namespace scarlett::d3d12xs::unixlib
@@ -195,7 +201,8 @@ using wine_unixlib_entry_t = int32_t (*)(void *);
     scarlett::d3d12xs::unixlib::op_power_state,            /* 21: POWER_STATE */ \
     scarlett::d3d12xs::unixlib::op_dump_dred_fault,        /* 22: DUMP_DRED_FAULT */ \
     scarlett::d3d12xs::unixlib::op_report_stub,            /* 23: REPORT_STUB */ \
-    scarlett::d3d12xs::unixlib::op_lift_shader             /* 24: LIFT_SHADER */
+    scarlett::d3d12xs::unixlib::op_lift_shader,            /* 24: LIFT_SHADER */ \
+    scarlett::d3d12xs::unixlib::op_check_mem               /* 25: CHECK_MEM */
 
 static const wine_unixlib_entry_t k_d3d12xs_local_unix_funcs[] = {
     SCARLETT_D3D12XS_UNIX_FUNC_LIST

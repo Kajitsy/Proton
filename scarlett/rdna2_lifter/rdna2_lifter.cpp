@@ -95,7 +95,16 @@ LiftResult Rdna2Lifter::lift_isa(const Rdna2ShaderMetadata& meta,
     uint32_t err_pc = 0u;
     if (!decode_gfx103_stream(isa_words, word_count, decoded, err_pc)) {
         res.status = SCARLETT_ERR_SHADER_UNSUPPORTED_ISA;
-        res.diagnostics = "GFX10.3 ISA decode error at word offset " + std::to_string(err_pc);
+        std::string ctx;
+        const size_t start = (err_pc > 6u) ? (err_pc - 6u) : 0u;
+        const size_t end = std::min(word_count, static_cast<size_t>(err_pc) + 3u);
+        for (size_t k = start; k < end; ++k) {
+            char wb[48];
+            std::snprintf(wb, sizeof(wb), "%s%zu:%08x", (k == start ? "" : " "), k, isa_words[k]);
+            ctx += wb;
+        }
+        res.diagnostics = "GFX10.3 ISA decode error at word " + std::to_string(err_pc) +
+                          "/" + std::to_string(word_count) + " [" + ctx + "]";
         return res;
     }
     res.decoded_instruction_count = static_cast<uint32_t>(decoded.size());

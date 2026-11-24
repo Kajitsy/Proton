@@ -68,6 +68,7 @@ constexpr uint16_t OpCompositeConstruct              = 80;
 constexpr uint16_t OpCompositeExtract                = 81;
 constexpr uint16_t OpImageSampleExplicitLod          = 88;
 constexpr uint16_t OpImageFetch                      = 95;
+constexpr uint16_t OpImageRead                       = 98;
 constexpr uint16_t OpImageWrite                      = 99;
 constexpr uint16_t OpConvertFToU                     = 109;
 constexpr uint16_t OpConvertFToS                     = 110;
@@ -440,20 +441,26 @@ public:
             setup_ray_query_globals();
         }
 
+        const bool suppress_rogue_descriptors =
+            opts_.graphics_no_rogue_descriptors &&
+            mod_.meta.stage != ShaderStage::Compute &&
+            mod_.rt_strategy != RtStrategy::BdaBvh4Fallback;
+
         /* Storage Buffers (binding 0 = input SSBO, binding 1 = output SSBO) */
         const bool need_ssbo =
-            mod_.uses_storage_buffer ||
-            mod_.rt_strategy == RtStrategy::BdaBvh4Fallback ||
-            mod_.meta.stage == ShaderStage::Compute;
+            !suppress_rogue_descriptors &&
+            (mod_.uses_storage_buffer ||
+             mod_.rt_strategy == RtStrategy::BdaBvh4Fallback ||
+             mod_.meta.stage == ShaderStage::Compute);
         if (need_ssbo) {
             setup_ssbo_globals();
         }
 
         /* Sampled / Storage images */
-        if (mod_.uses_image_sample) {
+        if (!suppress_rogue_descriptors && mod_.uses_image_sample) {
             setup_sampled_image_global();
         }
-        if (mod_.uses_image_storage) {
+        if (!suppress_rogue_descriptors && mod_.uses_image_storage) {
             setup_storage_image_global();
         }
 
@@ -1636,6 +1643,7 @@ private:
         struct OpenLoop { uint32_t hdr_lbl; uint32_t cont_lbl; uint32_t merge_lbl; };
         std::vector<OpenIf> if_stack;
         std::vector<OpenLoop> loop_stack;
+        std::vector<uint8_t> cf_kind_stack; /* 0 = If, 1 = Loop */
 
         /* Note: inside structured CfIf/CfLoop blocks, any SSA values defined inside
          * cannot be referenced outside without dominating; our CFG guarantees linear
@@ -1812,7 +1820,7 @@ private:
                         uint32_t xy = alloc_id();
                         push_inst(body_, spv::OpCompositeConstruct, {t_v2i32, xy, ci, const_i32(0)});
                         uint32_t rgba = alloc_id();
-                        push_inst(body_, spv::OpImageFetch, {t_v4f32_, rgba, im, xy});
+                        push_inst(body_, spv::OpImageRead, {t_v4f32_, rgba, im, xy});
                         res = alloc_id();
                         push_inst(body_, spv::OpCompositeExtract, {t_f32_, res, rgba, 0u});
                     } else {
@@ -2404,15 +2412,17 @@ private:
                     push_inst(body_, spv::OpBranchConditional, {cond, then_lbl, merge_lbl});
                     push_inst(body_, spv::OpLabel, {then_lbl});
                     if_stack.push_back({merge_lbl});
+                    cf_kind_stack.push_back(0u);
                     ++cf_depth;
                     break;
                 }
                 case IrOp::CfElse:
                     break;
                 case IrOp::CfEndIf: {
-                    if (!if_stack.empty()) {
+                    if (!if_stack.empty() && !cf_kind_stack.empty() && cf_kind_stack.back() == 0u) {
                         const uint32_t merge_lbl = if_stack.back().merge_lbl;
                         if_stack.pop_back();
+                        cf_kind_stack.pop_back();
                         push_inst(body_, spv::OpBranch, {merge_lbl});
                         push_inst(body_, spv::OpLabel, {merge_lbl});
                         --cf_depth;
@@ -2433,6 +2443,7 @@ private:
                     push_inst(body_, spv::OpBranch, {body_lbl});
                     push_inst(body_, spv::OpLabel, {body_lbl});
                     loop_stack.push_back({hdr, cont, merge});
+                    cf_kind_stack.push_back(1u);
                     ++cf_depth;
                     break;
                 }
@@ -2462,9 +2473,21 @@ private:
                     break;
                 }
                 case IrOp::CfLoopEnd: {
-                    if (!loop_stack.empty()) {
+                    while (!cf_kind_stack.empty() && cf_kind_stack.back() == 0u && !if_stack.empty()) {
+                        const uint32_t merge_lbl = if_stack.back().merge_lbl;
+                        if_stack.pop_back();
+                        cf_kind_stack.pop_back();
+                        if (!loop_broke_) {
+                            push_inst(body_, spv::OpBranch, {merge_lbl});
+                        }
+                        push_inst(body_, spv::OpLabel, {merge_lbl});
+                        loop_broke_ = false;
+                        --cf_depth;
+                    }
+                    if (!loop_stack.empty() && !cf_kind_stack.empty() && cf_kind_stack.back() == 1u) {
                         auto lp = loop_stack.back();
                         loop_stack.pop_back();
+                        cf_kind_stack.pop_back();
                         if (!loop_broke_) {
                             push_inst(body_, spv::OpBranch, {lp.merge_lbl});
                         }
@@ -2490,19 +2513,25 @@ private:
             }
         }
 
-        /* Close any unclosed CF scopes defensively */
-        while (!if_stack.empty()) {
-            push_inst(body_, spv::OpBranch, {if_stack.back().merge_lbl});
-            push_inst(body_, spv::OpLabel, {if_stack.back().merge_lbl});
-            if_stack.pop_back();
-        }
-        while (!loop_stack.empty()) {
-            auto lp = loop_stack.back();
-            loop_stack.pop_back();
-            push_inst(body_, spv::OpBranch, {lp.merge_lbl});
-            push_inst(body_, spv::OpLabel, {lp.cont_lbl});
-            push_inst(body_, spv::OpBranch, {lp.hdr_lbl});
-            push_inst(body_, spv::OpLabel, {lp.merge_lbl});
+        /* Close any unclosed CF scopes defensively in strict LIFO order */
+        while (!cf_kind_stack.empty()) {
+            uint8_t k = cf_kind_stack.back();
+            cf_kind_stack.pop_back();
+            if (k == 0u && !if_stack.empty()) {
+                push_inst(body_, spv::OpBranch, {if_stack.back().merge_lbl});
+                push_inst(body_, spv::OpLabel, {if_stack.back().merge_lbl});
+                if_stack.pop_back();
+            } else if (k == 1u && !loop_stack.empty()) {
+                auto lp = loop_stack.back();
+                loop_stack.pop_back();
+                if (!loop_broke_) {
+                    push_inst(body_, spv::OpBranch, {lp.merge_lbl});
+                }
+                loop_broke_ = false;
+                push_inst(body_, spv::OpLabel, {lp.cont_lbl});
+                push_inst(body_, spv::OpBranch, {lp.hdr_lbl});
+                push_inst(body_, spv::OpLabel, {lp.merge_lbl});
+            }
         }
     }
 

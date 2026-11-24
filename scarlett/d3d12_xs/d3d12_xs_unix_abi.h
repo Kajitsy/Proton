@@ -56,7 +56,8 @@ typedef enum scarlett_d3d12xs_unix_op_e {
     SCARLETT_D3D12XS_UNIX_DUMP_DRED_FAULT         = 22,
     SCARLETT_D3D12XS_UNIX_REPORT_STUB             = 23,
     SCARLETT_D3D12XS_UNIX_LIFT_SHADER             = 24,
-    SCARLETT_D3D12XS_UNIX_OP_COUNT                = 25
+    SCARLETT_D3D12XS_UNIX_CHECK_MEM               = 25,
+    SCARLETT_D3D12XS_UNIX_OP_COUNT                = 26
 } scarlett_d3d12xs_unix_op_t;
 
 /* ============================================================================
@@ -590,6 +591,18 @@ typedef struct scarlett_d3d12xs_lift_shader_params_s {
 
 SCARLETT_STATIC_ASSERT(sizeof(scarlett_d3d12xs_lift_shader_params_t) == 64,
                        "scarlett_d3d12xs_lift_shader_params_t must be 64 bytes");
+
+typedef struct scarlett_d3d12xs_check_mem_params_s {
+    uint64_t addr;
+    uint64_t size;
+    uint32_t check_write;
+    uint32_t out_ok;
+    scarlett_hresult_t out_status;
+    uint32_t reserved;
+} scarlett_d3d12xs_check_mem_params_t;
+
+SCARLETT_STATIC_ASSERT(sizeof(scarlett_d3d12xs_check_mem_params_t) == 32,
+                       "scarlett_d3d12xs_check_mem_params_t must be 32 bytes");
 
 #ifdef __cplusplus
 } /* extern "C" */

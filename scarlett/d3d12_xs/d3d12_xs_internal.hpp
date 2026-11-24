@@ -86,6 +86,8 @@ scarlett_hresult_t encode_rdna2_descriptor(
  * DXIL Fast-Path (Path A): DXBC Container Parser & XBOX/XS2M Stripper
  * ============================================================================ */
 
+void compute_dxbc_digest(const uint8_t *data, uint32_t total_size, uint8_t out_digest[16]) noexcept;
+
 scarlett_hresult_t strip_xbox_dxil_container(
     const uint8_t *src,
     uint64_t src_size,
@@ -438,6 +440,7 @@ public:
     scarlett_hresult_t dump_dred_fault(scarlett_d3d12xs_dred_dump_params_t &p);
     scarlett_hresult_t report_stub(scarlett_d3d12xs_report_stub_params_t &p);
     scarlett_hresult_t lift_shader(scarlett_d3d12xs_lift_shader_params_t &p);
+    scarlett_hresult_t check_mem(scarlett_d3d12xs_check_mem_params_t &p);
 
     void set_stub_sink(scarlett_stub_sink_fn_t sink, void *user_data);
 

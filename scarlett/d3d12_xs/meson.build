@@ -21,6 +21,7 @@ if is_windows_pe
 else
   d3d12_xs_threads_dep = dependency('threads')
   d3d12_xs_dl_dep = meson.get_compiler('cpp').find_library('dl', required: false)
+  d3d12_xs_zlib_dep = dependency('zlib')
 
   d3d12_xs_unix_so = shared_library('d3d12_xs_unix',
     d3d12_xs_unix_sources,
@@ -28,7 +29,7 @@ else
     include_directories: [scarlett_inc, include_directories('.')],
     cpp_args: ['-Wall', '-Wextra', '-Werror', '-fvisibility=hidden'],
     link_with: [xmem_unix_so, rdna2_lifter_lib],
-    dependencies: [d3d12_xs_threads_dep, d3d12_xs_dl_dep],
+    dependencies: [d3d12_xs_threads_dep, d3d12_xs_dl_dep, d3d12_xs_zlib_dep],
     install: true,
     install_dir: scarlett_install_dir,
   )
@@ -38,7 +39,7 @@ else
     include_directories: [scarlett_inc, include_directories('.')],
     cpp_args: ['-Wall', '-Wextra', '-Werror', '-DSCARLETT_D3D12XS_STATIC_HOST_LINK=1'],
     link_with: [xmem_unix_so, rdna2_lifter_lib],
-    dependencies: [d3d12_xs_threads_dep, d3d12_xs_dl_dep],
+    dependencies: [d3d12_xs_threads_dep, d3d12_xs_dl_dep, d3d12_xs_zlib_dep],
     install: false,
   )
 
@@ -56,7 +57,7 @@ else
       include_directories: [scarlett_inc, include_directories('.')],
       cpp_args: ['-Wall', '-Wextra', '-Werror'],
       link_with: [d3d12_xs_pe_host_lib, d3d12_xs_unix_core_lib, xmem_pe_host_lib, xmem_unix_so],
-      dependencies: [d3d12_xs_threads_dep, d3d12_xs_dl_dep],
+      dependencies: [d3d12_xs_threads_dep, d3d12_xs_dl_dep, d3d12_xs_zlib_dep],
       install: false,
     )
 
