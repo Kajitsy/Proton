@@ -864,7 +864,7 @@ bool try_lift_dxbc_xbch_to_spv0(
     opts.mode = mode;
     opts.prefer_ray_query = (prefer_ray_query != 0u);
     opts.gpu_profile.probe_bitmask &= ~scarlett::rdna2::probe_bits::EXT_SPV_KHR_FMA;
-    opts.graphics_no_rogue_descriptors = true;
+    opts.graphics_no_rogue_descriptors = false;
     opts.enable_maximal_reconvergence = false;
     opts.enable_quad_control = false;
     opts.validate_with_spirv_tools = true;

@@ -327,6 +327,91 @@ public:
     uint32_t get_sgpr_slot(uint16_t s) const noexcept {
         return (s < 106u) ? sgpr_slot_[s] : 0u;
     }
+    bool has_sgpr(uint16_t s) const noexcept {
+        return s < 106u && sgpr_[s] != 0u;
+    }
+
+    struct IfSnapshot {
+        uint32_t merge_idx{0};
+        std::array<uint32_t, 106> sgpr{};
+        std::array<uint32_t, 256> vgpr{};
+        std::array<IrType, 256>   vgpr_type{};
+        uint32_t scc{0};
+        uint32_t last_vcc_bool{0};
+    };
+
+    IfSnapshot capture_if_snapshot(uint32_t merge_idx) const {
+        IfSnapshot st{};
+        st.merge_idx = merge_idx;
+        st.sgpr = sgpr_;
+        st.vgpr = vgpr_;
+        st.vgpr_type = vgpr_type_;
+        st.scc = scc_;
+        st.last_vcc_bool = last_vcc_bool_;
+        return st;
+    }
+
+    void close_if_with_phis(const IfSnapshot& st) {
+        struct PendingPhi {
+            uint8_t kind;
+            uint16_t reg;
+            IrType type;
+            uint32_t pre_id;
+            uint32_t then_id;
+        };
+        std::vector<PendingPhi> phis;
+        for (uint16_t v = 0; v < 256u; ++v) {
+            if (vgpr_[v] != st.vgpr[v]) {
+                IrType ty = (st.vgpr[v] != 0u) ? st.vgpr_type[v] : vgpr_type_[v];
+                uint32_t pre = st.vgpr[v];
+                if (pre == 0u) {
+                    pre = (ty == IrType::F32) ? const_f32(0.0f) : const_u32(0u);
+                }
+                uint32_t thn = vgpr_[v];
+                if (thn == 0u) {
+                    thn = (ty == IrType::F32) ? const_f32(0.0f) : const_u32(0u);
+                } else if (vgpr_type_[v] != ty) {
+                    thn = emit((ty == IrType::F32) ? IrOp::BitcastU32ToF32 : IrOp::BitcastF32ToU32,
+                               ty, ValueUniformity::Divergent, {thn});
+                }
+                phis.push_back({0u, v, ty, pre, thn});
+            }
+        }
+        for (uint16_t s = 0; s < 106u; ++s) {
+            if (sgpr_[s] != st.sgpr[s]) {
+                uint32_t pre = st.sgpr[s] ? st.sgpr[s] : const_u32(0u);
+                uint32_t thn = sgpr_[s] ? sgpr_[s] : const_u32(0u);
+                phis.push_back({1u, s, IrType::U32, pre, thn});
+            }
+        }
+        if (scc_ != st.scc) {
+            uint32_t pre = st.scc ? st.scc : const_bool(true);
+            uint32_t thn = scc_ ? scc_ : const_bool(true);
+            phis.push_back({2u, 0u, IrType::Bool, pre, thn});
+        }
+        if (last_vcc_bool_ != st.last_vcc_bool) {
+            uint32_t pre = st.last_vcc_bool ? st.last_vcc_bool : const_bool(true);
+            uint32_t thn = last_vcc_bool_ ? last_vcc_bool_ : const_bool(true);
+            phis.push_back({3u, 0u, IrType::Bool, pre, thn});
+        }
+
+        emit(IrOp::CfEndIf, IrType::Void, ValueUniformity::Uniform);
+
+        for (const auto& p : phis) {
+            const ValueUniformity u = (p.kind == 0u) ? ValueUniformity::Divergent : ValueUniformity::Uniform;
+            uint32_t phi_id = emit(IrOp::Phi, p.type, u, {p.pre_id, p.then_id});
+            if (p.kind == 0u) {
+                vgpr_[p.reg] = phi_id;
+                vgpr_type_[p.reg] = p.type;
+            } else if (p.kind == 1u) {
+                sgpr_[p.reg] = phi_id;
+            } else if (p.kind == 2u) {
+                scc_ = phi_id;
+            } else {
+                last_vcc_bool_ = phi_id;
+            }
+        }
+    }
 
 private:
     static float inline_float_val(uint16_t code) noexcept {
@@ -381,9 +466,10 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
 
     /* Pre-collect vertex buffer load offsets in VS so each maps deterministically to Location 0, 1, ... */
     std::vector<uint32_t> vs_attr_offsets;
+    uint32_t vs_cbv_slot_bias = 0u;
     if (meta.stage == ShaderStage::Vertex) {
         for (const auto& di : decoded) {
-            if (di.cls == IsaClass::MUBUF || di.cls == IsaClass::MTBUF) {
+            if ((di.cls == IsaClass::MUBUF || di.cls == IsaClass::MTBUF) && !(di.offen && !di.idxen)) {
                 const bool is_load =
                     (di.cls == IsaClass::MUBUF && di.opcode >= mubuf_op::BUFFER_LOAD_DWORD && di.opcode <= mubuf_op::BUFFER_LOAD_DWORDX3) ||
                     (di.cls == IsaClass::MUBUF && di.opcode >= mubuf_op::BUFFER_LOAD_FORMAT_X && di.opcode <= mubuf_op::BUFFER_LOAD_FORMAT_XYZW) ||
@@ -396,6 +482,31 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
             }
         }
         std::sort(vs_attr_offsets.begin(), vs_attr_offsets.end());
+
+        uint32_t raw_vs_cbv_mask = 0u;
+        bool s8_is_desc = true;
+        for (const auto& di : decoded) {
+            if (di.cls == IsaClass::SMEM) {
+                const bool is_sbuf = (di.opcode >= smem_op::S_BUFFER_LOAD_DWORD &&
+                                      di.opcode <= smem_op::S_BUFFER_LOAD_DWORDX16);
+                const uint32_t cnt = (di.opcode == smem_op::S_LOAD_DWORDX8 || di.opcode == smem_op::S_LOAD_DWORDX16) ? 8u : 4u;
+                if (!is_sbuf && cnt < 8u && di.src[0] == 8u && s8_is_desc) {
+                    raw_vs_cbv_mask |= (1u << ((di.offset / 32u) & 7u));
+                }
+                if (di.dst <= 8u && di.dst + cnt > 8u) {
+                    s8_is_desc = false;
+                }
+            } else if (!di.dst_is_vgpr &&
+                       (di.cls == IsaClass::SOP1 || di.cls == IsaClass::SOP2 || di.cls == IsaClass::SOPK)) {
+                const uint32_t width = (di.cls == IsaClass::SOP1 && di.opcode == sop1_op::S_MOV_B64) ? 2u : 1u;
+                if (di.dst <= 8u && di.dst + width > 8u) {
+                    s8_is_desc = false;
+                }
+            }
+        }
+        if (raw_vs_cbv_mask != 0u && (raw_vs_cbv_mask & 1u) == 0u) {
+            vs_cbv_slot_bias = 1u;
+        }
     }
 
     /* Step 1: Map word PC -> instruction index & discover CFG block leaders */
@@ -498,16 +609,17 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
     if (meta.stage == ShaderStage::Vertex) {
         b.set_sgpr_desc(0u, IrBuilder::SgprKind::VbTablePtr, 0u);
         b.set_sgpr_desc(8u, IrBuilder::SgprKind::DescTablePtr, 0u);
+        b.write_vgpr(0u, b.emit(IrOp::LoadVertexId, IrType::U32, ValueUniformity::Divergent), IrType::U32);
     } else if (meta.stage == ShaderStage::Pixel) {
         b.set_sgpr_desc(8u, IrBuilder::SgprKind::DescTablePtr, 0u);
     }
-    std::vector<uint32_t> open_if_merges;
+    std::vector<IrBuilder::IfSnapshot> open_if_merges;
     int open_loops = 0;
 
     for (uint32_t idx = 0; idx < decoded.size(); ++idx) {
         /* Close any structured IF regions whose merge point is idx */
-        while (!open_if_merges.empty() && open_if_merges.back() == idx) {
-            b.emit(IrOp::CfEndIf, IrType::Void, ValueUniformity::Uniform);
+        while (!open_if_merges.empty() && open_if_merges.back().merge_idx == idx) {
+            b.close_if_with_phis(open_if_merges.back());
             open_if_merges.pop_back();
         }
 
@@ -678,6 +790,12 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
             }
 
             case IsaClass::SOP1: {
+                if ((d.opcode == sop1_op::S_MOV_B32 || d.opcode == sop1_op::S_MOV_B64) &&
+                    (d.dst == reg_code::M0 || d.dst == reg_code::EXEC_LO || d.dst == reg_code::EXEC_HI) &&
+                    d.src[0] < 106u && !b.has_sgpr(d.src[0])) {
+                    b.write_sgpr(d.dst, b.const_u32((d.dst == reg_code::M0) ? 0u : 0xFFFFFFFFu));
+                    break;
+                }
                 const uint32_t a = b.read_src_u32(d.src[0], d.has_literal, d.literal);
                 uint32_t r = a;
                 switch (d.opcode) {
@@ -783,17 +901,27 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
                 if (d.opcode == sopp_op::S_BARRIER) {
                     b.emit(IrOp::Barrier, IrType::Void, ValueUniformity::Uniform);
                 } else if (if_merge_target.count(idx) > 0u) {
-                    /* Forward conditional skip -> structured CfIf */
-                    uint32_t cond = b.get_scc();
-                    if (d.opcode == sopp_op::S_CBRANCH_EXECZ || d.opcode == sopp_op::S_CBRANCH_VCCZ) {
-                        cond = b.get_vcc_bool();
+                    /* Forward conditional skip -> structured CfIf.
+                     * RDNA2 skips to target when condition holds, so fallthrough executes on !cond for SCC1/VCCNZ/EXECNZ. */
+                    const bool use_vcc =
+                        (d.opcode == sopp_op::S_CBRANCH_EXECZ ||
+                         d.opcode == sopp_op::S_CBRANCH_EXECNZ ||
+                         d.opcode == sopp_op::S_CBRANCH_VCCZ ||
+                         d.opcode == sopp_op::S_CBRANCH_VCCNZ);
+                    const bool invert =
+                        (d.opcode == sopp_op::S_CBRANCH_SCC1 ||
+                         d.opcode == sopp_op::S_CBRANCH_VCCNZ ||
+                         d.opcode == sopp_op::S_CBRANCH_EXECNZ);
+                    uint32_t cond = use_vcc ? b.get_vcc_bool() : b.get_scc();
+                    if (invert) {
+                        cond = b.emit(IrOp::LogicalNot, IrType::Bool,
+                                      use_vcc ? ValueUniformity::Divergent : ValueUniformity::Uniform,
+                                      {cond});
                     }
                     b.emit(IrOp::CfIf, IrType::Void,
-                           (d.opcode == sopp_op::S_CBRANCH_EXECZ || d.opcode == sopp_op::S_CBRANCH_VCCZ)
-                               ? ValueUniformity::Divergent
-                               : ValueUniformity::Uniform,
+                           use_vcc ? ValueUniformity::Divergent : ValueUniformity::Uniform,
                            {cond});
-                    open_if_merges.push_back(if_merge_target[idx]);
+                    open_if_merges.push_back(b.capture_if_snapshot(if_merge_target[idx]));
                 } else if (open_loops > 0 &&
                            (d.opcode == sopp_op::S_CBRANCH_SCC1 ||
                             d.opcode == sopp_op::S_CBRANCH_SCC0 ||
@@ -832,7 +960,10 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
                 const auto src_kind = b.get_sgpr_kind(d.src[0]);
                 const uint32_t src_slot = b.get_sgpr_slot(d.src[0]);
                 if (!is_sbuf && src_kind == IrBuilder::SgprKind::DescTablePtr) {
-                    const uint32_t slot = (d.offset / 32u) & 7u;
+                    uint32_t slot = (d.offset / 32u) & 7u;
+                    if (count < 8u && slot >= vs_cbv_slot_bias) {
+                        slot = (slot - vs_cbv_slot_bias) & 7u;
+                    }
                     const auto res_kind = (count >= 8u)
                         ? IrBuilder::SgprKind::TexSrvDesc
                         : IrBuilder::SgprKind::CbvDesc;
@@ -846,14 +977,25 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
                         b.write_sgpr(static_cast<uint16_t>(d.dst + k), b.const_u32(0u));
                     }
                 } else if (is_sbuf && (meta.stage == ShaderStage::Vertex || meta.stage == ShaderStage::Pixel)) {
-                    const uint32_t cbv_slot = (src_kind == IrBuilder::SgprKind::CbvDesc) ? (src_slot & 7u) : 0u;
-                    mod.cbv_slot_mask |= (1u << cbv_slot);
-                    mod.uses_storage_buffer = true;
-                    for (uint32_t k = 0; k < count; ++k) {
-                        const uint32_t dw_idx = (d.offset / 4u) + k;
-                        uint32_t v = b.emit(IrOp::LoadCbvU32, IrType::U32, ValueUniformity::Uniform,
-                                            {}, dw_idx, 0.0f, false, cbv_slot);
-                        b.write_sgpr(static_cast<uint16_t>(d.dst + k), v);
+                    if (src_kind == IrBuilder::SgprKind::DescTablePtr) {
+                        mod.root_srv_mask |= 1u;
+                        mod.uses_storage_buffer = true;
+                        for (uint32_t k = 0; k < count; ++k) {
+                            const uint32_t dw_idx = (d.offset / 4u) + k;
+                            uint32_t v = b.emit(IrOp::LoadRootSrvU32, IrType::U32, ValueUniformity::Uniform,
+                                                {}, dw_idx, 0.0f, false, 0u);
+                            b.write_sgpr(static_cast<uint16_t>(d.dst + k), v);
+                        }
+                    } else {
+                        const uint32_t cbv_slot = (src_kind == IrBuilder::SgprKind::CbvDesc) ? (src_slot & 7u) : 0u;
+                        mod.cbv_slot_mask |= (1u << cbv_slot);
+                        mod.uses_storage_buffer = true;
+                        for (uint32_t k = 0; k < count; ++k) {
+                            const uint32_t dw_idx = (d.offset / 4u) + k;
+                            uint32_t v = b.emit(IrOp::LoadCbvU32, IrType::U32, ValueUniformity::Uniform,
+                                                {}, dw_idx, 0.0f, false, cbv_slot);
+                            b.write_sgpr(static_cast<uint16_t>(d.dst + k), v);
+                        }
                     }
                 } else {
                     mod.uses_storage_buffer = true;
@@ -951,6 +1093,14 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
                         const uint32_t c = b.read_src_u32(d.src[1], false, 0u);
                         uint32_t r = b.emit(IrOp::SelectU32, IrType::U32, ValueUniformity::Divergent,
                                             {b.get_vcc_bool(), c, a});
+                        b.write_vgpr(d.dst, r, IrType::U32);
+                        break;
+                    }
+                    case vop2_op::V_CVT_PKRTZ_F16_F32: {
+                        mod.uses_f16 = true;
+                        const uint32_t a = b.read_src_f32(d.src[0], d.has_literal, d.literal);
+                        const uint32_t c = b.read_src_f32(d.src[1], false, 0u);
+                        uint32_t r = b.emit(IrOp::PackF16x2, IrType::U32, ValueUniformity::Divergent, {a, c});
                         b.write_vgpr(d.dst, r, IrType::U32);
                         break;
                     }
@@ -1446,9 +1596,8 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
 
             case IsaClass::VINTRP: {
                 mod.in_attr_mask |= (1u << (d.attr & 15u));
-                const uint32_t v = b.read_src_f32(d.src[0], false, 0u);
                 uint32_t r = b.emit(IrOp::InterpAttr, IrType::F32, ValueUniformity::Divergent,
-                                    {v}, d.attr, 0.0f, false, d.attr_chan);
+                                    {b.const_f32(0.0f)}, d.attr, 0.0f, false, d.attr_chan);
                 b.write_vgpr(d.dst, r, IrType::F32);
                 break;
             }
@@ -1526,7 +1675,16 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
                               (d.opcode == mubuf_op::BUFFER_LOAD_DWORDX3 || d.opcode == mubuf_op::BUFFER_LOAD_FORMAT_XYZ)  ? 3u :
                               (d.opcode == mubuf_op::BUFFER_LOAD_DWORDX2 || d.opcode == mubuf_op::BUFFER_LOAD_FORMAT_XY)   ? 2u : 1u;
                     }
-                    if (meta.stage == ShaderStage::Vertex && !vs_attr_offsets.empty()) {
+                    if (d.cls == IsaClass::MUBUF && d.offen && !d.idxen &&
+                        b.get_sgpr_kind(d.srsrc) == IrBuilder::SgprKind::DescTablePtr) {
+                        mod.root_srv_mask |= 1u;
+                        mod.uses_storage_buffer = true;
+                        for (uint32_t k = 0; k < cnt; ++k) {
+                            uint32_t r = b.emit(IrOp::LoadRootSrvU32, IrType::U32, ValueUniformity::Divergent,
+                                                {vaddr}, d.offset, 0.0f, false, k);
+                            b.write_vgpr(static_cast<uint16_t>(d.dst + k), r, IrType::U32);
+                        }
+                    } else if (meta.stage == ShaderStage::Vertex && !vs_attr_offsets.empty() && !(d.offen && !d.idxen)) {
                         uint32_t loc = 0u;
                         for (size_t ai = 0u; ai < vs_attr_offsets.size(); ++ai) {
                             if (vs_attr_offsets[ai] == d.offset) {
@@ -1670,7 +1828,7 @@ IrModule build_ssa_ir_and_structurize(const Rdna2ShaderMetadata& meta,
 
     /* Close any remaining open structured regions cleanly */
     while (!open_if_merges.empty()) {
-        b.emit(IrOp::CfEndIf, IrType::Void, ValueUniformity::Uniform);
+        b.close_if_with_phis(open_if_merges.back());
         open_if_merges.pop_back();
     }
     while (open_loops > 0) {

@@ -355,6 +355,8 @@ bool decode_gfx103_stream(const uint32_t* words,
                 inst.opcode = static_cast<uint16_t>((w0 >> 18u) & 0x7Fu);
                 inst.dlc = ((w0 >> 15u) & 1u) != 0u;
                 inst.glc = ((w0 >> 14u) & 1u) != 0u;
+                inst.idxen = ((w0 >> 13u) & 1u) != 0u;
+                inst.offen = ((w0 >> 12u) & 1u) != 0u;
                 inst.slc = ((w1 >> 22u) & 1u) != 0u;
                 inst.offset = w0 & 0xFFFu;
                 inst.srsrc = static_cast<uint8_t>(((w1 >> 16u) & 0x1Fu) * 4u);
@@ -372,6 +374,8 @@ bool decode_gfx103_stream(const uint32_t* words,
                 inst.tbuf_format = static_cast<uint8_t>((w0 >> 19u) & 0x7Fu);
                 inst.opcode = static_cast<uint16_t>((w0 >> 16u) & 0x7u);
                 inst.glc = ((w0 >> 14u) & 1u) != 0u;
+                inst.idxen = ((w0 >> 13u) & 1u) != 0u;
+                inst.offen = ((w0 >> 12u) & 1u) != 0u;
                 inst.offset = w0 & 0xFFFu;
                 inst.srsrc = static_cast<uint8_t>(((w1 >> 16u) & 0x1Fu) * 4u);
                 inst.dst = static_cast<uint16_t>((w1 >> 8u) & 0xFFu);

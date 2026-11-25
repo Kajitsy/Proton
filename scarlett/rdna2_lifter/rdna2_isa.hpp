@@ -287,6 +287,7 @@ constexpr uint16_t V_SUB_CO_CI_U32     = 0x29;
 constexpr uint16_t V_ADD_NC_U32        = 0x25;
 constexpr uint16_t V_SUB_NC_U32        = 0x26;
 constexpr uint16_t V_SUBREV_NC_U32     = 0x27;
+constexpr uint16_t V_CVT_PKRTZ_F16_F32 = 0x2F;
 constexpr uint16_t V_FMAMK_F32         = 0x2C;
 constexpr uint16_t V_FMAAK_F32         = 0x2D;
 constexpr uint16_t V_ADD_F16           = 0x32;
@@ -696,6 +697,8 @@ struct DecodedInst {
     bool     glc{false};
     bool     dlc{false};
     bool     slc{false};
+    bool     offen{false};
+    bool     idxen{false};
     bool     a16{false};
     bool     d16{false};
     uint8_t  tbuf_format{0};

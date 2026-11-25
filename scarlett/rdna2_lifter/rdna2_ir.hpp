@@ -49,7 +49,9 @@ enum class IrOp : uint16_t {
     LoadInputU32,       /* Read from SSBO input buffer[idx] (lane or uniform) */
     LoadInputF32,
     LoadVertexAttr,     /* VS vertex input attribute (imm=location, imm2=component 0..3) */
+    LoadVertexId,       /* VS gl_VertexIndex as U32 */
     LoadCbvU32,         /* Graphics CBV/SSBO load (imm=dword_offset, imm2=slot 0..7) */
+    LoadRootSrvU32,     /* Graphics Root SRV SSBO load (imm=offset, imm2=root_idx/comp) */
     StoreOutputU32,     /* Write to SSBO output buffer[idx] */
     StoreOutputF32,
     LoadLdsU32,
@@ -94,6 +96,8 @@ enum class IrOp : uint16_t {
     BfiB32,
     SelectU32,
     SelectF32,
+    LogicalNot,
+    Phi,                /* Structured CfEndIf merge (args={pre_val, then_val}) */
     /* Floating-Point ALU (FP32) */
     FAdd,
     FSub,
@@ -220,6 +224,7 @@ struct IrModule {
     uint32_t branch_count{0};
     uint32_t max_lds_words{64};
     uint32_t cbv_slot_mask{0};
+    uint32_t root_srv_mask{0};
     uint32_t tex_slot_mask{0};
     uint32_t vtx_attr_mask{0};
     uint32_t out_param_mask{0};

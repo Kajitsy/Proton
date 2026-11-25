@@ -123,6 +123,7 @@ constexpr uint16_t OpEmitVertex                      = 218;
 constexpr uint16_t OpEndPrimitive                    = 219;
 constexpr uint16_t OpControlBarrier                  = 224;
 constexpr uint16_t OpAtomicIAdd                      = 234;
+constexpr uint16_t OpPhi                             = 245;
 constexpr uint16_t OpLoopMerge                       = 246;
 constexpr uint16_t OpSelectionMerge                  = 247;
 constexpr uint16_t OpLabel                           = 248;
@@ -360,6 +361,7 @@ public:
         push_inst(types_, spv::OpTypeFunction, {t_fn_void_, t_void_});
 
         /* Common pointer types */
+        p_func_bool_ = make_ptr(spv::ScFunction, t_bool_);
         p_func_u32_ = make_ptr(spv::ScFunction, t_u32_);
         p_func_f32_ = make_ptr(spv::ScFunction, t_f32_);
 
@@ -447,17 +449,17 @@ public:
             mod_.meta.stage != ShaderStage::Compute &&
             mod_.rt_strategy != RtStrategy::BdaBvh4Fallback;
 
-        /* Storage Buffers (binding 0 = input SSBO, binding 1 = output SSBO) or Graphics CBV slots */
-        const bool is_gfx_with_explicit_cbv =
+        /* Storage Buffers (binding 0 = input SSBO, binding 1 = output SSBO) or Graphics CBV/RootSRV slots */
+        const bool is_gfx_with_explicit_desc =
             (mod_.meta.stage != ShaderStage::Compute &&
              mod_.rt_strategy != RtStrategy::BdaBvh4Fallback &&
-             mod_.cbv_slot_mask != 0u);
+             (mod_.cbv_slot_mask != 0u || mod_.root_srv_mask != 0u));
         const bool need_ssbo =
             !suppress_rogue_descriptors &&
             (mod_.uses_storage_buffer ||
              mod_.rt_strategy == RtStrategy::BdaBvh4Fallback ||
              mod_.meta.stage == ShaderStage::Compute);
-        if (need_ssbo && is_gfx_with_explicit_cbv) {
+        if (need_ssbo && is_gfx_with_explicit_desc) {
             setup_ssbo_types();
             for (uint32_t s = 0u; s < 8u; ++s) {
                 if ((mod_.cbv_slot_mask & (1u << s)) != 0u) {
@@ -467,6 +469,16 @@ public:
                     push_inst(decos_, spv::OpDecorate, {var_cbv_ssbo_[s], spv::DecBinding, s});
                     push_inst(decos_, spv::OpDecorate, {var_cbv_ssbo_[s], spv::DecNonWritable});
                     add_interface(var_cbv_ssbo_[s]);
+                }
+            }
+            for (uint32_t r = 0u; r < 4u; ++r) {
+                if ((mod_.root_srv_mask & (1u << r)) != 0u) {
+                    var_root_ssbo_[r] = alloc_id();
+                    push_inst(globals_, spv::OpVariable, {p_ssbo_struct_, var_root_ssbo_[r], spv::ScStorageBuffer});
+                    push_inst(decos_, spv::OpDecorate, {var_root_ssbo_[r], spv::DecDescriptorSet, 0u});
+                    push_inst(decos_, spv::OpDecorate, {var_root_ssbo_[r], spv::DecBinding, 16u + r});
+                    push_inst(decos_, spv::OpDecorate, {var_root_ssbo_[r], spv::DecNonWritable});
+                    add_interface(var_root_ssbo_[r]);
                 }
             }
         } else if (need_ssbo) {
@@ -536,7 +548,7 @@ public:
         }
 
         /* Emit all SSA IR instructions */
-        emit_ir_body(is_workgroup_stage, use_paired_wave64_lds);
+        emit_ir_body(entry_label, is_workgroup_stage, use_paired_wave64_lds);
 
         /* Stage epilogue & terminator */
         emit_stage_epilogue(exec_model);
@@ -1696,10 +1708,13 @@ private:
         return mask;
     }
 
-    void emit_ir_body(bool is_workgroup_stage, bool use_paired_wave64_lds) {
+    void emit_ir_body(uint32_t entry_label, bool is_workgroup_stage, bool use_paired_wave64_lds) {
         std::vector<uint32_t> val(mod_.next_ssa_id + 1u, 0u);
+        std::vector<int> val_cf_depth(mod_.next_ssa_id + 1u, 0);
+        int cf_depth = 0;
         auto arg = [&](const IrInst& inst, uint8_t k, IrType fallback_type) -> uint32_t {
-            if (k < inst.arg_count && inst.args[k] < val.size() && val[inst.args[k]] != 0u) {
+            if (k < inst.arg_count && inst.args[k] < val.size() && val[inst.args[k]] != 0u &&
+                (val_cf_depth[inst.args[k]] <= cf_depth || inst.op == IrOp::Phi)) {
                 return val[inst.args[k]];
             }
             if (fallback_type == IrType::F32) return const_f32(0.0f);
@@ -1707,19 +1722,48 @@ private:
             return const_u32(0u);
         };
 
-        struct OpenIf { uint32_t merge_lbl; };
+        uint32_t current_label = entry_label;
+        auto emit_label = [&](uint32_t lbl) {
+            push_inst(body_, spv::OpLabel, {lbl});
+            current_label = lbl;
+        };
+
+        struct OpenIf { uint32_t header_lbl; uint32_t merge_lbl; };
         struct OpenLoop { uint32_t hdr_lbl; uint32_t cont_lbl; uint32_t merge_lbl; };
         std::vector<OpenIf> if_stack;
         std::vector<OpenLoop> loop_stack;
         std::vector<uint8_t> cf_kind_stack; /* 0 = If, 1 = Loop */
 
-        /* Note: inside structured CfIf/CfLoop blocks, any SSA values defined inside
-         * cannot be referenced outside without dominating; our CFG guarantees linear
-         * dominance for straight-line ops, and for safety if a value is defined inside
-         * a branch we also mirror final results cleanly. */
-        int cf_depth = 0;
+        std::vector<size_t> open_if_insts;
+        std::unordered_map<size_t, std::vector<size_t>> if_to_phis;
+        std::unordered_map<size_t, std::vector<size_t>> endif_to_phis;
+        std::vector<uint32_t> phi_vars(mod_.next_ssa_id + 1u, 0u);
+        for (size_t i = 0; i < mod_.insts.size(); ++i) {
+            const auto& mi = mod_.insts[i];
+            if (mi.op == IrOp::CfIf) {
+                open_if_insts.push_back(i);
+            } else if (mi.op == IrOp::CfEndIf) {
+                if (!open_if_insts.empty()) {
+                    const size_t if_i = open_if_insts.back();
+                    open_if_insts.pop_back();
+                    size_t j = i + 1u;
+                    while (j < mod_.insts.size() && mod_.insts[j].op == IrOp::Phi) {
+                        const auto& pi = mod_.insts[j];
+                        uint32_t pty = (pi.type == IrType::F32) ? p_func_f32_ :
+                                       (pi.type == IrType::Bool) ? p_func_bool_ : p_func_u32_;
+                        uint32_t pv = alloc_id();
+                        push_inst(func_vars_, spv::OpVariable, {pty, pv, spv::ScFunction});
+                        if (pi.id < phi_vars.size()) phi_vars[pi.id] = pv;
+                        if_to_phis[if_i].push_back(j);
+                        endif_to_phis[i].push_back(j);
+                        ++j;
+                    }
+                }
+            }
+        }
 
-        for (const auto& inst : mod_.insts) {
+        for (size_t inst_idx = 0; inst_idx < mod_.insts.size(); ++inst_idx) {
+            const auto& inst = mod_.insts[inst_idx];
             uint32_t res = 0u;
             switch (inst.op) {
                 case IrOp::Nop:
@@ -1748,12 +1792,48 @@ private:
                     break;
                 }
 
+                case IrOp::LoadVertexId:
+                    res = lane_id_val_;
+                    break;
+
                 case IrOp::LoadCbvU32: {
                     const uint32_t slot = inst.imm2_u32 & 7u;
                     const uint32_t ssbo = (var_cbv_ssbo_[slot] != 0u) ? var_cbv_ssbo_[slot] : var_in_ssbo_;
                     if (ssbo != 0u) {
                         uint32_t p = alloc_id();
                         push_inst(body_, spv::OpAccessChain, {p_ssbo_u32_, p, ssbo, const_u32(0u), const_u32(inst.imm_u32)});
+                        res = alloc_id();
+                        push_inst(body_, spv::OpLoad, {t_u32_, res, p});
+                    } else {
+                        res = const_u32(0u);
+                    }
+                    break;
+                }
+
+                case IrOp::LoadRootSrvU32: {
+                    const uint32_t ssbo = (var_root_ssbo_[0] != 0u) ? var_root_ssbo_[0] : var_in_ssbo_;
+                    if (ssbo != 0u) {
+                        uint32_t idx = 0u;
+                        if (inst.arg_count == 0u) {
+                            idx = const_u32(inst.imm_u32);
+                        } else {
+                            uint32_t byte_off = arg(inst, 0, IrType::U32);
+                            if (inst.imm_u32 != 0u) {
+                                uint32_t sum = alloc_id();
+                                push_inst(body_, spv::OpIAdd, {t_u32_, sum, byte_off, const_u32(inst.imm_u32)});
+                                byte_off = sum;
+                            }
+                            uint32_t dw = alloc_id();
+                            push_inst(body_, spv::OpShiftRightLogical, {t_u32_, dw, byte_off, const_u32(2u)});
+                            if (inst.imm2_u32 != 0u) {
+                                idx = alloc_id();
+                                push_inst(body_, spv::OpIAdd, {t_u32_, idx, dw, const_u32(inst.imm2_u32)});
+                            } else {
+                                idx = dw;
+                            }
+                        }
+                        uint32_t p = alloc_id();
+                        push_inst(body_, spv::OpAccessChain, {p_ssbo_u32_, p, ssbo, const_u32(0u), idx});
                         res = alloc_id();
                         push_inst(body_, spv::OpLoad, {t_u32_, res, p});
                     } else {
@@ -2145,6 +2225,10 @@ private:
                 case IrOp::BitNot:
                     res = alloc_id();
                     push_inst(body_, spv::OpNot, {t_u32_, res, arg(inst, 0, IrType::U32)});
+                    break;
+                case IrOp::LogicalNot:
+                    res = alloc_id();
+                    push_inst(body_, spv::OpLogicalNot, {t_bool_, res, arg(inst, 0, IrType::Bool)});
                     break;
                 case IrOp::Shl: {
                     uint32_t sh = alloc_id();
@@ -2545,13 +2629,23 @@ private:
 
                 /* Structured Control Flow */
                 case IrOp::CfIf: {
+                    auto pit = if_to_phis.find(inst_idx);
+                    if (pit != if_to_phis.end()) {
+                        for (size_t j : pit->second) {
+                            const auto& pi = mod_.insts[j];
+                            if (pi.id < phi_vars.size() && phi_vars[pi.id] != 0u) {
+                                push_inst(body_, spv::OpStore, {phi_vars[pi.id], arg(pi, 0u, pi.type)});
+                            }
+                        }
+                    }
                     uint32_t cond = arg(inst, 0, IrType::Bool);
+                    uint32_t hdr_lbl = current_label;
                     uint32_t then_lbl = alloc_id();
                     uint32_t merge_lbl = alloc_id();
                     push_inst(body_, spv::OpSelectionMerge, {merge_lbl, 0u});
                     push_inst(body_, spv::OpBranchConditional, {cond, then_lbl, merge_lbl});
-                    push_inst(body_, spv::OpLabel, {then_lbl});
-                    if_stack.push_back({merge_lbl});
+                    emit_label(then_lbl);
+                    if_stack.push_back({hdr_lbl, merge_lbl});
                     cf_kind_stack.push_back(0u);
                     ++cf_depth;
                     break;
@@ -2560,12 +2654,32 @@ private:
                     break;
                 case IrOp::CfEndIf: {
                     if (!if_stack.empty() && !cf_kind_stack.empty() && cf_kind_stack.back() == 0u) {
-                        const uint32_t merge_lbl = if_stack.back().merge_lbl;
+                        auto epit = endif_to_phis.find(inst_idx);
+                        if (epit != endif_to_phis.end()) {
+                            for (size_t j : epit->second) {
+                                const auto& pi = mod_.insts[j];
+                                if (pi.id < phi_vars.size() && phi_vars[pi.id] != 0u) {
+                                    push_inst(body_, spv::OpStore, {phi_vars[pi.id], arg(pi, 1u, pi.type)});
+                                }
+                            }
+                        }
+                        const auto opif = if_stack.back();
                         if_stack.pop_back();
                         cf_kind_stack.pop_back();
-                        push_inst(body_, spv::OpBranch, {merge_lbl});
-                        push_inst(body_, spv::OpLabel, {merge_lbl});
+                        push_inst(body_, spv::OpBranch, {opif.merge_lbl});
+                        emit_label(opif.merge_lbl);
                         --cf_depth;
+                    }
+                    break;
+                }
+                case IrOp::Phi: {
+                    uint32_t ty = (inst.type == IrType::F32) ? t_f32_ :
+                                  (inst.type == IrType::Bool) ? t_bool_ : t_u32_;
+                    if (inst.id < phi_vars.size() && phi_vars[inst.id] != 0u) {
+                        res = alloc_id();
+                        push_inst(body_, spv::OpLoad, {ty, res, phi_vars[inst.id]});
+                    } else {
+                        res = arg(inst, 0, inst.type);
                     }
                     break;
                 }
@@ -2578,10 +2692,10 @@ private:
                     uint32_t cont = alloc_id();
                     uint32_t merge = alloc_id();
                     push_inst(body_, spv::OpBranch, {hdr});
-                    push_inst(body_, spv::OpLabel, {hdr});
+                    emit_label(hdr);
                     push_inst(body_, spv::OpLoopMerge, {merge, cont, 0u});
                     push_inst(body_, spv::OpBranch, {body_lbl});
-                    push_inst(body_, spv::OpLabel, {body_lbl});
+                    emit_label(body_lbl);
                     loop_stack.push_back({hdr, cont, merge});
                     cf_kind_stack.push_back(1u);
                     ++cf_depth;
@@ -2605,7 +2719,7 @@ private:
                         }
                         uint32_t keep_lbl = alloc_id();
                         push_inst(body_, spv::OpBranchConditional, {cond, loop_stack.back().cont_lbl, loop_stack.back().merge_lbl});
-                        push_inst(body_, spv::OpLabel, {keep_lbl});
+                        emit_label(keep_lbl);
                         /* Unreachable fallthrough goes directly to merge */
                         push_inst(body_, spv::OpBranch, {loop_stack.back().merge_lbl});
                         loop_broke_ = true;
@@ -2620,7 +2734,7 @@ private:
                         if (!loop_broke_) {
                             push_inst(body_, spv::OpBranch, {merge_lbl});
                         }
-                        push_inst(body_, spv::OpLabel, {merge_lbl});
+                        emit_label(merge_lbl);
                         loop_broke_ = false;
                         --cf_depth;
                     }
@@ -2632,9 +2746,9 @@ private:
                             push_inst(body_, spv::OpBranch, {lp.merge_lbl});
                         }
                         loop_broke_ = false;
-                        push_inst(body_, spv::OpLabel, {lp.cont_lbl});
+                        emit_label(lp.cont_lbl);
                         push_inst(body_, spv::OpBranch, {lp.hdr_lbl});
-                        push_inst(body_, spv::OpLabel, {lp.merge_lbl});
+                        emit_label(lp.merge_lbl);
                         --cf_depth;
                     }
                     break;
@@ -2642,14 +2756,10 @@ private:
             }
 
             if (inst.id > 0u && res != 0u) {
-                /* Only publish to dominating SSA map when at top-level CF depth;
-                 * inside conditional/loop blocks use a safe fallback for outside uses. */
-                if (cf_depth == 0) {
-                    val[inst.id] = res;
-                } else {
-                    val[inst.id] = (inst.type == IrType::F32) ? const_f32(0.0f) :
-                                   (inst.type == IrType::Bool) ? const_bool(false) : const_u32(0u);
-                }
+                val[inst.id] = res;
+                const bool is_global_const =
+                    (inst.op == IrOp::ConstU32 || inst.op == IrOp::ConstF32 || inst.op == IrOp::ConstBool);
+                val_cf_depth[inst.id] = is_global_const ? 0 : cf_depth;
             }
         }
 
@@ -2659,7 +2769,7 @@ private:
             cf_kind_stack.pop_back();
             if (k == 0u && !if_stack.empty()) {
                 push_inst(body_, spv::OpBranch, {if_stack.back().merge_lbl});
-                push_inst(body_, spv::OpLabel, {if_stack.back().merge_lbl});
+                emit_label(if_stack.back().merge_lbl);
                 if_stack.pop_back();
             } else if (k == 1u && !loop_stack.empty()) {
                 auto lp = loop_stack.back();
@@ -2668,9 +2778,9 @@ private:
                     push_inst(body_, spv::OpBranch, {lp.merge_lbl});
                 }
                 loop_broke_ = false;
-                push_inst(body_, spv::OpLabel, {lp.cont_lbl});
+                emit_label(lp.cont_lbl);
                 push_inst(body_, spv::OpBranch, {lp.hdr_lbl});
-                push_inst(body_, spv::OpLabel, {lp.merge_lbl});
+                emit_label(lp.merge_lbl);
             }
         }
     }
@@ -2870,7 +2980,7 @@ private:
     uint32_t t_as_{0}, t_rq_{0};
     uint32_t t_psb_u32_blk_{0}, t_psb_f32_blk_{0}, t_arr_u32_32_{0};
 
-    uint32_t p_func_u32_{0}, p_func_f32_{0}, p_func_rq_{0}, p_func_u32_arr32_{0};
+    uint32_t p_func_bool_{0}, p_func_u32_{0}, p_func_f32_{0}, p_func_rq_{0}, p_func_u32_arr32_{0};
     uint32_t p_ssbo_struct_{0}, p_ssbo_u32_{0}, p_wg_u32_{0};
     uint32_t p_psb_u32_blk_{0}, p_psb_u32_{0}, p_psb_f32_blk_{0}, p_psb_f32_{0};
 
@@ -2879,6 +2989,7 @@ private:
     /* Globals */
     uint32_t var_in_ssbo_{0}, var_out_ssbo_{0};
     std::array<uint32_t, 8>  var_cbv_ssbo_{};
+    std::array<uint32_t, 4>  var_root_ssbo_{};
     std::array<uint32_t, 8>  var_tex_2d_{};
     uint32_t var_sampled_img_{0}, var_stor_img_{0};
     uint32_t var_lds_{0}, var_wave64_lds_{0}, var_wave64_ballot_{0};

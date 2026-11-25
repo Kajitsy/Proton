@@ -747,6 +747,95 @@ void test_image_load_opimageread_and_interleaved_cf_validation() {
           "MIMG ImageLoad must emit OpImageRead and pass spirv-val Vulkan 1.4: " << img_res.diagnostics);
 }
 
+void test_iter11_draw_flow_fixes() {
+    std::cout << "[test] Draw flow fixes (RootSrv, MUBUF offen, CfIf ScFunction Phi, VOP2 PKRTZ, VS CBV bias)..." << std::endl;
+
+    Rdna2Lifter lifter;
+    LiftOptions opts{};
+    opts.mode = SCARLETT_SHADER_MODE_ADAPTIVE;
+    opts.validate_with_spirv_tools = true;
+    opts.graphics_no_rogue_descriptors = false;
+
+    /* 1. PS with s_mov_b32 exec_lo, s10 + VINTRP + VOP2 V_CVT_PKRTZ_F16_F32 (0x2F) */
+    {
+        Rdna2ShaderMetadata meta{};
+        meta.stage = ShaderStage::Pixel;
+        meta.wave_size = 32u;
+        const std::vector<uint32_t> ps_isa = {
+            0xBEFC030Au, /* s_mov_b32 exec_lo, s10 */
+            0xC80A0002u, /* v_interp_mov_f32 v2, p0, attr0.x */
+            0xC80E0102u, /* v_interp_mov_f32 v3, p0, attr0.y */
+            0xC8120202u, /* v_interp_mov_f32 v4, p0, attr0.z */
+            0xC8160302u, /* v_interp_mov_f32 v5, p0, attr0.w */
+            0x5E000702u, /* v_cvt_pkrtz_f16_f32 v0, v2, v3 (VOP2 0x2F) */
+            0x5E020B04u, /* v_cvt_pkrtz_f16_f32 v1, v4, v5 (VOP2 0x2F) */
+            0xF8001C0Fu, 0x00000100u, /* exp mrt0 v0, v1 compr done */
+            0xBF810000u, /* s_endpgm */
+        };
+        auto res = lifter.lift_isa(meta, ps_isa.data(), ps_isa.size(), opts);
+        CHECK(res.status == SCARLETT_OK && res.spirv_words.size() > 10u,
+              "PS with VOP2 PKRTZ must lift & validate: " << res.diagnostics);
+        /* No bogus storage buffer descriptor emitted when s10/VINTRP are unused */
+        std::vector<DecodedInst> dec;
+        uint32_t err_pc = 0u;
+        CHECK(decode_gfx103_stream(ps_isa.data(), ps_isa.size(), dec, err_pc), "PS decode ok");
+        IrModule ir = build_ssa_ir_and_structurize(meta, dec);
+        CHECK(!ir.uses_storage_buffer, "PS with VINTRP + s_mov exec_lo must not emit rogue SSBO");
+    }
+
+    /* 2. VS with RootSrv (s_mov s0, s8 + s_buffer_load + MUBUF offen + S_CBRANCH_SCC1 + LoadVertexId) */
+    {
+        Rdna2ShaderMetadata meta{};
+        meta.stage = ShaderStage::Vertex;
+        meta.wave_size = 32u;
+        const std::vector<uint32_t> vs_isa = {
+            0xBE800308u, /* s_mov_b32 s0, s8 */
+            0x8801FF09u, 0x00010000u, /* s_or_b32 s1, s9, 0x10000 */
+            0x7E020280u, /* v_mov_b32 v1, 0 */
+            0xF4200100u, 0xFA000000u, /* s_buffer_load_dword s4, s[0:3], null */
+            0x87058F04u, /* s_and_b32 s5, s4, 15 */
+            0xBF078305u, /* s_cmp_lg_u32 s5, 3 */
+            0xBF850002u, /* s_cbranch_scc1 +2 -> skip over MUBUF */
+            0xE03C1000u, 0x80000101u, /* buffer_load_dwordx3 v[1:3], v1, s[0:3], 0 offen */
+            0x7E0002F2u, /* v_mov_b32 v0, 1.0 */
+            0xF80008CFu, 0x00030201u, /* exp pos0 v1, v2, v3, v0 done */
+            0xBF810000u, /* s_endpgm */
+        };
+        std::vector<DecodedInst> dec;
+        uint32_t err_pc = 0u;
+        CHECK(decode_gfx103_stream(vs_isa.data(), vs_isa.size(), dec, err_pc), "VS decode ok");
+        IrModule ir = build_ssa_ir_and_structurize(meta, dec);
+        CHECK(ir.root_srv_mask == 1u, "VS RootSrv must set root_srv_mask bit 0");
+        CHECK(ir.vtx_attr_mask == 0u, "MUBUF offen must not be treated as vertex attribute");
+        auto res = lifter.lift_isa(meta, vs_isa.data(), vs_isa.size(), opts);
+        CHECK(res.status == SCARLETT_OK && res.spirv_words.size() > 10u,
+              "VS with RootSrv + S_CBRANCH_SCC1 + ScFunction Phi must validate: " << res.diagnostics);
+    }
+
+    /* 3. VS DescTablePtr CBV slot bias (+0x20/+0x60 when slot 0 unused -> bindings 0 and 2) */
+    {
+        Rdna2ShaderMetadata meta{};
+        meta.stage = ShaderStage::Vertex;
+        meta.wave_size = 32u;
+        const std::vector<uint32_t> vs_cbv_isa = {
+            0xF4080304u, 0xFA000020u, /* s_load_dwordx4 s[12:15], s[8:9], 0x20 */
+            0xF4080404u, 0xFA000060u, /* s_load_dwordx4 s[16:19], s[8:9], 0x60 */
+            0xF4200506u, 0xFA000000u, /* s_buffer_load_dword s20, s[12:15], 0x0 */
+            0xF4200548u, 0xFA000000u, /* s_buffer_load_dword s21, s[16:19], 0x0 */
+            0xF80008CFu, 0x00000000u, /* exp pos0 v0, v0, v0, v0 done */
+            0xBF810000u, /* s_endpgm */
+        };
+        std::vector<DecodedInst> dec;
+        uint32_t err_pc = 0u;
+        CHECK(decode_gfx103_stream(vs_cbv_isa.data(), vs_cbv_isa.size(), dec, err_pc), "VS CBV decode ok");
+        IrModule ir = build_ssa_ir_and_structurize(meta, dec);
+        CHECK(ir.cbv_slot_mask == 0x5u, "Shifted VS CBV loads (0x20, 0x60) must map to slots 0 and 2");
+        auto res = lifter.lift_isa(meta, vs_cbv_isa.data(), vs_cbv_isa.size(), opts);
+        CHECK(res.status == SCARLETT_OK && res.spirv_words.size() > 10u,
+              "Shifted VS CBV shader must lift & validate: " << res.diagnostics);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -758,6 +847,7 @@ int main() {
     test_c_abi_bridge();
     test_fssm_v11_vop3_lit_dpp16_and_no_rogue_desc();
     test_image_load_opimageread_and_interleaved_cf_validation();
+    test_iter11_draw_flow_fixes();
 
     if (g_failures == 0) {
         std::cout << "[PASS] All rdna2_lifter unit & live Vulkan 1.4 integration tests PASSED (0 failures)." << std::endl;
